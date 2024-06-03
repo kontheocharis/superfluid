@@ -22,6 +22,10 @@ import System.IO (stderr)
 data Mode
   = -- | Typecheck a file.
     CheckFile String
+  | -- | Parse a file
+    ParseFile String
+  | -- | Represent a file
+    RepresentFile String
   | -- | Run a REPL
     Repl
   deriving (Show)
@@ -32,8 +36,8 @@ data ApplyChanges = InPlace | Print | NewFile
 
 -- | Command-line flags.
 data Flags = Flags
-  { -- | Whether to dump the parsed program.
-    dumpParsed :: Bool,
+  { -- | Whether to dump the program.
+    dump :: Bool,
     -- | Whether to be verbose.
     verbose :: Bool
   }
@@ -50,13 +54,15 @@ data Args = Args
 parseFlags :: Parser Flags
 parseFlags =
   Flags
-    <$> switch (long "dump-parsed" <> help "Print the parsed program")
+    <$> switch (long "dump" <> short 'd' <> help "Print the parsed program")
     <*> switch (long "verbose" <> short 'v' <> help "Be verbose")
 
 -- | Parse the mode to run in.
 parseMode :: Parser Mode
 parseMode =
   (CheckFile <$> strOption (long "check" <> short 'c' <> help "File to check"))
+    <|> (ParseFile <$> strOption (long "parse" <> short 'p' <> help "File to parse"))
+    <|> (RepresentFile <$> strOption (long "represent" <> short 'r' <> help "File to represent"))
     <|> pure Repl
 
 -- | Parse the command line arguments.
@@ -97,29 +103,40 @@ replErr m = do
 
 -- | Run the compiler.
 runCompiler :: Args -> InputT IO ()
-runCompiler (Args (CheckFile file) flags) = void (parseAndCheckFile file flags)
+runCompiler (Args (CheckFile file) flags) = do
+  checked <- checkFile file
+  when flags.verbose $ msg "\nTypechecked program successfully"
+  when flags.dump $ msg $ printVal checked
+runCompiler (Args (ParseFile file) flags) = do
+  when flags.verbose $ msg $ "Parsing file " ++ file
+  parsed <- parseFile file
+  when flags.dump $ msg $ printVal parsed
+runCompiler (Args (RepresentFile file) flags) = do
+  represented <- representFile file
+  when flags.verbose $ msg "\nTypechecked and represented program successfully"
+  when flags.dump $ msg $ printVal represented
 runCompiler (Args Repl _) = runRepl
 
 -- | Parse a file.
-parseFile :: String -> Flags -> InputT IO Program
-parseFile file flags = do
-  when flags.verbose $ msg $ "Parsing file " ++ file
+parseFile :: String -> InputT IO Program
+parseFile file = do
   contents <- liftIO $ readFile file
-  parsed <- handleParse err (parseProgram file contents)
-  when flags.dumpParsed $ msg $ "Parsed program:\n" ++ printVal parsed
-  return parsed
+  handleParse err (parseProgram file contents)
 
 -- | Parse and check a file.
-parseAndCheckFile :: String -> Flags -> InputT IO Program
-parseAndCheckFile file flags = do
-  parsed <- parseFile file flags
+checkFile :: String -> InputT IO Program
+checkFile file = do
+  parsed <- parseFile file
   (checked, _) <- handleTc err (checkProgram parsed)
-  when flags.verbose $ msg "\nTypechecked program successfully"
-  when flags.dumpParsed $ msg $ "Checked program:\n" ++ printVal checked
-  (represented, state) <- handleTc err (representProgram checked)
-  when flags.dumpParsed $ msg $ "Reepresented program:\n" ++ printVal represented
-  when flags.verbose $ msg $ "\nEnding state:\n" ++ show state
   return checked
+
+-- | Parse, check and represent a file.
+representFile :: String -> InputT IO Program
+representFile file = do
+  parsed <- parseFile file
+  (checked, _) <- handleTc err (checkProgram parsed)
+  (represented, _) <- handleTc err (representProgram checked)
+  return represented
 
 -- | Run the REPL.
 runRepl :: InputT IO a
