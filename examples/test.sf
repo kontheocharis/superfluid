@@ -49,6 +49,10 @@ def word-sub : Word -> Word -> Word {
   }
 }
 
+def switch-word : (F : Word -> Type) -> F word-zero -> ((w : Word) -> F (word-add w word-one)) -> (w : Word) -> F w {
+  ?h2
+}
+
 
 ---
 
@@ -72,7 +76,8 @@ repr NatWord {
       z => b,
       s => r,
     } as (
-      if-then-else _ (word-is-zero n) b (r (word-sub n word-one))
+      switch-word _ b r n
+      -- if-then-else _ (word-is-zero n) b (r (word-sub n word-one))
     )
   }
 

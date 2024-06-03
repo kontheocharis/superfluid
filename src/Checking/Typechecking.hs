@@ -329,7 +329,7 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
     return target'
 
   -- Add the case representation to the context
-  let result = ReprDataCaseItem (elimTySubjectVar, ctors) target'
+  let result = ReprDataCaseItem (subject, ctors) target'
   modifySignature $ addCaseItemToRepr rName dat.name result
   return result
 
@@ -493,7 +493,7 @@ unifyTermsTo t1 t2 = do
 checkTerm' :: Term -> Type -> Tc (Term, Type)
 checkTerm' ((Term (Lam v t) d1)) ((Term (PiT var' ty1 ty2) d2)) = do
   (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
-  return (locatedAt d1 (Lam v t'), locatedAt d2 (PiT var' ty1 ty2'))
+  return (locatedAt d1 (Lam v t'), locatedAt d2 (PiT var' ty1 (alphaRename v (var', d2) ty2')))
 checkTerm' ((Term (Lam v t1) d1)) typ = do
   varTy <- freshMeta
   (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferTerm t1

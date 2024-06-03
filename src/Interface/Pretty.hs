@@ -126,9 +126,9 @@ instance Print ReprDataCaseItem where
       ++ " "
       ++ curlies
         ( intercalate ",\n" (map (\(c, b) -> c ++ " => " ++ printVal b) ctors)
-            ++ " as "
-            ++ printVal target
         )
+      ++ " as "
+      ++ printVal target
 
 instance Print ReprDeclItem where
   printVal (ReprDeclItem name target) = "def " ++ name ++ " as " ++ printVal target

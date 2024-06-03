@@ -231,7 +231,7 @@ reprDataItem :: Parser ReprDataItem
 reprDataItem = whiteWrap $ do
   symbol "data"
   name <- identifier
-  ps <- many var
+  ps <- many newVar
   symbol "as"
   target <- term
   curlies $ do
@@ -250,21 +250,21 @@ reprDeclItem = whiteWrap $ do
 reprCtorItem :: Parser ReprDataCtorItem
 reprCtorItem = do
   name <- identifier
-  ps <- many var
+  ps <- many newVar
   reservedOp "as"
   ReprDataCtorItem name ps <$> term
 
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
   symbol "case"
-  subject <- var
+  subject <- newVar
   ctors <-
     curlies
       ( commaSep
           ( do
               name <- identifier
               reservedOp "=>"
-              bind <- var
+              bind <- newVar
               return (name, bind)
           )
       )
