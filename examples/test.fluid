@@ -1,0 +1,39 @@
+-- Foo
+
+data Word : Type where
+  | ZW : Word
+  | SW : Word -> Word
+
+data Nat : Type where
+  | Z : Nat
+  | S : Nat -> Nat
+
+data Fin : Nat -> Type where
+  | FZ : (n : Nat) -> Fin (S n)
+  | FS : (n : Nat) -> Fin n -> Fin (S n)
+
+def wordAdd : Word -> Word -> Word :=
+  \m n => case m of
+    | ZW => n
+    | SW m' => SW (wordAdd m' n)
+
+def add : Nat -> Nat -> Nat :=
+  \m n => case m of
+    | Z => n
+    | S m' => S (add m' n)
+
+
+def main : Nat -> Nat := \n => add n n
+
+repr NatWord where
+  data Nat as Word where
+    | Z as ZW
+    | S n as SW n
+    | case n of
+      | Z => b
+      | S => r
+      as case n of
+        | ZW => b
+        | SW n' => r n'
+
+  def add as wordAdd

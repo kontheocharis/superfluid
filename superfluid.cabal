@@ -1,0 +1,131 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.36.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           superfluid
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/rep-hs#readme>
+homepage:       https://github.com/kontheocharis/superfluid#readme
+bug-reports:    https://github.com/kontheocharis/superfluid/issues
+author:         Constantine Theocharis
+maintainer:     cthe@mailbox.org
+copyright:      2024 Constantine Theocharis
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/kontheocharis/superfluid
+
+library
+  exposed-modules:
+      Checking.Context
+      Checking.Typechecking
+      Checking.Vars
+      Interface.Cli
+      Interface.Pretty
+      Lang
+      Parsing.Parser
+      Parsing.Resolution
+  other-modules:
+      Paths_superfluid
+  hs-source-dirs:
+      src
+  default-extensions:
+      LambdaCase
+      TupleSections
+      OverloadedRecordDot
+      DuplicateRecordFields
+      NoFieldSelectors
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      array ==0.5.*
+    , base >=4.7 && <5
+    , containers ==0.6.*
+    , criterion ==1.6.*
+    , deepseq ==1.4.*
+    , haskeline ==0.8.*
+    , mtl ==2.3.*
+    , optparse-applicative ==0.18.*
+    , parsec ==3.1.*
+    , persistent-vector ==0.2.*
+    , random ==1.2.*
+    , syb
+    , template-haskell ==2.20.*
+    , text ==2.0.*
+    , th-lift ==0.8.*
+    , vector ==0.13.*
+  default-language: Haskell2010
+
+executable superfluid-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_superfluid
+  hs-source-dirs:
+      app
+  default-extensions:
+      LambdaCase
+      TupleSections
+      OverloadedRecordDot
+      DuplicateRecordFields
+      NoFieldSelectors
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -O3
+  build-depends:
+      array ==0.5.*
+    , base >=4.7 && <5
+    , containers ==0.6.*
+    , criterion ==1.6.*
+    , deepseq ==1.4.*
+    , haskeline ==0.8.*
+    , mtl ==2.3.*
+    , optparse-applicative ==0.18.*
+    , parsec ==3.1.*
+    , persistent-vector ==0.2.*
+    , random ==1.2.*
+    , superfluid
+    , syb
+    , template-haskell ==2.20.*
+    , text ==2.0.*
+    , th-lift ==0.8.*
+    , vector ==0.13.*
+  default-language: Haskell2010
+
+test-suite superfluid-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_superfluid
+  hs-source-dirs:
+      test
+  default-extensions:
+      LambdaCase
+      TupleSections
+      OverloadedRecordDot
+      DuplicateRecordFields
+      NoFieldSelectors
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      array ==0.5.*
+    , base >=4.7 && <5
+    , containers ==0.6.*
+    , criterion ==1.6.*
+    , deepseq ==1.4.*
+    , haskeline ==0.8.*
+    , mtl ==2.3.*
+    , optparse-applicative ==0.18.*
+    , parsec ==3.1.*
+    , persistent-vector ==0.2.*
+    , random ==1.2.*
+    , superfluid
+    , syb
+    , template-haskell ==2.20.*
+    , text ==2.0.*
+    , th-lift ==0.8.*
+    , vector ==0.13.*
+  default-language: Haskell2010
