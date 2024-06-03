@@ -49,6 +49,7 @@ import Text.Parsec
     modifyState,
     notFollowedBy,
     optionMaybe,
+    optional,
     putState,
     runParser,
     satisfy,
@@ -58,6 +59,7 @@ import Text.Parsec
     (<|>),
   )
 import Text.Parsec.Char (alphaNum, letter)
+import Text.Parsec.Combinator (sepBy1, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 
@@ -115,6 +117,15 @@ type Parser a = Parsec Text ParserState a
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
 
+curlies :: Parser a -> Parser a
+curlies = between (symbol "{") (symbol "}")
+
+commaSep1 :: Parser a -> Parser [a]
+commaSep1 p = p `sepEndBy1` comma
+
+commaSep :: Parser a -> Parser [a]
+commaSep p = p `sepEndBy1` comma
+
 comment :: Parser ()
 comment = void . try $ do
   reservedOp "--"
@@ -126,7 +137,7 @@ anyWhite = void . try $ many $ void (satisfy isSpace) <|> comment
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "where", "case", "of", "repr", "as", "def"]
+reservedIdents = ["data", "case", "repr", "as", "def"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -210,8 +221,7 @@ reprItem :: Parser ReprItem
 reprItem = whiteWrap $ do
   symbol "repr"
   name <- identifier
-  symbol "where"
-  ReprItem name <$> reprItems -- Just a single clause for now
+  ReprItem name <$> curlies reprItems -- Just a single clause for now
 
 -- | Parse a series of repr items
 reprItems :: Parser [ReprSomeItem]
@@ -224,9 +234,11 @@ reprDataItem = whiteWrap $ do
   ps <- many var
   symbol "as"
   target <- term
-  symbol "where"
-  ctors <- many reprCtorItem
-  ReprDataItem name ps target ctors . Just <$> reprCaseItem
+  curlies $ do
+    ctors <- commaSep reprCtorItem
+    cse <- reprCaseItem
+    optional comma
+    return $ ReprDataItem name ps target ctors (Just cse)
 
 reprDeclItem :: Parser ReprDeclItem
 reprDeclItem = whiteWrap $ do
@@ -237,25 +249,24 @@ reprDeclItem = whiteWrap $ do
 
 reprCtorItem :: Parser ReprDataCtorItem
 reprCtorItem = do
-  name <- try (symbol "|" >> identifier)
+  name <- identifier
   ps <- many var
   reservedOp "as"
   ReprDataCtorItem name ps <$> term
 
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
-  symbol "|"
   symbol "case"
   subject <- var
-  symbol "of"
   ctors <-
-    many
-      ( do
-          symbol "|"
-          name <- identifier
-          reservedOp "=>"
-          bind <- var
-          return (name, bind)
+    curlies
+      ( commaSep
+          ( do
+              name <- identifier
+              reservedOp "=>"
+              bind <- var
+              return (name, bind)
+          )
       )
   symbol "as"
   ReprDataCaseItem (subject, ctors) <$> term
@@ -263,7 +274,6 @@ reprCaseItem = do
 -- | Parse a constructor item.
 ctorItem :: GlobalName -> Parser (Int -> CtorItem)
 ctorItem d = do
-  symbol "|"
   name <- identifier
   _ <- colon
   ty <- term
@@ -274,8 +284,7 @@ dataItem :: Parser DataItem
 dataItem = whiteWrap $ do
   symbol "data"
   (name, ty) <- declSignature
-  symbol "where"
-  ctors <- many (ctorItem name)
+  ctors <- curlies (commaSep (ctorItem name))
   return $
     DataItem
       name
@@ -288,8 +297,7 @@ declItem = whiteWrap $ do
   start <- getPos
   symbol "def"
   (name, ty) <- declSignature
-  symbol ":="
-  t <- term
+  t <- curlies term
   DeclItem name (fromMaybe (genTerm Wild) ty) t . Loc start <$> getPos
 
 -- | Parse the type signature of a declaration.
@@ -408,13 +416,11 @@ caseExpr :: Parser Term
 caseExpr = locatedTerm $ do
   reserved "case"
   t <- term
-  reserved "of"
-  clauses <- many caseClause
+  clauses <- curlies (commaSep caseClause)
   return $ Case t clauses
 
 caseClause :: Parser (Pat, Term)
 caseClause = do
-  symbol "|"
   p <- pat
   reservedOp "=>"
   t' <- term

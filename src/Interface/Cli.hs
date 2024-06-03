@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Interface.Cli (runCli) where
 
 import Checking.Context (Tc, TcState, runTc)
@@ -75,8 +73,8 @@ runCli = do
       info
         (parseArgs <**> helper)
         ( fullDesc
-            <> progDesc "Fluid is a toy dependently typed programming language for experimenting with automated program transformations. A REPL is available if no arguments are given."
-            <> header "Fluid"
+            <> progDesc "Superfluid is a dependently typed programming language with customisable type representations"
+            <> header "Superfluid"
         )
 
 -- | Log a message.

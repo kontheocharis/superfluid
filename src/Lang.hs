@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE InstanceSigs #-}
 
 module Lang
   ( Type,

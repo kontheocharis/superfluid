@@ -16,6 +16,13 @@ indented str
   | (l : ls) <- lines str = intercalate "\n" $ l : map ("  " ++) ls
   | [] <- lines str = ""
 
+curlies :: String -> String
+curlies str = "{\n" ++ indentedFst str ++ "\n}"
+
+-- | Replace each newline with a newline followed by 2 spaces (and the first line).
+indentedFst :: String -> String
+indentedFst str = "  " ++ indented str
+
 instance Print Var where
   printVal (Var s _) = s
 
@@ -32,10 +39,12 @@ instance Print TermValue where
   printVal (Case t cs) =
     "case "
       ++ printVal t
-      ++ " of\n"
-      ++ intercalate
-        "\n"
-        (map (\(p, c) -> "  | " ++ printVal p ++ " => " ++ indented (printVal c)) cs)
+      ++ " "
+      ++ curlies
+        ( intercalate
+            ",\n"
+            (map (\(p, c) -> printVal p ++ " => " ++ printVal c) cs)
+        )
   printVal TyT = "Type"
   printVal Wild = "_"
   printVal (V v) = printVal v
@@ -65,7 +74,7 @@ instance Print Item where
   printVal (Repr r) = printVal r
 
 instance Print DeclItem where
-  printVal (DeclItem v ty term _) = "def " ++ v ++ " : " ++ printVal ty ++ " := " ++ printVal term
+  printVal (DeclItem v ty term _) = "def " ++ v ++ " : " ++ printVal ty ++ " " ++ curlies (printVal term)
 
 instance Print DataItem where
   printVal (DataItem name ty ctors) =
@@ -73,8 +82,8 @@ instance Print DataItem where
       ++ name
       ++ " : "
       ++ printVal ty
-      ++ " where\n"
-      ++ intercalate "\n" (map (\c -> "  | " ++ indented (printVal c)) ctors)
+      ++ " "
+      ++ curlies (intercalate ",\n" (map printVal ctors))
 
 instance Print CtorItem where
   printVal (CtorItem name ty _ _) = name ++ " : " ++ printVal ty
@@ -83,8 +92,8 @@ instance Print ReprItem where
   printVal (ReprItem name cs) =
     "repr "
       ++ name
-      ++ " where\n"
-      ++ intercalate "\n\n" (map (\t -> "  " ++ indented (printVal t)) cs)
+      ++ " "
+      ++ curlies (intercalate "\n\n" (map printVal cs))
 
 instance Print ReprSomeItem where
   printVal (ReprData d) = printVal d
@@ -98,14 +107,14 @@ instance Print ReprDataItem where
       ++ intercalate " " (map printVal binds)
       ++ " as "
       ++ printVal target
-      ++ " where\n"
-      ++ intercalate "\n" (map (\c -> "  | " ++ indented (printVal c)) ctors)
-      ++ case cse of
-        Just cse' ->
-          "\n"
-            ++ "  | "
-            ++ indented (printVal cse')
-        Nothing -> ""
+      ++ " "
+      ++ curlies
+        ( intercalate ",\n" (map printVal ctors)
+            ++ case cse of
+              Just cse' ->
+                ",\n" ++ printVal cse'
+              Nothing -> ""
+        )
 
 instance Print ReprDataCtorItem where
   printVal (ReprDataCtorItem name binds target) = name ++ (if null binds then "" else " ") ++ intercalate " " (map printVal binds) ++ " as " ++ printVal target
@@ -114,10 +123,12 @@ instance Print ReprDataCaseItem where
   printVal (ReprDataCaseItem (subject, ctors) target) =
     "case "
       ++ printVal subject
-      ++ " of\n"
-      ++ intercalate "\n" (map (\(c, b) -> "  | " ++ c ++ " => " ++ printVal b) ctors)
-      ++ "\n  as "
-      ++ printVal target
+      ++ " "
+      ++ curlies
+        ( intercalate ",\n" (map (\(c, b) -> c ++ " => " ++ printVal b) ctors)
+            ++ " as "
+            ++ printVal target
+        )
 
 instance Print ReprDeclItem where
   printVal (ReprDeclItem name target) = "def " ++ name ++ " as " ++ printVal target

@@ -14,10 +14,6 @@
       "match": "=>|->|:|\\\\"
     },
     {
-      "name": "variable.superfluid",
-      "match": "\\b(\\w|'|_)(\\w|'|_|[0-9])*\\b"
-    },
-    {
       "name": "constant.numeric.superfluid",
       "match": "\\b\\d+\\b"
     }
