@@ -152,7 +152,7 @@ runRepl = do
     Just inp -> do
       t <- handleParse replErr (parseTerm inp)
       _ <- handleTc replErr (inferTerm t)
-      (t', _) <- handleTc replErr (normaliseTermFully t)
+      (t', _) <- handleTc replErr (return $ normaliseTermFully t)
       outputStrLn $ printVal t'
   runRepl
 

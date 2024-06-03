@@ -90,7 +90,7 @@ import Lang
     piTypeToList,
     typedAs,
   )
-import Lang as DI (DeclItem (..))
+import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -121,7 +121,7 @@ resolveFinal t = do
         Just t' -> do
           -- If the meta is already solved, then we can resolve the term.
           r <- resolveShallow (listToApp (t', ts))
-          normaliseTermFully r
+          return $ normaliseTermFully r
         Nothing -> do
           -- If the meta is not resolved, then substitute the original hole
           let tLoc = getLoc t
@@ -143,7 +143,7 @@ resolveShallow (Term (Meta h) d) = do
     Nothing -> return $ Term (Meta h) d
 resolveShallow (Term (App t1 t2) d) = do
   t1' <- resolveShallow t1
-  normaliseTermFully (Term (App t1' t2) d)
+  return $ normaliseTermFully (Term (App t1' t2) d)
 resolveShallow t = return t
 
 -- | Represent a checked program
@@ -162,8 +162,11 @@ representProgram (Program decls) = do
   -- Add them to the signature
   modifySignature $ addItems reprs
 
-  -- Then, we represent all the items in the program
-  mapTermMappableM representTermRec (Program rest)
+  -- Then, represent all the items in the program
+  Program rest' <- mapTermMappableM representTermRec (Program rest)
+
+  -- Finally, normalise the program
+  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
 
 -- | Check some item in the program.
 checkItem :: Item -> Tc Item
@@ -547,7 +550,7 @@ checkTerm' (Term (App t1 t2) _) typ = do
   case subjectTyRes of
     (Term (PiT v varTy bodyTy) _) -> go v varTy bodyTy
     _ -> do
-      subjectTy' <- normaliseTerm subjectTyRes
+      let subjectTy' = normaliseTerm subjectTyRes
       subjectTyRes' <- case subjectTy' of
         Just t -> Just <$> resolveShallow t
         Nothing -> return Nothing
@@ -611,24 +614,17 @@ inferTerm t = do
 
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
-normaliseTerm :: Term -> Tc (Maybe Term)
-normaliseTerm (Term (App (Term (Lam v t1) _) t2) _) = do
-  return . Just $ subVar v t2 t1
+normaliseTerm :: Term -> Maybe Term
+normaliseTerm (Term (App (Term (Lam v t1) _) t2) _) =
+  return $ subVar v t2 t1
 normaliseTerm (Term (App t1 t2) d1) = do
   t1' <- normaliseTerm t1
-  case t1' of
-    Nothing -> return Nothing
-    Just t1'' -> do
-      return $ Just (Term (App t1'' t2) d1)
-normaliseTerm _ = return Nothing -- @@Todo: normalise declarations
+  return (Term (App t1' t2) d1)
+normaliseTerm _ = Nothing -- @@Todo: normalise declarations
 
 -- | Reduce a term to normal form (fully).
-normaliseTermFully :: Term -> Tc Term
-normaliseTermFully t = do
-  t' <- normaliseTerm t
-  case t' of
-    Nothing -> return t
-    Just t'' -> normaliseTermFully t''
+normaliseTermFully :: Term -> Term
+normaliseTermFully t = maybe t normaliseTermFully (normaliseTerm t)
 
 -- \| Unify two terms.
 -- This might produce a substitution.
@@ -695,10 +691,10 @@ unifyTerms a' b' = do
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()
 normaliseAndUnifyTerms l r = do
-  l' <- normaliseTerm l
+  let l' = normaliseTerm l
   case l' of
     Nothing -> do
-      r' <- normaliseTerm r
+      let r' = normaliseTerm r
       case r' of
         Nothing -> throwError $ Mismatch l r
         Just r'' -> unifyTerms l r''
@@ -731,5 +727,5 @@ validateProb hole (x : xs) rhs = do
 solve :: Var -> [Term] -> Term -> Tc ()
 solve hole spine rhs = do
   vars <- validateProb hole spine rhs
-  solution <- normaliseTermFully (lams vars rhs)
+  let solution = normaliseTermFully (lams vars rhs)
   solveMeta hole solution

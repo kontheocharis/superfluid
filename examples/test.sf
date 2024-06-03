@@ -1,48 +1,90 @@
 -- Foo
 
-data Word : Type {
-  ZW : Word,
-  SW : Word -> Word,
+data Bool : Type {
+  true : Bool,
+  false : Bool,
 }
+
+def if-then-else : (T : Type) -> Bool -> T -> T -> T {
+  \T b t e => case b {
+    true => t,
+    false => e,
+  }
+}
+
+data Word : Type {
+  zw : Word,
+  sw : Word -> Word,
+}
+
+def word-zero : Word {
+  zw
+}
+
+def word-add : Word -> Word -> Word {
+  \m n => case m {
+    zw => n,
+    sw m' => sw (word-add m' n),
+  }
+}
+
+def word-one : Word {
+  sw zw
+}
+
+def word-is-zero : Word -> Bool {
+  \m => case m {
+    zw => true,
+    sw m' => false,
+  }
+}
+
+def word-sub : Word -> Word -> Word {
+  \m n => case n {
+    zw => m,
+    sw n' => case m {
+      zw => zw,
+      sw m' => word-sub m' n',
+    },
+  }
+}
+
+
+---
 
 data Nat : Type {
-  Z : Nat,
-  S : Nat -> Nat,
-}
-
-data Fin : Nat -> Type {
-  FZ : (n : Nat) -> Fin (S n),
-  FS : (n : Nat) -> Fin n -> Fin (S n),
-}
-
-def wordAdd : Word -> Word -> Word {
-  \m n => case m {
-    ZW => n,
-    SW m' => SW (wordAdd m' n),
-  }
+  z : Nat,
+  s : Nat -> Nat,
 }
 
 def add : Nat -> Nat -> Nat {
   \m n => case m {
-    Z => n,
-    S m' => S (add m' n),
+    z => n,
+    s m' => s (add m' n),
   }
 }
 
-def main : Nat -> Nat { \n => add n n }
-
 repr NatWord {
   data Nat as Word {
-    Z as ZW,
-    S n as SW n,
+    z as word-zero,
+    s n as word-add n word-one,
     case n {
-      Z => b,
-      S => r,
-    } as case n {
-      ZW => b,
-      SW n' => r n',
-    }
+      z => b,
+      s => r,
+    } as (
+      if-then-else _ (word-is-zero n) b (r (word-sub n word-one))
+    )
   }
 
-  def add as wordAdd
+  def add as word-add
+}
+
+def fib : Nat -> Nat {
+  \n => case n {
+    z => z,
+    s i => case i {
+      z => s z,
+      s j => add (fib i) (fib j),
+    },
+  }
 }

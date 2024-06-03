@@ -142,7 +142,7 @@ reservedIdents = ["data", "case", "repr", "as", "def"]
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
   first <- letter <|> char '_'
-  rest <- many (alphaNum <|> char '_' <|> char '\'')
+  rest <- many (alphaNum <|> char '_' <|> char '\'' <|> char '-')
   anyWhite
   return $ first : rest
 
