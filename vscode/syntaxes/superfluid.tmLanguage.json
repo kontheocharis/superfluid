@@ -1,0 +1,46 @@
+{
+  "scopeName": "source.superfluid",
+  "patterns": [
+    {
+      "name": "comment.line.superfluid",
+      "match": "--.*$"
+    },
+    {
+      "name": "keyword.control.superfluid",
+      "match": "\\b(case|data|def|repr|as)\\b"
+    },
+    {
+      "name": "keyword.operator.superfluid",
+      "match": "=>|->|:|\\\\"
+    },
+    {
+      "name": "variable.superfluid",
+      "match": "\\b(\\w|'|_)(\\w|'|_|[0-9])*\\b"
+    },
+    {
+      "name": "constant.numeric.superfluid",
+      "match": "\\b\\d+\\b"
+    }
+  ],
+  "repository": {
+    "block": {
+      "begin": "{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.block.begin.superfluid"
+        }
+      },
+      "end": "}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.superfluid"
+        }
+      },
+      "patterns": [
+        {
+          "include": "$self"
+        }
+      ]
+    }
+  }
+}

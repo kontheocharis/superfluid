@@ -1,0 +1,35 @@
+{
+  "name": "superfluid",
+  "displayName": "Superfluid",
+  "description": "Syntax highlighting for Superfluid",
+  "version": "0.0.1",
+  "publisher": "your-username",
+  "engines": {
+    "vscode": "^1.62.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "superfluid",
+        "aliases": [
+          "Superfluid",
+          "superfluid"
+        ],
+        "extensions": [
+          ".sf"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "superfluid",
+        "scopeName": "source.superfluid",
+        "path": "./syntaxes/superfluid.tmLanguage.json"
+      }
+    ]
+  }
+}

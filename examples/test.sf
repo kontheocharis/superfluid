@@ -1,0 +1,48 @@
+-- Foo
+
+data Word : Type {
+  ZW : Word,
+  SW : Word -> Word,
+}
+
+data Nat : Type {
+  Z : Nat,
+  S : Nat -> Nat,
+}
+
+data Fin : Nat -> Type {
+  FZ : (n : Nat) -> Fin (S n),
+  FS : (n : Nat) -> Fin n -> Fin (S n),
+}
+
+def wordAdd : Word -> Word -> Word {
+  \m n => case m {
+    ZW => n,
+    SW m' => SW (wordAdd m' n),
+  }
+}
+
+def add : Nat -> Nat -> Nat {
+  \m n => case m {
+    Z => n,
+    S m' => S (add m' n),
+  }
+}
+
+def main : Nat -> Nat { \n => add n n }
+
+repr NatWord {
+  data Nat as Word {
+    Z as ZW,
+    S n as SW n,
+    case n {
+      Z => b,
+      S => r,
+    } as case n {
+      ZW => b,
+      SW n' => r n',
+    }
+  }
+
+  def add as wordAdd
+}
