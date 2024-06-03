@@ -5,10 +5,28 @@ data Bool : Type {
   false : Bool,
 }
 
+data Equal : (A : Type) -> A -> A -> Type {
+  refl : (A : Type) -> (x : A) -> Equal A x x
+}
+
 def if-then-else : (T : Type) -> Bool -> T -> T -> T {
   \T b t e => case b {
     true => t,
     false => e,
+  }
+}
+
+def if-then-else-dep : (T : Bool -> Type) -> (b : Bool) -> T true -> T false -> T b {
+  \T b t e => case b {
+    true => t,
+    false => e,
+  }
+}
+
+def if-then-else-eq : (T : Type) -> (b : Bool) -> (Equal Bool b true -> T) -> (Equal Bool b false -> T) -> T {
+  \T b t e => case b {
+    true => t (refl _ _),
+    false => e (refl _ _),
   }
 }
 
@@ -53,6 +71,10 @@ def switch-word : (F : Word -> Type) -> F word-zero -> ((w : Word) -> F (word-ad
   ?h2
 }
 
+def cast : (T : Type) -> (U : Type) -> T -> U {
+  ?invalid
+}
+
 
 ---
 
@@ -76,8 +98,7 @@ repr NatWord {
       z => b,
       s => r,
     } as (
-      switch-word _ b r n
-      -- if-then-else _ (word-is-zero n) b (r (word-sub n word-one))
+      switch-word _ (?h4) (?h5) n
     )
   }
 
