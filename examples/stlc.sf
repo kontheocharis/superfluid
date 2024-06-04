@@ -64,7 +64,8 @@ def UNSAFE-cast : (a : Type) -> (b : Type) -> a -> b {
 }
 
 def testing : Unit {
-  let a = tt;
+  let a : Unit = tt;
+  let b = tt;
   a
 }
 
@@ -79,8 +80,8 @@ repr SnocListAsList {
     } as case l {
       nil _ => b _,
       -- cons _ x xs => r _ (init _ x xs) (last _ x xs)
-      cons a x xs => (
-
+      cons a x xs => {
+        let m = r;
         UNSAFE-cast Unit _ ?h1
         -- let V : ((s : Type) -> List s -> Type)) = _ in ( ... :  V a l )
         -- UNSAFE-cast _ _ ((r _ (init _ x xs) (last _ x xs)))
@@ -98,7 +99,7 @@ repr SnocListAsList {
         --       (prepend-init-last-is-cons a x xs)
         --       (r _ (init _ x xs) (last _ x xs))
         --   )
-      )
+      }
     }
   }
 }

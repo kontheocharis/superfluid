@@ -547,6 +547,11 @@ checkTerm' (Term (SigmaT v t1 t2) d1) typ = do
 checkTerm' (Term TyT d1) typ = do
   typ' <- unifyTermsTo typ (locatedAt d1 TyT)
   return (Term TyT d1, typ')
+checkTerm' (Term (Let var ty tm ret) d1) typ = do
+  (ty', _) <- checkTermExpected ty TyT
+  (tm', ty'') <- checkTerm tm ty'
+  (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxMod (addSubst var tm') $ checkTerm ret typ
+  return (locatedAt d1 (Let var ty'' tm' ret'), subVar var tm' typ')
 checkTerm' t@(Term (V v) _) typ = do
   vTyp <- inCtx (lookupType v)
   case vTyp of
