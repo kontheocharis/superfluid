@@ -236,6 +236,21 @@ def is-palindrome : (A : Type) -> Eq A -> List A -> Bool {
   }
 }
 
+-- -- OUTPUT:
+--
+-- def is-palindrome : (A : Type) -> (n190 : Eq A) -> (n191 : FlatArray A) -> Bool {
+--   \A eq l => {
+--     let l' : FlatArray A = l;
+--     if-then-else _ (is-zero (len _ l'))
+--     (\_ => true)
+--     (\_ => if-then-else _ (is-one (len _ l'))
+--       (\_ => true)
+--       (\_ => if-then-else _ (is-equal _ eq (index _ l' ZERO) (index _ l' (sub (len _ l') ONE)))
+--         (\_ => is-palindrome _ eq (slice _ l' ONE (sub (len _ l') ONE)))
+--         (\_ => false)))
+--   }
+-- }
+
 -- REPRESENTATIONS
 
 repr FlatLists {

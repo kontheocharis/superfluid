@@ -351,6 +351,8 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
     (target', _) <- checkTerm target elimTy
     return target'
 
+  -- @@TODO: hide eliminators from the context in the end!
+
   -- Add the case representation to the context
   let result = ReprDataCaseItem (subjectAsTerm, ctors') target'
   modifySignature $ addCaseItemToRepr rName dat.name result
