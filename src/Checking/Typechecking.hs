@@ -174,6 +174,8 @@ representProgram (Program decls) = do
   -- Finally, normalise the program
   return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
 
+-- return . Program $ rest'
+
 -- | Represent the current context.
 representCtx :: Tc ()
 representCtx = modifyCtxM $ mapTermMappableM representTermRec
@@ -422,6 +424,7 @@ representTermRec = \case
     case sTy of
       Just t -> do
         t' <- resolveShallow t
+        traceM $ "Case subject type of " ++ printVal s ++ " is " ++ printVal t'
         case appToList t' of
           (Term (Global g) _, _) -> do
             r <- findReprForCase g
@@ -429,8 +432,8 @@ representTermRec = \case
               Nothing -> return Continue
               Just (_, term) -> do
                 xs <- caseElimsToAppArgs g cs
-                return $ ReplaceAndContinue (listToApp (term, xs))
-          _ -> error "Case subject is not a global type"
+                return $ ReplaceAndContinue (listToApp (term, s : xs))
+          _ -> error $ "Case subject is not a global type: " ++ printVal t'
       _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
   _ -> return Continue
 
@@ -497,7 +500,7 @@ checkDeclItem decl = do
 checkTerm :: Term -> Type -> Tc (Term, Type)
 checkTerm v t = do
   (v', t') <- checkTerm' v t
-  setType v t'
+  setType v t' -- @@FIXME: store on terms!!
   return (v', t')
 
 -- | Check the type of a term.
@@ -612,8 +615,8 @@ checkTerm' (Term (Case s cs) _) typ = do
           pt' <- enterPat $ do
             (pt', _) <- checkTerm pt sTy
 
-            -- If the pattern is a variable,
-            -- then we can unify with the subject for dependent
+            -- If the subject is a variable,
+            -- then we can unify with the pattern for dependent
             -- pattern matching.
             case s' of
               Term (V _) _ -> unifyTerms pt' s'
@@ -689,16 +692,17 @@ unifyTerms a' b' = do
     -- \| Unify a variable with a term. Returns True if successful.
     unifyVarWithTerm :: Term -> Var -> Term -> Tc ()
     unifyVarWithTerm vOrigin v t = do
-      -- Check if the variable exists in a substitution in
-      -- the context.
-      subst <- inCtx (lookupSubst v)
-      case subst of
-        Just s -> unifyTerms s t
-        Nothing -> do
-          pt <- gets (\s -> s.inPat)
-          if pt
-            then modifyCtx (addSubst v t)
-            else throwError $ Mismatch vOrigin t
+      -- If in a pattern, then we can add a substitution straight away.
+      pt <- gets (\s -> s.inPat)
+      if pt
+        then modifyCtx (addSubst v t)
+        else do
+          -- Check if the variable exists in a substitution in
+          -- the context.
+          subst <- inCtx (lookupSubst v)
+          case subst of
+            Just s -> unifyTerms s t
+            Nothing -> throwError $ Mismatch vOrigin t
 
     unifyTerms' :: Term -> Term -> Tc ()
     unifyTerms' (Term (PiT lv l1 l2) d1) (Term (PiT rv r1 r2) _) = do

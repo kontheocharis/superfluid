@@ -47,7 +47,7 @@ instance Print TermValue where
               ++ [printVal ret]
   printVal (Case t cs) =
     "case "
-      ++ printVal t
+      ++ printSingleVal t
       ++ " "
       ++ curlies
         ( intercalate

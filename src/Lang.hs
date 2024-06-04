@@ -404,6 +404,8 @@ isCompound x =
    in case x' of
         (PiT {}) -> True
         (Lam _ _) -> True
+        (Let {}) -> True
+        (Case {}) -> True
         (App _ _) -> True
         (SigmaT {}) -> True
         _ -> False

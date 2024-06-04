@@ -310,7 +310,7 @@ declSignature = do
 -- Some are grouped to prevent lots of backtracking.
 term :: Parser Term
 term = do
-  t <- choice [caseExpr, piTOrSigmaT, lam, app, lets]
+  t <- choice [caseExpr, lets, piTOrSigmaT, lam, app]
   resolveTerm t
 
 -- | Parse a single term.

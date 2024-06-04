@@ -1,54 +1,64 @@
 
-data Equal : (a: Type) -> a -> a -> Type {
-  refl : (a : Type) -> (x : a) -> Equal a x x
+data Equal : (A: Type) -> A -> A -> Type {
+  refl : (A : Type) -> (x : A) -> Equal A x x
+}
+
+data Bool : Type {
+  true : Bool,
+  false : Bool
+}
+
+data Maybe : Type -> Type {
+  nothing : (A : Type) -> Maybe A,
+  just : (A : Type) -> A -> Maybe A
 }
 
 data Unit : Type {
   tt : Unit
 }
 
-def rewrite : (a : Type) -> (p : a -> Type) -> (x : a) -> (y : a) -> Equal a x y -> p x -> p y {
-  \a p x y e px => case e {
+def rewrite : (A : Type) -> (P : A -> Type) -> (x : A) -> (y : A) -> Equal A x y -> P x -> P y {
+  \A P x y e px => case e {
     refl _ _ => px
   }
 }
 
 data List : Type -> Type {
-  nil : (a : Type) -> List a,
-  cons : (a : Type) -> a -> List a -> List a
+  nil : (A : Type) -> List A,
+  cons : (A : Type) -> A -> List A -> List A
 }
 
 data SnocList : Type -> Type {
-  lin : (a : Type) -> SnocList a,
-  snoc : (a : Type) -> SnocList a -> a -> SnocList a
+  lin : (A : Type) -> SnocList A,
+  snoc : (A : Type) -> SnocList A -> A -> SnocList A
 }
 
-def prepend : (a : Type) -> List a -> List a -> List a {
-  \a xs ys => case xs {
+def prepend : (A : Type) -> List A -> List A -> List A {
+  \A xs ys => case xs {
     nil _ => ys,
-    cons _ x xs' => cons a x (prepend a xs' ys)
+    cons _ x xs' => cons A x (prepend A xs' ys)
   }
 }
 
-def last : (a : Type) -> a -> List a -> a {
-  \a x xs => case xs {
+def last : (A : Type) -> A -> List A -> A {
+  \A x xs => case xs {
     nil _ => x,
-    cons _ y ys => last a y ys
+    cons _ y ys => last A y ys
   }
 }
 
-def init : (a : Type) -> a -> List a -> List a {
-  \a x xs => case xs {
-    nil _ => nil a,
-    cons _ y ys => cons a x (init a y ys)
+def init : (A : Type) -> A -> List A -> List A {
+  \A x xs => case xs {
+    nil _ => nil A,
+    cons _ y ys => cons A x (init A y ys)
   }
 }
 
 def prepend-init-last-is-cons :
-  (a : Type) ->
-  (x : a) ->
-  (xs : List a) ->
-  Equal (List a) (cons a x xs) (prepend a (init a x xs) (cons a (last a x xs) (nil a)))
+  (A : Type) ->
+  (x : A) ->
+  (xs : List A) ->
+  Equal (List A) (cons A x xs) (prepend A (init A x xs) (cons A (last A x xs) (nil A)))
 {
   ?prepend-init-last-is-cons
 }
@@ -59,7 +69,7 @@ def letting : (X : Type) -> (Z : X -> Type) -> (y : X) -> (z : (w : X) -> Z w) -
   \X Z y z => z y
 }
 
-def UNSAFE-cast : (a : Type) -> (b : Type) -> a -> b {
+def UNSAFE-cast : (A : Type) -> (B : Type) -> A -> B {
   ?UNSAFE-cast
 }
 
@@ -69,9 +79,8 @@ def testing : Unit {
   a
 }
 
-
 repr SnocListAsList {
-  data SnocList a as List a {
+  data SnocList A as List A {
     lin _ as nil _,
     snoc _ xs x as prepend _ xs (cons _ x (nil _)),
     case l {
@@ -79,10 +88,24 @@ repr SnocListAsList {
       snoc => r
     } as case l {
       nil _ => b _,
-      -- cons _ x xs => r _ (init _ x xs) (last _ x xs)
-      cons a x xs => {
-        let m = r;
-        UNSAFE-cast Unit _ ?h1
+      cons _ x xs => UNSAFE-cast _ _ (r _ (init _ x xs) (last _ x xs)),
+    }
+  }
+}
+
+def find-rev : (A : Type) -> (l : SnocList A) -> (pred : A -> Bool) -> Maybe A {
+  \A l pred => case l {
+    lin _ => nothing _,
+    snoc _ xs x => {
+      let result = pred x;
+      case result {
+        true => just _ x,
+        false => find-rev _ xs pred
+      }
+    }
+  }
+}
+
         -- let V : ((s : Type) -> List s -> Type)) = _ in ( ... :  V a l )
         -- UNSAFE-cast _ _ ((r _ (init _ x xs) (last _ x xs)))
         -- let ?h3 (\n => ?h2) (r _ (init _ x xs) (last _ x xs)) (\n => ?h1)
@@ -99,7 +122,3 @@ repr SnocListAsList {
         --       (prepend-init-last-is-cons a x xs)
         --       (r _ (init _ x xs) (last _ x xs))
         --   )
-      }
-    }
-  }
-}
