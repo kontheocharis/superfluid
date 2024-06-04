@@ -1,0 +1,12 @@
+
+-- LOW LEVEL TYPES
+-- Never mind their implementations, these are opaque (TODO: Add definitions without implementations)
+
+
+-- HIGH LEVEL TYPES
+
+data Nat : Type {
+  zero : Nat,
+  succ : Nat -> Nat
+}
+

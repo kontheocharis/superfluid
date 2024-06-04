@@ -28,6 +28,11 @@ data List : Type -> Type {
   cons : (A : Type) -> A -> List A -> List A
 }
 
+data Elem : (A : Type) -> A -> List A -> Type {
+  here : (A : Type) -> (x : A) -> (xs : List A) -> Elem A x (cons A x xs),
+  there : (A : Type) -> (x : A) -> (y : A) -> (xs : List A) -> Elem A x xs -> Elem A x (cons A y xs)
+}
+
 data SnocList : Type -> Type {
   lin : (A : Type) -> SnocList A,
   snoc : (A : Type) -> SnocList A -> A -> SnocList A
@@ -92,6 +97,8 @@ repr SnocListAsList {
     }
   }
 }
+
+
 
 def find-rev : (A : Type) -> (l : SnocList A) -> (pred : A -> Bool) -> Maybe A {
   \A l pred => case l {

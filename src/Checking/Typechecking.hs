@@ -55,7 +55,7 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
-import Control.Monad (filterM, mapAndUnzipM, replicateM, when)
+import Control.Monad (mapAndUnzipM, replicateM, when)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
 import Data.Foldable (find)
@@ -173,8 +173,6 @@ representProgram (Program decls) = do
 
   -- Finally, normalise the program
   return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
-
--- return . Program $ rest'
 
 -- | Represent the current context.
 representCtx :: Tc ()
