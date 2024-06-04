@@ -55,13 +55,19 @@ def prepend-init-last-is-cons :
 
 -- let x : X = y in (z : Z x)
 
-def let : (X : Type) -> (Z : X -> Type) -> (y : X) -> (z : (w : X) -> Z w) -> Z y {
+def letting : (X : Type) -> (Z : X -> Type) -> (y : X) -> (z : (w : X) -> Z w) -> Z y {
   \X Z y z => z y
 }
 
 def UNSAFE-cast : (a : Type) -> (b : Type) -> a -> b {
   ?UNSAFE-cast
 }
+
+def testing : Unit {
+  let a = tt;
+  a
+}
+
 
 repr SnocListAsList {
   data SnocList a as List a {

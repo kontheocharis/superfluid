@@ -37,6 +37,14 @@ instance Print TermValue where
   printVal (SigmaT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") ** " ++ printVal t2
   printVal (Pair t1 t2) = "(" ++ printVal t1 ++ ", " ++ printVal t2 ++ ")"
   printVal t@(App _ _) = intercalate " " $ map printSingleVal (let (x, xs) = appToList (genTerm t) in x : xs)
+  printVal l@(Let {}) =
+    curlies $
+      let (binds, ret) = letToList (genTerm l)
+       in intercalate "\n" $
+            map
+              (\(v, ty, t) -> "let " ++ printVal v ++ " : " ++ printVal ty ++ " = " ++ printVal t ++ ";")
+              binds
+              ++ [printVal ret]
   printVal (Case t cs) =
     "case "
       ++ printVal t
@@ -75,7 +83,10 @@ instance Print Item where
   printVal (Repr r) = printVal r
 
 instance Print DeclItem where
-  printVal (DeclItem v ty term _) = "def " ++ v ++ " : " ++ printVal ty ++ " " ++ curlies (printVal term)
+  printVal (DeclItem v ty term _) =
+    "def " ++ v ++ " : " ++ printVal ty ++ " " ++ case term.value of
+      Let {} -> printVal term
+      _ -> curlies $ printVal term
 
 instance Print DataItem where
   printVal (DataItem name ty ctors) =

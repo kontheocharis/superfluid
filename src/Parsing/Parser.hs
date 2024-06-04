@@ -34,6 +34,7 @@ import Lang
     listToApp,
     mapTermM,
     termDataAt,
+    termLoc,
   )
 import Parsing.Resolution (resolveGlobalsRec)
 import Text.Parsec
@@ -53,6 +54,7 @@ import Text.Parsec
     putState,
     runParser,
     satisfy,
+    sepEndBy,
     sourceColumn,
     sourceLine,
     string,
@@ -134,7 +136,7 @@ anyWhite = void . try $ many $ void (satisfy isSpace) <|> comment
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -294,7 +296,7 @@ declItem = whiteWrap $ do
   start <- getPos
   symbol "def"
   (name, ty) <- declSignature
-  t <- curlies term
+  t <- lets
   DeclItem name (fromMaybe (genTerm Wild) ty) t . Loc start <$> getPos
 
 -- | Parse the type signature of a declaration.
@@ -308,7 +310,7 @@ declSignature = do
 -- Some are grouped to prevent lots of backtracking.
 term :: Parser Term
 term = do
-  t <- choice [caseExpr, piTOrSigmaT, lam, app]
+  t <- choice [caseExpr, piTOrSigmaT, lam, app, lets]
   resolveTerm t
 
 -- | Parse a single term.
@@ -384,6 +386,29 @@ app = do
   t <- singleTerm
   ts <- many singleTerm
   return $ listToApp (t, ts)
+
+-- | Parse a series of let terms.
+lets :: Parser Term
+lets = curlies $ do
+  bindings <- many . located $ do
+    reserved "let"
+    v <- newVar
+    ty <- optionMaybe $ do
+      colon
+      term
+    reservedOp "="
+    t <- term
+    reservedOp ";"
+    return (v, ty, t)
+  ret <- term
+  return $
+    foldr
+      ( \((v, ty, t), loc) acc -> case ty of
+          Just ty' -> Term (Let v ty' t acc) (termDataAt (loc <> termLoc acc))
+          Nothing -> Term (Let v (genTerm Wild) t acc) (termDataAt (loc <> termLoc acc))
+      )
+      ret
+      bindings
 
 -- | Parse a lambda.
 lam :: Parser Term

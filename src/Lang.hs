@@ -42,6 +42,7 @@ module Lang
     typedAs,
     appToList,
     lamsToList,
+    letToList,
     lams,
     startPos,
     endPos,
@@ -73,6 +74,7 @@ data TermValue
   = -- Dependently-typed lambda calculus with Pi and Sigma:
     PiT Var Type Term
   | Lam Var Term
+  | Let Var Type Term Term
   | App Term Term
   | SigmaT Var Type Term
   | Pair Term Term
@@ -198,6 +200,11 @@ appToList :: Term -> (Term, [Term])
 appToList (Term (App t1 t2) _) = let (t, ts) = appToList t1 in (t, ts ++ [t2])
 appToList t = (t, [])
 
+-- | Convert a let term to a list of bindings and the body term.
+letToList :: Term -> ([(Var, Type, Term)], Term)
+letToList (Term (Let v ty t1 t2) _) = let (bs, t) = letToList t2 in ((v, ty, t1) : bs, t)
+letToList t = ([], t)
+
 -- | Convert a lambda term to a list of variables and the body term.
 lamsToList :: Term -> ([Var], Term)
 lamsToList (Term (Lam v t) _) = let (vs, t') = lamsToList t in (v : vs, t')
@@ -313,6 +320,7 @@ mapTermM f term = do
     mapTermRec t' = case t' of
       (PiT v t1 t2) -> PiT v <$> mapTermM f t1 <*> mapTermM f t2
       (Lam v t) -> Lam v <$> mapTermM f t
+      (Let v t1 t2 t3) -> Let v <$> mapTermM f t1 <*> mapTermM f t2 <*> mapTermM f t3
       (App t1 t2) -> App <$> mapTermM f t1 <*> mapTermM f t2
       (SigmaT v t1 t2) -> SigmaT v <$> mapTermM f t1 <*> mapTermM f t2
       (Pair t1 t2) -> Pair <$> mapTermM f t1 <*> mapTermM f t2
