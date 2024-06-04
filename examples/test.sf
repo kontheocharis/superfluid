@@ -71,11 +71,6 @@ def switch-word : (F : Word -> Type) -> F word-zero -> ((w : Word) -> F (word-ad
   ?h2
 }
 
-def cast : (T : Type) -> (U : Type) -> T -> U {
-  ?invalid
-}
-
-
 ---
 
 data Nat : Type {
@@ -98,7 +93,7 @@ repr NatWord {
       z => b,
       s => r,
     } as (
-      switch-word _ (?h4) (?h5) n
+      switch-word _ b r n
     )
   }
 

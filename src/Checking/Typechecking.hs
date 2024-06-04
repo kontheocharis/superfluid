@@ -640,8 +640,16 @@ unifyTerms a' b' = do
   b <- resolveShallow b'
   case (classifyApp a, classifyApp b) of
     (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> unifyTerms' a b
-    (Just (Flex h1 ts1), _) -> solve h1 ts1 b
-    (_, Just (Flex h2 ts2)) -> solve h2 ts2 a
+    (Just (Flex h1 ts1), _) -> do
+      res <- solve h1 ts1 b
+      if res
+        then return ()
+        else unifyTerms' a b
+    (_, Just (Flex h2 ts2)) -> do
+      res <- solve h2 ts2 a
+      if res
+        then return ()
+        else unifyTerms' a b
     _ -> unifyTerms' a b
   where
     -- \| Unify a variable with a term. Returns True if successful.
@@ -718,19 +726,23 @@ patToTerm =
     )
 
 -- | Validate a pattern unification problem, returning the spine variables.
-validateProb :: Var -> [Term] -> Term -> Tc [Var]
-validateProb _ [] _ = return []
+validateProb :: Var -> [Term] -> Term -> Tc (Maybe [Var])
+validateProb _ [] _ = return (Just [])
 validateProb hole (x : xs) rhs = do
   x' <- resolveShallow x
   case x'.value of
     V v -> do
       xs' <- validateProb hole xs rhs
-      return $ v : xs'
-    _ -> throwError $ Mismatch (listToApp (genTerm (Meta hole), x : xs)) rhs -- @@Todo : better error message
+      return $ (v :) <$> xs'
+    _ -> return Nothing
 
 -- | Solve a pattern unification problem.
-solve :: Var -> [Term] -> Term -> Tc ()
+solve :: Var -> [Term] -> Term -> Tc Bool
 solve hole spine rhs = do
   vars <- validateProb hole spine rhs
-  let solution = normaliseTermFully (lams vars rhs)
-  solveMeta hole solution
+  case vars of
+    Nothing -> return False
+    Just vars' -> do
+      let solution = normaliseTermFully (lams vars' rhs)
+      solveMeta hole solution
+      return True
