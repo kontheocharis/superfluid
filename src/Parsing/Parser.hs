@@ -98,16 +98,20 @@ registerNewVar n = do
   return v
 
 -- | Get an already registered variable or generate a new one.
-registerVar :: String -> Parser Var
-registerVar n = do
-  s <- getState
-  let ns = s.names
-  case lookup n ns of
-    Just v -> return v
-    Nothing -> do
-      v <- Var n <$> newVarIndex
-      modifyState $ \s' -> s' {names = (n, v) : ns}
-      return v
+registerVar :: Loc -> String -> Parser Var
+registerVar l n = do
+  case n of
+    "_" -> return $ Term Wild (termDataAt l)
+    "Type" -> return $ Term TyT (termDataAt l)
+    _ -> do
+      s <- getState
+      let ns = s.names
+      case lookup n ns of
+        Just v -> return v
+        Nothing -> do
+          v <- Var n <$> newVarIndex
+          modifyState $ \s' -> s' {names = (n, v) : ns}
+          return v
 
 -- | Parser type alias.
 type Parser a = Parsec Text ParserState a
@@ -231,7 +235,7 @@ reprDataItem :: Parser ReprDataItem
 reprDataItem = whiteWrap $ do
   symbol "data"
   name <- identifier
-  ps <- many newVar
+  ps <- enterPat $ many newVar
   symbol "as"
   target <- term
   curlies $ do
@@ -250,21 +254,21 @@ reprDeclItem = whiteWrap $ do
 reprCtorItem :: Parser ReprDataCtorItem
 reprCtorItem = do
   name <- identifier
-  ps <- many newVar
+  ps <- enterPat $ many newVar
   reservedOp "as"
   ReprDataCtorItem name ps <$> term
 
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
   symbol "case"
-  subject <- newVar
+  subject <- enterPat newVar
   ctors <-
     curlies
       ( commaSep
           ( do
               name <- identifier
               reservedOp "=>"
-              bind <- newVar
+              bind <- enterPat newVar
               return (name, bind)
           )
       )
@@ -320,13 +324,20 @@ term = do
 singleTerm :: Parser Term
 singleTerm = choice [varOrHole, pairOrParens]
 
+enterPat :: Parser a -> Parser a
+enterPat p = do
+  modifyState $ \s -> s {parsingPat = True}
+  x <- p
+  modifyState $ \s -> s {parsingPat = False}
+  return x
+
 -- | Parse a pattern.
 pat :: Parser Pat
 pat = do
-  modifyState $ \s -> s {parsingPat = True}
-  t <- term
-  t' <- resolveTerm t
-  modifyState $ \s -> s {parsingPat = False}
+  (t, t') <- enterPat $ do
+    t <- term
+    t' <- resolveTerm t
+    return (t, t')
   if isValidPat t'
     then return t'
     else fail $ "Cannot use term " ++ show t ++ " as a pattern"

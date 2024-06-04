@@ -21,6 +21,7 @@ module Checking.Context
     emptyTcState,
     enterCtx,
     enterCtxMod,
+    modifyCtxM,
     enterPat,
     enterSignatureMod,
     freshMeta,
@@ -71,6 +72,7 @@ import Lang
     ReprItem (..),
     ReprSomeItem (..),
     Term (..),
+    TermMappable (..),
     TermValue (..),
     Type,
     Var (..),
@@ -79,6 +81,7 @@ import Lang
     lams,
     listToApp,
     locatedAt,
+    mapTermM,
   )
 
 -- | A typing judgement.
@@ -90,6 +93,13 @@ instance Show Judgement where
 
 -- | A context, represented as a list of typing judgements.
 newtype Ctx = Ctx [Judgement]
+
+instance TermMappable Judgement where
+  mapTermMappableM f (Typing v ty) = Typing v <$> mapTermM f ty
+  mapTermMappableM f (Subst v t) = Subst v <$> mapTermM f t
+
+instance TermMappable Ctx where
+  mapTermMappableM f (Ctx js) = Ctx <$> mapM (mapTermMappableM f) js
 
 instance Show Ctx where
   show (Ctx js) = intercalate "\n" $ map show js
@@ -238,6 +248,12 @@ modifyCtx :: (Ctx -> Ctx) -> Tc ()
 modifyCtx f = do
   s <- get
   put $ s {ctx = f (ctx s)}
+
+modifyCtxM :: (Ctx -> Tc Ctx) -> Tc ()
+modifyCtxM f = do
+  s <- get
+  c <- f (ctx s)
+  put $ s {ctx = c}
 
 -- | Update the signature.
 modifySignature :: (Signature -> Signature) -> Tc ()

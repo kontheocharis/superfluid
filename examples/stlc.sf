@@ -1,0 +1,30 @@
+
+
+
+data List : Type -> Type {
+  nil : (a : Type) -> List a,
+  cons : (a : Type) -> a -> List a -> List a
+}
+
+data SnocList : Type -> Type {
+  lin : (a : Type) -> SnocList a,
+  snoc : (a : Type) -> SnocList a -> a -> SnocList a
+}
+
+def prepend : (a : Type) -> List a -> List a -> List a {
+  \a xs ys => case xs {
+    nil _ => ys,
+    cons _ x xs' => cons a x (prepend a xs' ys)
+  }
+}
+
+repr SnocListAsList {
+  data SnocList a as List a {
+    lin _ as nil _,
+    snoc _ xs x as prepend _ xs (cons _ x (nil _)),
+    case l {
+      lin => b,
+      snoc => r
+    } as ?h1
+  }
+}

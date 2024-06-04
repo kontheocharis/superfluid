@@ -24,6 +24,7 @@ indentedFst :: String -> String
 indentedFst str = "  " ++ indented str
 
 instance Print Var where
+  -- printVal (Var s n) = s ++ show n
   printVal (Var s _) = s
 
 instance Print TermValue where

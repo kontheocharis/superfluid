@@ -12,7 +12,8 @@ module Checking.Typechecking
 where
 
 import Checking.Context
-  ( FlexApp (..),
+  ( Ctx (..),
+    FlexApp (..),
     Tc,
     TcError (..),
     TcState (..),
@@ -44,13 +45,14 @@ import Checking.Context
     lookupSubst,
     lookupType,
     modifyCtx,
+    modifyCtxM,
     modifySignature,
     registerHole,
     registerWild,
     setType,
     solveMeta,
   )
-import Checking.Vars (alphaRename, subVar)
+import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (filterM, replicateM, when)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
@@ -58,7 +60,7 @@ import Data.Foldable (find)
 import Data.List (sort, sortBy)
 import Data.Map (Map, lookup, (!?))
 import Data.Maybe (fromJust)
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
 import Interface.Pretty (Print (..))
 import Lang
   ( CtorItem (..),
@@ -170,6 +172,10 @@ representProgram (Program decls) = do
   -- Finally, normalise the program
   return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
 
+-- | Represent the current context.
+representCtx :: Tc ()
+representCtx = modifyCtxM $ mapTermMappableM representTermRec
+
 -- | Check some item in the program.
 checkItem :: Item -> Tc Item
 checkItem (Decl decl) = Decl <$> checkDeclItem decl
@@ -194,17 +200,37 @@ checkSomeReprItem _ (ReprDecl d) = ReprDecl <$> checkReprDeclItem d
 -- Also takes a closure to run more stuff in the same context, given the goal.
 checkBindAppMatchesPi :: Term -> [Var] -> Type -> (Type -> Tc a) -> Tc a
 checkBindAppMatchesPi subject binds ty f = do
+  traceM $ "Checking that " ++ printVal subject ++ " with bindings " ++ show binds ++ " is a valid application of " ++ printVal ty
   let (params, ret) = piTypeToList ty
-  let typings = zipWith (curry (\(b, (_, t)) -> (b, t))) binds params
-  enterCtxMod (addTypings typings) $ do
-    -- Check that the LHS fully applied is a type
+  holeSub <-
+    Sub
+      <$> mapM
+        ( \(v, _) -> do
+            m <- freshMeta
+            return (v, m)
+        )
+        params
+  let retApplied = sub holeSub ret
+
+  enterCtx $ do
     let lhs = listToApp (subject, map (genTerm . V) binds)
-    _ <- checkTerm lhs ret
-    return ()
-  typings' <- mapM (\(b, t) -> (,) b <$> representTerm t) typings
-  enterCtxMod (addTypings typings') $ do
-    ret' <- representTerm ret
+    traceM $ "Checking that " ++ printVal lhs ++ " is of type " ++ printVal retApplied
+    _ <- enterPat $ checkTerm lhs retApplied
+    representCtx
+    ret' <- representTerm retApplied
     f ret'
+
+-- enterCtxMod (addTypings typings) $ do
+--   -- Check that the LHS fully applied is a type
+--   let lhs = listToApp (subject, map (genTerm . V) binds)
+--   c <- inCtx id
+--   traceM $ "The context is: " ++ show c
+--   _ <- checkTerm lhs retApplied
+--   return ()
+-- typings' <- mapM (\(b, t) -> (,) b <$> representTerm t) typings
+-- enterCtxMod (addTypings typings') $ do
+--   ret' <- representTerm retApplied
+--   f ret'
 
 -- | Check a repr data item.
 checkReprDataItem :: String -> ReprDataItem -> Tc ReprDataItem
@@ -230,6 +256,8 @@ checkReprDataItem rName (ReprDataItem name binds target ctors cse) = do
       -- Check each constructor
       ctors' <- mapM (checkReprDataCtorItem rName d.name) ctors
 
+      traceM $ "Checking case representation for " ++ name
+
       -- Check the case expression
       cse' <- traverse (checkReprDataCaseItem rName d) cse
 
@@ -246,7 +274,7 @@ checkReprDataCtorItem rName dName (ReprDataCtorItem name binds target) = do
   -- Ensure that the name exists
   decl <- inSignature (lookupItemOrCtor name)
   case decl of
-    Just (Right (CtorItem _ ty _ _)) -> do
+    Just (Right (CtorItem g ty _ _)) -> do
       -- Check the target against the represented constructor type
       target' <- checkBindAppMatchesPi (genTerm (Global name)) binds ty $ \ret -> do
         -- Check that the target is also of the same type
@@ -546,6 +574,8 @@ checkTerm' (Term (App t1 t2) _) typ = do
   (t1', subjectTy) <- inferTerm t1
   subjectTyRes <- resolveShallow subjectTy
 
+  traceM $ "Checking application of " ++ printVal t1' ++ " to " ++ printVal t2 ++ " with type " ++ printVal typ ++ " and subject type " ++ printVal subjectTy
+
   let go v varTy bodyTy = do
         (t2', _) <- checkTerm t2 varTy
         typ' <- unifyTermsTo typ $ subVar v t2' bodyTy
@@ -553,7 +583,9 @@ checkTerm' (Term (App t1 t2) _) typ = do
 
   -- Try to normalise to a pi type.
   case subjectTyRes of
-    (Term (PiT v varTy bodyTy) _) -> go v varTy bodyTy
+    (Term (PiT v varTy bodyTy) _) -> do
+      traceM $ "Subject type is a pi type: " ++ printVal (PiT v varTy bodyTy)
+      go v varTy bodyTy
     _ -> do
       let subjectTy' = normaliseTerm subjectTyRes
       subjectTyRes' <- case subjectTy' of
