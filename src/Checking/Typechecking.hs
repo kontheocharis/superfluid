@@ -58,6 +58,8 @@ import Data.Foldable (find)
 import Data.List (sort, sortBy)
 import Data.Map (Map, lookup, (!?))
 import Data.Maybe (fromJust)
+import Debug.Trace (trace)
+import Interface.Pretty (Print (..))
 import Lang
   ( CtorItem (..),
     DataItem (..),
@@ -397,16 +399,19 @@ representTermRec = \case
   Term (Case s cs) _ -> do
     sTy <- getType s
     case sTy of
-      Just t -> case appToList t of
-        (Term (Global g) _, _) -> do
-          r <- findReprForCase g
-          case r of
-            Nothing -> return Continue
-            Just (dName, term) -> do
-              xs <- caseElimsToAppArgs dName cs
-              return $ ReplaceAndContinue (listToApp (term, xs))
-        _ -> return Continue
-      _ -> return Continue
+      Just t -> do
+        t' <- resolveShallow t
+        trace ("Resolved type of " ++ printVal (Case s cs) ++ " to be " ++ printVal t') $ return ()
+        case appToList t' of
+          (Term (Global g) _, _) -> do
+            r <- findReprForCase g
+            case r of
+              Nothing -> return Continue
+              Just (_, term) -> do
+                xs <- caseElimsToAppArgs g cs
+                return $ ReplaceAndContinue (listToApp (term, xs))
+          _ -> error "Case subject is not a global type"
+      _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
   _ -> return Continue
 
 -- | Represent a checked term through defined representations.

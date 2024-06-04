@@ -4,6 +4,7 @@ import Checking.Context (Tc, TcState, runTc)
 import Checking.Typechecking (checkProgram, inferTerm, normaliseTermFully, representProgram)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (MonadState (..))
 import Data.Char (isSpace)
 import Data.String
 import Data.Text.IO (hPutStrLn)
@@ -134,8 +135,8 @@ checkFile file = do
 representFile :: String -> InputT IO Program
 representFile file = do
   parsed <- parseFile file
-  (checked, _) <- handleTc err (checkProgram parsed)
-  (represented, _) <- handleTc err (representProgram checked)
+  (checked, s) <- handleTc err (checkProgram parsed)
+  (represented, _) <- handleTc err (put s >> representProgram checked)
   return represented
 
 -- | Run the REPL.
