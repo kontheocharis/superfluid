@@ -1,4 +1,4 @@
-module Interface.Pretty (Print (..)) where
+module Interface.Pretty (Print (..), indented, indentedFst) where
 
 import Data.List (intercalate)
 import Lang

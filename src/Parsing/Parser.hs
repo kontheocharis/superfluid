@@ -67,17 +67,14 @@ import Text.Parsec.Text ()
 data ParserState = ParserState
   { varCount :: Int,
     -- Keep track of the names of variables so we can resolve them when encountering them.
-    names :: [(String, Var)],
-    -- Whether we are parsing a pattern.
-    parsingPat :: Bool
+    names :: [(String, Var)]
   }
 
 initialParserState :: ParserState
 initialParserState =
   ParserState
     { varCount = 0,
-      names = [],
-      parsingPat = False
+      names = []
     }
 
 -- | Get a new variable index and increment it.
@@ -98,20 +95,16 @@ registerNewVar n = do
   return v
 
 -- | Get an already registered variable or generate a new one.
-registerVar :: Loc -> String -> Parser Var
-registerVar l n = do
-  case n of
-    "_" -> return $ Term Wild (termDataAt l)
-    "Type" -> return $ Term TyT (termDataAt l)
-    _ -> do
-      s <- getState
-      let ns = s.names
-      case lookup n ns of
-        Just v -> return v
-        Nothing -> do
-          v <- Var n <$> newVarIndex
-          modifyState $ \s' -> s' {names = (n, v) : ns}
-          return v
+registerVar :: String -> Parser Var
+registerVar n = do
+  s <- getState
+  let ns = s.names
+  case lookup n ns of
+    Just v -> return v
+    Nothing -> do
+      v <- Var n <$> newVarIndex
+      modifyState $ \s' -> s' {names = (n, v) : ns}
+      return v
 
 -- | Parser type alias.
 type Parser a = Parsec Text ParserState a
@@ -235,7 +228,7 @@ reprDataItem :: Parser ReprDataItem
 reprDataItem = whiteWrap $ do
   symbol "data"
   name <- identifier
-  ps <- enterPat $ many newVar
+  ps <- many patVar
   symbol "as"
   target <- term
   curlies $ do
@@ -254,21 +247,21 @@ reprDeclItem = whiteWrap $ do
 reprCtorItem :: Parser ReprDataCtorItem
 reprCtorItem = do
   name <- identifier
-  ps <- enterPat $ many newVar
+  ps <- many patVar
   reservedOp "as"
   ReprDataCtorItem name ps <$> term
 
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
   symbol "case"
-  subject <- enterPat newVar
+  subject <- patVar
   ctors <-
     curlies
       ( commaSep
           ( do
               name <- identifier
               reservedOp "=>"
-              bind <- enterPat newVar
+              bind <- patVar
               return (name, bind)
           )
       )
@@ -324,23 +317,22 @@ term = do
 singleTerm :: Parser Term
 singleTerm = choice [varOrHole, pairOrParens]
 
-enterPat :: Parser a -> Parser a
+-- | Parse a pattern given a parser for terms.
+enterPat :: Parser Term -> Parser Term
 enterPat p = do
-  modifyState $ \s -> s {parsingPat = True}
-  x <- p
-  modifyState $ \s -> s {parsingPat = False}
-  return x
-
--- | Parse a pattern.
-pat :: Parser Pat
-pat = do
-  (t, t') <- enterPat $ do
-    t <- term
-    t' <- resolveTerm t
-    return (t, t')
+  t <- p
+  t' <- resolveTerm t
   if isValidPat t'
     then return t'
     else fail $ "Cannot use term " ++ show t ++ " as a pattern"
+
+-- | Parse a pattern.
+pat :: Parser Pat
+pat = enterPat term
+
+-- | Parse a pattern variable.
+patVar :: Parser Pat
+patVar = enterPat (locatedTerm $ V <$> var)
 
 -- | Parse a variable.
 var :: Parser Var

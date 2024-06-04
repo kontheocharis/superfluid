@@ -18,6 +18,8 @@ module Checking.Context
     findReprForGlobal,
     classifyApp,
     ctx,
+    patToTerm,
+    patVarToVar,
     emptyTcState,
     enterCtx,
     enterCtxMod,
@@ -64,6 +66,7 @@ import Lang
     HasLoc (..),
     Item (..),
     Loc (..),
+    MapResult (..),
     Pat,
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
@@ -387,7 +390,7 @@ addItemToRepr rName item = modifyItem rName $ \case
 -- | Add an empty data item to a representation in a signature.
 --
 -- Assumes that the representation is already present and empty.
-addEmptyDataItemToRepr :: String -> String -> [Var] -> Term -> Signature -> Signature
+addEmptyDataItemToRepr :: String -> String -> [Pat] -> Term -> Signature -> Signature
 addEmptyDataItemToRepr rName name binds target = addItemToRepr rName $ ReprData (ReprDataItem name binds target [] Nothing)
 
 -- | Modify representation items in a signature.
@@ -416,45 +419,68 @@ addCaseItemToRepr rName dName item = modifyReprItems rName go
       | otherwise = t
     go t = t
 
+-- | Convert a pattern to a term, converting wildcards to fresh variables.
+patToTerm :: Pat -> Tc Term
+patToTerm =
+  mapTermM
+    ( \t -> case t.value of
+        Wild -> do
+          v <- freshVar
+          return . Replace $ Term (V v) t.dat
+        _ -> return Continue
+    )
+
+-- | Convert a pattern to a variable, converting wildcards to fresh variables.
+patVarToVar :: Pat -> Tc Var
+patVarToVar p = case p.value of
+  V v -> return v
+  Wild -> freshVar
+  _ -> throwError $ PatternNotSupported p
+
 -- | Find a representation for the given global name.
 -- Returns the name of the representation and the term.
 findReprForGlobal :: String -> Tc (Maybe (String, Term))
 findReprForGlobal name = do
   (Signature items) <- gets sig
-  return $ join $ find isJust $ map findRepr items
+  join . find isJust <$> mapM findRepr items
   where
-    findRepr (Repr (ReprItem rName contents)) = join $ find isJust $ map (findReprData rName) contents
-    findRepr _ = Nothing
+    findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
+    findRepr _ = return Nothing
 
     findReprData rName (ReprDecl d)
-      | d.name == name = Just (rName, d.target)
-      | otherwise = Nothing
+      | d.name == name = return $ Just (rName, d.target)
+      | otherwise = return Nothing
     findReprData rName (ReprData d)
-      | d.name == name = Just (rName, lams d.binds d.target)
-      | otherwise = join $ find isJust $ map (findReprDataCtor rName) d.ctors
+      | d.name == name = do
+          bindsAsVars <- mapM patVarToVar d.binds
+          return $ Just (rName, lams bindsAsVars d.target)
+      | otherwise = join . find isJust <$> mapM (findReprDataCtor rName) d.ctors
 
-    findReprDataCtor :: String -> ReprDataCtorItem -> Maybe (String, Term)
+    findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, Term))
     findReprDataCtor rName c
-      | c.name == name = Just (rName, lams c.binds c.target)
-      | otherwise = Nothing
+      | c.name == name = do
+          bindsAsVars <- mapM patVarToVar c.binds
+          return $ Just (rName, lams bindsAsVars c.target)
+      | otherwise = return Nothing
 
 -- | Find a representation for the case expression of the given global type name.
 findReprForCase :: String -> Tc (Maybe (String, Term))
 findReprForCase tyName = do
   (Signature items) <- gets sig
-  return $ join $ find isJust $ map findRepr items
+  join . find isJust <$> mapM findRepr items
   where
-    findRepr (Repr (ReprItem rName contents)) = join $ find isJust $ map (findReprData rName) contents
-    findRepr _ = Nothing
+    findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
+    findRepr _ = return Nothing
 
     findReprData rName (ReprData d)
       | d.name == tyName =
           case d.cse of
-            Just reprCase ->
+            Just reprCase -> do
               let (subjectBind, ctors) = reprCase.binds
-               in Just (rName, lams (subjectBind : map snd ctors) reprCase.target)
-            Nothing -> Nothing
-    findReprData _ _ = Nothing
+              bindsAsVars <- mapM patVarToVar (subjectBind : map snd ctors)
+              return $ Just (rName, lams bindsAsVars reprCase.target)
+            Nothing -> return Nothing
+    findReprData _ _ = return Nothing
 
 -- | Get the data item for a given name in a signature.
 --

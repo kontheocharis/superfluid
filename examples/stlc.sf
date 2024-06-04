@@ -1,5 +1,17 @@
 
+data Equal : (a: Type) -> a -> a -> Type {
+  refl : (a : Type) -> (x : a) -> Equal a x x
+}
 
+data Unit : Type {
+  tt : Unit
+}
+
+def rewrite : (a : Type) -> (p : a -> Type) -> (x : a) -> (y : a) -> Equal a x y -> p x -> p y {
+  \a p x y e px => case e {
+    refl _ _ => px
+  }
+}
 
 data List : Type -> Type {
   nil : (a : Type) -> List a,
@@ -18,6 +30,39 @@ def prepend : (a : Type) -> List a -> List a -> List a {
   }
 }
 
+def last : (a : Type) -> a -> List a -> a {
+  \a x xs => case xs {
+    nil _ => x,
+    cons _ y ys => last a y ys
+  }
+}
+
+def init : (a : Type) -> a -> List a -> List a {
+  \a x xs => case xs {
+    nil _ => nil a,
+    cons _ y ys => cons a x (init a y ys)
+  }
+}
+
+def prepend-init-last-is-cons :
+  (a : Type) ->
+  (x : a) ->
+  (xs : List a) ->
+  Equal (List a) (cons a x xs) (prepend a (init a x xs) (cons a (last a x xs) (nil a)))
+{
+  ?prepend-init-last-is-cons
+}
+
+-- let x : X = y in (z : Z x)
+
+def let : (X : Type) -> (Z : X -> Type) -> (y : X) -> (z : (w : X) -> Z w) -> Z y {
+  \X Z y z => z y
+}
+
+def UNSAFE-cast : (a : Type) -> (b : Type) -> a -> b {
+  ?UNSAFE-cast
+}
+
 repr SnocListAsList {
   data SnocList a as List a {
     lin _ as nil _,
@@ -25,6 +70,29 @@ repr SnocListAsList {
     case l {
       lin => b,
       snoc => r
-    } as ?h1
+    } as case l {
+      nil _ => b _,
+      -- cons _ x xs => r _ (init _ x xs) (last _ x xs)
+      cons a x xs => (
+
+        UNSAFE-cast Unit _ ?h1
+        -- let V : ((s : Type) -> List s -> Type)) = _ in ( ... :  V a l )
+        -- UNSAFE-cast _ _ ((r _ (init _ x xs) (last _ x xs)))
+        -- let ?h3 (\n => ?h2) (r _ (init _ x xs) (last _ x xs)) (\n => ?h1)
+        -- let
+        --   ((s : Type) -> List s -> Type)
+        --   (\V => (V a (prepend a (init a x xs) (cons a (last a x xs) (nil a)))))
+        --   _
+        --   (\V =>
+        --     rewrite
+        --       (List a)
+        --       (\l => V a l)
+        --       (cons a x xs)
+        --       (prepend a (init a x xs) (cons a (last a x xs) (nil a)))
+        --       (prepend-init-last-is-cons a x xs)
+        --       (r _ (init _ x xs) (last _ x xs))
+        --   )
+      )
+    }
   }
 }

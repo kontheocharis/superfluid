@@ -232,21 +232,21 @@ data ReprSomeItem = ReprData ReprDataItem | ReprDecl ReprDeclItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataCaseItem = ReprDataCaseItem
-  { binds :: (Var, [(String, Var)]), -- subjectBind, [(ctorName, elimBind)]
+  { binds :: (Pat, [(String, Pat)]), -- subjectBind, [(ctorName, elimBind)]
     target :: Term
   }
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataCtorItem = ReprDataCtorItem
   { name :: String,
-    binds :: [Var],
+    binds :: [Pat],
     target :: Term
   }
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataItem = ReprDataItem
   { name :: String,
-    binds :: [Var],
+    binds :: [Pat],
     target :: Term,
     ctors :: [ReprDataCtorItem],
     cse :: Maybe ReprDataCaseItem
