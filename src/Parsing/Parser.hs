@@ -16,6 +16,7 @@ import Lang
     Loc (..),
     MapResult (..),
     Pat,
+    PiMode (..),
     Pos (..),
     Program (..),
     ReprDataCaseItem (ReprDataCaseItem),
@@ -118,6 +119,9 @@ parens = between (symbol "(") (symbol ")")
 
 curlies :: Parser a -> Parser a
 curlies = between (symbol "{") (symbol "}")
+
+square :: Parser a -> Parser a
+square = between (symbol "[") (symbol "]")
 
 commaSep1 :: Parser a -> Parser [a]
 commaSep1 p = p `sepEndBy1` comma
@@ -355,36 +359,45 @@ freshVar = do
   return $ Var ("n" ++ show idx) idx
 
 -- | Parse a named parameter like `(n : Nat)`.
-named :: Parser (Var, Type)
+named :: Parser (PiMode, Var, Type)
 named =
   (try . parens)
     ( do
-        optName <- optionMaybe $ do
+        name <- newVar
+        _ <- colon
+        ty <- term
+        return (Explicit, name, ty)
+    )
+    <|> (try . square)
+      ( do
           name <- newVar
           _ <- colon
-          return name
-        ty <- term
-        actualName <- maybe freshVar return optName
-        return (actualName, ty)
-    )
+          ty <- term
+          return (Implicit, name, ty)
+      )
     <|> ( do
             name <- freshVar
-            ty <- app
-            return (name, ty)
+            t <- app
+            return (Explicit, name, t)
         )
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser Type
 piTOrSigmaT = try . locatedTerm $ do
-  (name, ty1) <- named
-  binderT <- (reservedOp "->" >> return PiT) <|> (reservedOp "**" >> return SigmaT)
+  (m, name, ty1) <- named
+  binderT <-
+    (reservedOp "->" >> return (PiT m))
+      <|> ( reservedOp "**" >> case m of
+              Explicit -> return SigmaT
+              Implicit -> fail "Cannot use implicit arguments in a sigma type"
+          )
   binderT name ty1 <$> term
 
 -- | Parse an application.
 app :: Parser Term
 app = do
   t <- singleTerm
-  ts <- many singleTerm
+  ts <- many (((Implicit,) <$> try (square singleTerm)) <|> ((Explicit,) <$> singleTerm))
   return $ listToApp (t, ts)
 
 -- | Parse a series of let terms.
@@ -414,11 +427,11 @@ lets = curlies $ do
 lam :: Parser Term
 lam = do
   reservedOp "\\"
-  v <- many1 (located newVar)
+  v <- many1 (((Implicit,) <$> try (square (located newVar))) <|> ((Explicit,) <$> located newVar))
   reservedOp "=>"
   t <- term
   end <- getPos
-  return $ foldr (\(x, l) acc -> Term (Lam x acc) (termDataAt (l <> Loc end end))) t v
+  return $ foldr (\(m, (x, l)) acc -> Term (Lam m x acc) (termDataAt (l <> Loc end end))) t v
 
 -- Lam v <$> term
 

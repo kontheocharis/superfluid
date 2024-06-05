@@ -1,4 +1,5 @@
 
+
 -- LOW LEVEL TYPES
 -- Never mind their implementations, these are opaque (TODO: Add definitions without implementations)
 
@@ -253,20 +254,21 @@ def is-palindrome : (A : Type) -> Eq A -> List A -> Bool {
 
 -- REPRESENTATIONS
 
-repr FlatLists {
-  data List A as FlatArray A {
-    nil _ as empty _,
-    cons _ x xs as push-front _ x xs,
+  repr Foo {
+    data List A as FlatArray A {
+      nil _ as empty _,
+      cons _ x xs as push-front _ x xs,
 
-    case l {
-      nil => b,
-      cons => r
-    } as {
-      if-then-else _ (is-zero (len _ l))
-        (\_ => unsafe-cast _ _ (b _))
-        (\_ => unsafe-cast _ _ (r _ (index _ l ZERO) (slice _ l ONE (len _ l))))
+      case l {
+        nil => b,
+        cons => r
+      } as {
+        if-then-else _ (is-zero (len _ l))
+          (\_ => unsafe-cast _ _ (b _))
+          (\_ => unsafe-cast _ _ (r _ (index _ l ZERO) (slice _ l ONE (len _ l))))
+      }
     }
-  }
+
 
   data SnocList A as FlatArray A {
     lin _ as empty _,
@@ -308,4 +310,4 @@ repr FlatLists {
   def from-snoc as \_ x => x
 
   def to-double as \_ x => x
-}
+  }

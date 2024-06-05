@@ -96,7 +96,7 @@ import Lang
     piTypeToList,
     typedAs,
   )
-import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
+import Lang as DI (DeclItem (..), PiMode (Explicit), TermMappable (mapTermMappable))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -126,7 +126,7 @@ resolveFinal t = do
       case metas !? h of
         Just t' -> do
           -- If the meta is already solved, then we can resolve the term.
-          r <- resolveShallow (listToApp (t', ts))
+          r <- resolveShallow (listToApp (t', map (Explicit,) ts))
           return $ normaliseTermFully r
         Nothing -> do
           -- If the meta is not resolved, then substitute the original hole
@@ -147,9 +147,9 @@ resolveShallow (Term (Meta h) d) = do
   case metas !? h of
     Just t -> resolveShallow t
     Nothing -> return $ Term (Meta h) d
-resolveShallow (Term (App t1 t2) d) = do
+resolveShallow (Term (App Explicit t1 t2) d) = do
   t1' <- resolveShallow t1
-  return $ normaliseTermFully (Term (App t1' t2) d)
+  return $ normaliseTermFully (Term (App Explicit t1' t2) d)
 resolveShallow t = return t
 
 -- | Represent a checked program
@@ -206,7 +206,7 @@ checkBindAppMatchesPi subject binds ty f = do
   holeSub <-
     Sub
       <$> mapM
-        ( \(v, _) -> do
+        ( \(_, v, _) -> do
             m <- freshMeta
             return (v, m)
         )
@@ -215,7 +215,7 @@ checkBindAppMatchesPi subject binds ty f = do
 
   enterCtx $ do
     binds' <- mapM patToTerm binds
-    let lhs = listToApp (subject, binds')
+    let lhs = listToApp (subject, map (Explicit,) binds')
     _ <- enterPat $ checkTerm lhs retApplied
     representCtx
     ret' <- representTerm retApplied
@@ -289,18 +289,18 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
 
   -- Type of the subject is the represented data type
   let (params, _) = piTypeToList dat.ty
-  let subjectTy = listToApp (genTerm (Global dat.name), map (genTerm . V . fst) params)
-  subjectReprIndices <- mapM (\(a, b) -> (a,) <$> representTerm b) params
+  let subjectTy = listToApp (genTerm (Global dat.name), map (\(m, p, _) -> (m, genTerm (V p))) params)
+  subjectReprIndices <- mapM (\(_, a, b) -> (a,) <$> representTerm b) params
   subjectReprTy <- representTerm subjectTy
 
   -- Form the elimination type family
   elimTySubjectVar <- freshVar
-  let elimFam = listToPiType (params ++ [(elimTySubjectVar, subjectTy)], genTerm TyT)
+  let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
   elimReprFam <- representTerm elimFam
   elimName <- freshVar
 
   -- Form the elimination type
-  let elimTy = listToApp (genTerm (V elimName), map (genTerm . V . fst) subjectReprIndices ++ [subjectAsTerm])
+  let elimTy = listToApp (genTerm (V elimName), map ((Explicit,) . genTerm . V . fst) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
 
   -- Gather all the eliminators
   (ctors', eliminators) <-
@@ -309,14 +309,14 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
           -- Represented constructor parameters
           let c = fromJust (find (\n -> n.name == cName) dat.ctors)
           let (ctorParams, ctorRet) = piTypeToList c.ty
-          ctorReprParams <- mapM (\(a, b) -> (a,) <$> representTerm b) ctorParams
+          ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
 
           -- Represented constructor return indices
           let (_, ctorRetIndices) = appToList ctorRet
-          ctorReprRetIndices <- mapM representTerm ctorRetIndices
+          ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
 
           -- Represented constructor return type
-          let ctorParamVarTerms = map (genTerm . V . fst) ctorParams
+          let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
           let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
           ctorReprRetTy <- representTerm ctorRetTy
 
@@ -327,7 +327,7 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
                     listToApp
                       ( genTerm (V elimName),
                         ctorReprRetIndices
-                          ++ [ctorReprRetTy]
+                          ++ [(Explicit, ctorReprRetTy)]
                       )
                   )
 
@@ -397,8 +397,8 @@ caseElimsToAppArgs dName clauses = do
             -- Ensure the pattern arguments are variables.
             xs' <-
               mapM
-                ( \case
-                    Term (V v) _ -> return v
+                ( \(m, t') -> case t' of
+                    Term (V v) _ -> return (m, v)
                     _ -> throwError (PatternNotSupported p)
                 )
                 xs
@@ -432,7 +432,7 @@ representTermRec = \case
               Nothing -> return Continue
               Just (_, term) -> do
                 xs <- caseElimsToAppArgs g cs
-                return $ ReplaceAndContinue (listToApp (term, s : xs))
+                return $ ReplaceAndContinue (listToApp (term, map (Explicit,) (s : xs)))
           _ -> error $ "Case subject is not a global type: " ++ printVal t'
       _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
   _ -> return Continue
@@ -469,10 +469,10 @@ checkCtorItem dTy (CtorItem name ty i dTyName) = do
   let (tys, ret) = piTypeToList ty'
 
   -- \| Add all the arguments to the context
-  enterCtxMod (\c -> foldr (\(v, t) c' -> addTyping v t c') c tys) $ do
+  enterCtxMod (\c -> foldr (\(_, v, t) c' -> addTyping v t c') c tys) $ do
     -- \| Check that the return type is the data type.
     dummyArgs <- replicateM dTyArgCount freshMeta
-    let dummyRet = listToApp (genTerm (Global dTyName), dummyArgs)
+    let dummyRet = listToApp (genTerm (Global dTyName), map (Explicit,) dummyArgs)
     unifyTerms ret dummyRet
 
   return (CtorItem name ty' i dTyName)
@@ -519,14 +519,14 @@ unifyTermsTo t1 t2 = do
 --
 -- This also performs elaboration by filling named holes and wildcards with metavariables.
 checkTerm' :: Term -> Type -> Tc (Term, Type)
-checkTerm' ((Term (Lam v t) d1)) ((Term (PiT var' ty1 ty2) d2)) = do
+checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2)) | m1 == m2 = do
   (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
-  return (locatedAt d1 (Lam v t'), locatedAt d2 (PiT var' ty1 (alphaRename v (var', d2) ty2')))
-checkTerm' ((Term (Lam v t1) d1)) typ = do
+  return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
+checkTerm' ((Term (Lam Explicit v t1) d1)) typ = do
   varTy <- freshMeta
   (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferTerm t1
-  typ' <- unifyTermsTo typ $ locatedAt d1 (PiT v varTy bodyTy)
-  return (locatedAt d1 (Lam v t1'), typ')
+  typ' <- unifyTermsTo typ $ locatedAt d1 (PiT Explicit v varTy bodyTy)
+  return (locatedAt d1 (Lam Explicit v t1'), typ')
 checkTerm' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
   (t1', ty1') <- checkTerm t1 ty1
   (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
@@ -537,11 +537,11 @@ checkTerm' (Term (Pair t1 t2) d1) typ = do
   v <- freshVar
   typ' <- unifyTermsTo typ $ locatedAt d1 (SigmaT v ty1 ty2)
   return (locatedAt d1 (Pair t1' t2'), typ')
-checkTerm' (Term (PiT v t1 t2) d1) typ = do
+checkTerm' (Term (PiT m v t1 t2) d1) typ = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
   typ' <- unifyTermsTo typ (locatedAt d1 TyT)
-  return (locatedAt d1 (PiT v t1' t2'), typ')
+  return (locatedAt d1 (PiT m v t1' t2'), typ')
 checkTerm' (Term (SigmaT v t1 t2) d1) typ = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
@@ -570,18 +570,18 @@ checkTerm' t@(Term (V v) _) typ = do
     Just vTyp' -> do
       typ' <- unifyTermsTo typ vTyp'
       return (t, typ')
-checkTerm' (Term (App t1 t2) _) typ = do
+checkTerm' (Term (App Explicit t1 t2) _) typ = do
   (t1', subjectTy) <- inferTerm t1
   subjectTyRes <- resolveShallow subjectTy
 
   let go v varTy bodyTy = do
         (t2', _) <- checkTerm t2 varTy
         typ' <- unifyTermsTo typ $ subVar v t2' bodyTy
-        return (locatedAt t1 (App t1' t2'), typ')
+        return (locatedAt t1 (App Explicit t1' t2'), typ')
 
   -- Try to normalise to a pi type.
   case subjectTyRes of
-    (Term (PiT v varTy bodyTy) _) -> do
+    (Term (PiT Explicit v varTy bodyTy) _) -> do
       go v varTy bodyTy
     _ -> do
       let subjectTy' = normaliseTerm subjectTyRes
@@ -589,7 +589,7 @@ checkTerm' (Term (App t1 t2) _) typ = do
         Just t -> Just <$> resolveShallow t
         Nothing -> return Nothing
       case subjectTyRes' of
-        Just (Term (PiT v varTy bodyTy) _) -> go v varTy bodyTy
+        Just (Term (PiT Explicit v varTy bodyTy) _) -> go v varTy bodyTy
         _ -> throwError $ NotAFunction subjectTy
 checkTerm' t@(Term (Global g) _) typ = do
   decl <- inSignature (lookupItemOrCtor g)
@@ -657,11 +657,11 @@ inferTerm t = do
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Term -> Maybe Term
-normaliseTerm (Term (App (Term (Lam v t1) _) t2) _) =
+normaliseTerm (Term (App Explicit (Term (Lam Explicit v t1) _) t2) _) =
   return $ subVar v t2 t1
-normaliseTerm (Term (App t1 t2) d1) = do
+normaliseTerm (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm t1
-  return (Term (App t1' t2) d1)
+  return (Term (App m t1' t2) d1)
 normaliseTerm _ = Nothing -- @@Todo: normalise declarations
 
 -- | Reduce a term to normal form (fully).
@@ -705,13 +705,13 @@ unifyTerms a' b' = do
             Nothing -> throwError $ Mismatch vOrigin t
 
     unifyTerms' :: Term -> Term -> Tc ()
-    unifyTerms' (Term (PiT lv l1 l2) d1) (Term (PiT rv r1 r2) _) = do
+    unifyTerms' (Term (PiT m1 lv l1 l2) d1) (Term (PiT m2 rv r1 r2) _) | m1 == m2 = do
       unifyTerms l1 r1
       unifyTerms l2 (alphaRename rv (lv, d1) r2)
     unifyTerms' (Term (SigmaT lv l1 l2) d1) (Term (SigmaT rv r1 r2) _) = do
       unifyTerms l1 r1
       unifyTerms l2 (alphaRename rv (lv, d1) r2)
-    unifyTerms' (Term (Lam lv l) d1) (Term (Lam rv r) _) = do
+    unifyTerms' (Term (Lam m1 lv l) d1) (Term (Lam m2 rv r) _) | m1 == m2 = do
       unifyTerms l (alphaRename rv (lv, d1) r)
     unifyTerms' (Term (Pair l1 l2) _) (Term (Pair r1 r2) _) = do
       unifyTerms l1 r1
@@ -734,11 +734,12 @@ unifyTerms a' b' = do
             unifyTerms t1 t2
         )
         (zip cs1 cs2)
-    unifyTerms' a@(Term (App l1 l2) _) b@(Term (App r1 r2) _) =
-      do
-        unifyTerms l1 r1
-        unifyTerms l2 r2
-        `catchError` (\_ -> normaliseAndUnifyTerms a b)
+    unifyTerms' a@(Term (App m1 l1 l2) _) b@(Term (App m2 r1 r2) _)
+      | m1 == m2 =
+          do
+            unifyTerms l1 r1
+            unifyTerms l2 r2
+            `catchError` (\_ -> normaliseAndUnifyTerms a b)
     unifyTerms' l r = normaliseAndUnifyTerms l r
 
 -- | Unify two terms, normalising them first.
@@ -772,6 +773,6 @@ solve hole spine rhs = do
   case vars of
     Nothing -> return False
     Just vars' -> do
-      let solution = normaliseTermFully (lams vars' rhs)
+      let solution = normaliseTermFully (lams (map (Explicit,) vars') rhs)
       solveMeta hole solution
       return True

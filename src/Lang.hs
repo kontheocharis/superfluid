@@ -28,6 +28,7 @@ module Lang
     HasLoc (..),
     TermMappable (..),
     MapResult (..),
+    PiMode (..),
     mapTerm,
     mapTermM,
     piTypeToList,
@@ -69,13 +70,16 @@ type GlobalName = String
 -- Represented by a string name and a unique integer identifier (no shadowing).
 data Var = Var String Int deriving (Eq, Ord, Generic, Data, Typeable, Show)
 
+-- | Whether a pi type is implicit or explicit.
+data PiMode = Implicit | Explicit deriving (Eq, Generic, Data, Typeable, Show)
+
 -- | A term
 data TermValue
   = -- Dependently-typed lambda calculus with Pi and Sigma:
-    PiT Var Type Term
-  | Lam Var Term
+    PiT PiMode Var Type Term
+  | Lam PiMode Var Term
   | Let Var Type Term Term
-  | App Term Term
+  | App PiMode Term Term
   | SigmaT Var Type Term
   | Pair Term Term
   | Case Term [(Pat, Term)]
@@ -182,22 +186,22 @@ genTerm :: TermValue -> Term
 genTerm t = Term t emptyTermData
 
 -- | Convert a pi type to a list of types and the return type.
-piTypeToList :: Type -> ([(Var, Type)], Type)
-piTypeToList (Term (PiT v ty1 ty2) _) = let (tys, ty) = piTypeToList ty2 in ((v, ty1) : tys, ty)
+piTypeToList :: Type -> ([(PiMode, Var, Type)], Type)
+piTypeToList (Term (PiT m v ty1 ty2) _) = let (tys, ty) = piTypeToList ty2 in ((m, v, ty1) : tys, ty)
 piTypeToList t = ([], t)
 
 -- | Convert a list of types and the return type to a pi type.
-listToPiType :: ([(Var, Type)], Type) -> Type
+listToPiType :: ([(PiMode, Var, Type)], Type) -> Type
 listToPiType ([], ty) = ty
-listToPiType ((v, ty1) : tys, ty2) = Term (PiT v ty1 (listToPiType (tys, ty2))) emptyTermData
+listToPiType ((m, v, ty1) : tys, ty2) = Term (PiT m v ty1 (listToPiType (tys, ty2))) emptyTermData
 
 -- | Convert a *non-empty* list of terms to an application term
-listToApp :: (Term, [Term]) -> Term
-listToApp (t, ts) = foldl (\acc x -> Term (App acc x) (termDataAt (termLoc acc <> termLoc x))) t ts
+listToApp :: (Term, [(PiMode, Term)]) -> Term
+listToApp (t, ts) = foldl (\acc (m, x) -> Term (App m acc x) (termDataAt (termLoc acc <> termLoc x))) t ts
 
 -- | Convert an application term to a *non-empty* list of terms
-appToList :: Term -> (Term, [Term])
-appToList (Term (App t1 t2) _) = let (t, ts) = appToList t1 in (t, ts ++ [t2])
+appToList :: Term -> (Term, [(PiMode, Term)])
+appToList (Term (App m t1 t2) _) = let (t, ts) = appToList t1 in (t, ts ++ [(m, t2)])
 appToList t = (t, [])
 
 -- | Convert a let term to a list of bindings and the body term.
@@ -206,14 +210,14 @@ letToList (Term (Let v ty t1 t2) _) = let (bs, t) = letToList t2 in ((v, ty, t1)
 letToList t = ([], t)
 
 -- | Convert a lambda term to a list of variables and the body term.
-lamsToList :: Term -> ([Var], Term)
-lamsToList (Term (Lam v t) _) = let (vs, t') = lamsToList t in (v : vs, t')
+lamsToList :: Term -> ([(PiMode, Var)], Term)
+lamsToList (Term (Lam m v t) _) = let (vs, t') = lamsToList t in ((m, v) : vs, t')
 lamsToList t = ([], t)
 
 -- | Wrap a term in `n` lambdas.
-lams :: [Var] -> Term -> Term
+lams :: [(PiMode, Var)] -> Term -> Term
 lams [] t = t
-lams (v : vs) t = Term (Lam v (lams vs t)) (termDataAt t)
+lams ((m, v) : vs) t = Term (Lam m v (lams vs t)) (termDataAt t)
 
 -- | An item is either a declaration or a data item.
 data Item
@@ -318,10 +322,10 @@ mapTermM f term = do
     Replace t' -> return t'
   where
     mapTermRec t' = case t' of
-      (PiT v t1 t2) -> PiT v <$> mapTermM f t1 <*> mapTermM f t2
-      (Lam v t) -> Lam v <$> mapTermM f t
+      (PiT m v t1 t2) -> PiT m v <$> mapTermM f t1 <*> mapTermM f t2
+      (Lam m v t) -> Lam m v <$> mapTermM f t
       (Let v t1 t2 t3) -> Let v <$> mapTermM f t1 <*> mapTermM f t2 <*> mapTermM f t3
-      (App t1 t2) -> App <$> mapTermM f t1 <*> mapTermM f t2
+      (App m t1 t2) -> App m <$> mapTermM f t1 <*> mapTermM f t2
       (SigmaT v t1 t2) -> SigmaT v <$> mapTermM f t1 <*> mapTermM f t2
       (Pair t1 t2) -> Pair <$> mapTermM f t1 <*> mapTermM f t2
       (Case t cs) -> Case <$> mapTermM f t <*> mapM (\(p, c) -> (,) <$> mapTermM f p <*> mapTermM f c) cs
@@ -403,16 +407,16 @@ isCompound x =
   let x' = getTermValue x
    in case x' of
         (PiT {}) -> True
-        (Lam _ _) -> True
+        (Lam {}) -> True
         (Let {}) -> True
         (Case {}) -> True
-        (App _ _) -> True
+        (App {}) -> True
         (SigmaT {}) -> True
         _ -> False
 
 -- | Check if a given term is a valid pattern (no typechecking).
 isValidPat :: Term -> Bool
-isValidPat (Term (App a b) _) = isValidPat a && isValidPat b
+isValidPat (Term (App _ a b) _) = isValidPat a && isValidPat b
 isValidPat (Term (V _) _) = True
 isValidPat (Term Wild _) = True
 isValidPat (Term (Pair p1 p2) _) = isValidPat p1 && isValidPat p2

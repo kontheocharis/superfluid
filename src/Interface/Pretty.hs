@@ -32,11 +32,37 @@ instance Print TermValue where
   printSingleVal v | (isCompound . getTermValue) v = "(" ++ printVal v ++ ")"
   printSingleVal v = printVal v
 
-  printVal (PiT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") -> " ++ printVal t2
-  printVal l@(Lam _ _) = let (vs, b) = lamsToList (genTerm l) in "\\" ++ intercalate " " (map printSingleVal vs) ++ " => " ++ printVal b
+  printVal (PiT Explicit v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") -> " ++ printVal t2
+  printVal (PiT Implicit v t1 t2) = "[" ++ printVal v ++ " : " ++ printVal t1 ++ "] -> " ++ printVal t2
+  printVal l@(Lam {}) =
+    let (vs, b) = lamsToList (genTerm l)
+     in "\\"
+          ++ intercalate
+            " "
+            ( map
+                ( \(m, v) -> case m of
+                    Explicit -> printSingleVal v
+                    Implicit -> "[" ++ printSingleVal v ++ "]"
+                )
+                vs
+            )
+          ++ " => "
+          ++ printVal b
   printVal (SigmaT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") ** " ++ printVal t2
   printVal (Pair t1 t2) = "(" ++ printVal t1 ++ ", " ++ printVal t2 ++ ")"
-  printVal t@(App _ _) = intercalate " " $ map printSingleVal (let (x, xs) = appToList (genTerm t) in x : xs)
+  printVal t@(App {}) =
+    let (x, xs) = appToList (genTerm t)
+     in printSingleVal x
+          ++ " "
+          ++ intercalate
+            " "
+            ( map
+                ( \(m, x) -> case m of
+                    Explicit -> printSingleVal x
+                    Implicit -> "[" ++ printSingleVal x ++ "]"
+                )
+                xs
+            )
   printVal l@(Let {}) =
     curlies $
       let (binds, ret) = letToList (genTerm l)

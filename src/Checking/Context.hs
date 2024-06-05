@@ -68,6 +68,7 @@ import Lang
     Loc (..),
     MapResult (..),
     Pat,
+    PiMode (Explicit),
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
     ReprDataItem (..),
@@ -340,7 +341,7 @@ freshMetaAt :: (HasLoc a) => a -> Tc Term
 freshMetaAt h = do
   v <- freshVarPrefixed "m"
   vrs <- inCtx ctxVars
-  let (m, ms) = (genTerm (Meta v), map (genTerm . V) vrs)
+  let (m, ms) = (genTerm (Meta v), map ((Explicit,) . genTerm . V) vrs)
   let t = listToApp (m, ms)
   return $ locatedAt h t.value
 
@@ -372,7 +373,7 @@ addTerm t (Flex h ts) = Flex h (ts ++ [t])
 -- | Interpret a `FlexApp`
 classifyApp :: Term -> Maybe FlexApp
 classifyApp (Term (Meta h) _) = return $ Flex h []
-classifyApp (Term (App t1 t2) _) = do
+classifyApp (Term (App Explicit t1 t2) _) = do
   c <- classifyApp t1
   return $ addTerm t2 c
 classifyApp _ = Nothing
@@ -453,14 +454,14 @@ findReprForGlobal name = do
     findReprData rName (ReprData d)
       | d.name == name = do
           bindsAsVars <- mapM patVarToVar d.binds
-          return $ Just (rName, lams bindsAsVars d.target)
+          return $ Just (rName, lams (map (Explicit,) bindsAsVars) d.target)
       | otherwise = join . find isJust <$> mapM (findReprDataCtor rName) d.ctors
 
     findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, Term))
     findReprDataCtor rName c
       | c.name == name = do
           bindsAsVars <- mapM patVarToVar c.binds
-          return $ Just (rName, lams bindsAsVars c.target)
+          return $ Just (rName, lams (map (Explicit,) bindsAsVars) c.target)
       | otherwise = return Nothing
 
 -- | Find a representation for the case expression of the given global type name.
@@ -478,7 +479,7 @@ findReprForCase tyName = do
             Just reprCase -> do
               let (subjectBind, ctors) = reprCase.binds
               bindsAsVars <- mapM patVarToVar (subjectBind : map snd ctors)
-              return $ Just (rName, lams bindsAsVars reprCase.target)
+              return $ Just (rName, lams (map (Explicit,) bindsAsVars) reprCase.target)
             Nothing -> return Nothing
     findReprData _ _ = return Nothing
 
