@@ -1,8 +1,6 @@
 module Parsing.Parser (parseProgram, parseTerm) where
 
 import Checking.Context (Signature (Signature))
-import Control.Monad (void)
-import Control.Monad.State (gets)
 import Data.Char (isSpace)
 import Data.Maybe (fromMaybe)
 import Data.String
@@ -55,14 +53,15 @@ import Text.Parsec
     putState,
     runParser,
     satisfy,
-    sepEndBy,
+    skipMany,
+    skipMany1,
     sourceColumn,
     sourceLine,
     string,
     (<|>),
   )
 import Text.Parsec.Char (alphaNum, letter)
-import Text.Parsec.Combinator (sepBy1, sepEndBy1)
+import Text.Parsec.Combinator (sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 
@@ -123,20 +122,17 @@ curlies = between (symbol "{") (symbol "}")
 square :: Parser a -> Parser a
 square = between (symbol "[") (symbol "]")
 
-commaSep1 :: Parser a -> Parser [a]
-commaSep1 p = p `sepEndBy1` comma
-
 commaSep :: Parser a -> Parser [a]
 commaSep p = p `sepEndBy1` comma
 
 comment :: Parser ()
-comment = void . try $ do
-  reservedOp "--"
-  many (satisfy (/= '\n'))
+comment = do
+  _ <- try (string "--")
+  skipMany (satisfy (/= '\n'))
 
 -- | Parse vertical whitespace (i.e. a new line) or horizontal whitespace or comments.
 anyWhite :: Parser ()
-anyWhite = void . try $ many $ void (satisfy isSpace) <|> comment
+anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
