@@ -249,15 +249,13 @@ data ReprDataCaseItem = ReprDataCaseItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataCtorItem = ReprDataCtorItem
-  { name :: String,
-    binds :: [Pat],
+  { src :: Pat,
     target :: Term
   }
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataItem = ReprDataItem
-  { name :: String,
-    binds :: [Pat],
+  { src :: Pat,
     target :: Term,
     ctors :: [ReprDataCtorItem],
     cse :: Maybe ReprDataCaseItem
@@ -265,7 +263,7 @@ data ReprDataItem = ReprDataItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDeclItem = ReprDeclItem
-  { name :: String,
+  { src :: String,
     target :: Term
   }
   deriving (Eq, Generic, Data, Typeable, Show)
@@ -359,14 +357,14 @@ mapReprSomeItemM f (ReprData d) = ReprData <$> mapReprDataItemM f d
 mapReprSomeItemM f (ReprDecl d) = ReprDecl <$> mapReprDeclItemM f d
 
 mapReprDataItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprDataItem -> m ReprDataItem
-mapReprDataItemM f (ReprDataItem name ps target ctors caseItem) =
-  ReprDataItem name ps <$> mapTermM f target <*> mapM (mapReprDataCtorItemM f) ctors <*> traverse (mapReprDataCaseItemM f) caseItem
+mapReprDataItemM f (ReprDataItem src target ctors caseItem) =
+  ReprDataItem <$> mapTermM f src <*> mapTermM f target <*> mapM (mapReprDataCtorItemM f) ctors <*> traverse (mapReprDataCaseItemM f) caseItem
 
 mapReprDeclItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprDeclItem -> m ReprDeclItem
 mapReprDeclItemM f (ReprDeclItem name target) = ReprDeclItem name <$> mapTermM f target
 
 mapReprDataCtorItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprDataCtorItem -> m ReprDataCtorItem
-mapReprDataCtorItemM f (ReprDataCtorItem name binds target) = ReprDataCtorItem name binds <$> mapTermM f target
+mapReprDataCtorItemM f (ReprDataCtorItem src target) = ReprDataCtorItem <$> mapTermM f src <*> mapTermM f target
 
 mapReprDataCaseItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprDataCaseItem -> m ReprDataCaseItem
 mapReprDataCaseItemM f (ReprDataCaseItem binds target) = ReprDataCaseItem binds <$> mapTermM f target

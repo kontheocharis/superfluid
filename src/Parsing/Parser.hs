@@ -64,6 +64,7 @@ import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import Interface.Pretty (Print(printVal))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
@@ -229,15 +230,14 @@ reprItems = many1 $ choice [ReprData <$> reprDataItem, ReprDecl <$> reprDeclItem
 reprDataItem :: Parser ReprDataItem
 reprDataItem = whiteWrap $ do
   symbol "data"
-  name <- identifier
-  ps <- many patVar
+  src <- pat
   symbol "as"
   target <- term
   curlies $ do
-    ctors <- commaSep reprCtorItem
+    ctors <- commaSep (notFollowedBy (symbol "case") >> reprCtorItem)
     cse <- reprCaseItem
     optional comma
-    return $ ReprDataItem name ps target ctors (Just cse)
+    return $ ReprDataItem src target ctors (Just cse)
 
 reprDeclItem :: Parser ReprDeclItem
 reprDeclItem = whiteWrap $ do
@@ -248,22 +248,21 @@ reprDeclItem = whiteWrap $ do
 
 reprCtorItem :: Parser ReprDataCtorItem
 reprCtorItem = do
-  name <- identifier
-  ps <- many patVar
+  src <- pat
   reservedOp "as"
-  ReprDataCtorItem name ps <$> term
+  ReprDataCtorItem src <$> term
 
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
   symbol "case"
-  subject <- patVar
+  subject <- singlePat
   ctors <-
     curlies
       ( commaSep
           ( do
               name <- identifier
               reservedOp "=>"
-              bind <- patVar
+              bind <- singlePat
               return (name, bind)
           )
       )
@@ -326,15 +325,15 @@ enterPat p = do
   t' <- resolveTerm t
   if isValidPat t'
     then return t'
-    else fail $ "Cannot use term " ++ show t ++ " as a pattern"
+    else fail $ "Cannot use term " ++ printVal t ++ " as a pattern"
 
 -- | Parse a pattern.
 pat :: Parser Pat
 pat = enterPat term
 
 -- | Parse a pattern variable.
-patVar :: Parser Pat
-patVar = enterPat (locatedTerm $ V <$> var)
+singlePat :: Parser Pat
+singlePat = enterPat singleTerm
 
 -- | Parse a variable.
 var :: Parser Var

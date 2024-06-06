@@ -18,12 +18,17 @@ data Nat : Type {
   s : Nat -> Nat
 }
 
+def plus : Nat -> Nat -> Nat {
+  \x => case x {
+    z => \y => y,
+    s => \y => s (plus y)
+  }
+}
+
+
+
 data Vect : (A : Type) -> Nat -> Type {
   nil : [A : Type] -> Vect A z,
   cons : [A : Type] -> [n : Nat] -> A -> Vect A n -> Vect A (s n)
-}
-
-def foo : _ {
-  cons z (cons (s z) (cons (s (s z)) (nil [Nat])))
 }
 

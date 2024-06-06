@@ -12,8 +12,7 @@ module Checking.Typechecking
 where
 
 import Checking.Context
-  ( Ctx (..),
-    FlexApp (..),
+  ( FlexApp (..),
     Tc,
     TcError (..),
     TcState (..),
@@ -39,6 +38,8 @@ import Checking.Context
     freshVar,
     getDataItem,
     getType,
+    globalAppSubjectName,
+    globalAppSubjectNameM,
     inCtx,
     inSignature,
     lookupItemOrCtor,
@@ -47,20 +48,16 @@ import Checking.Context
     modifyCtx,
     modifyCtxM,
     modifySignature,
-    patToTerm,
-    patVarToVar,
-    registerHole,
-    registerWild,
     setType,
     solveMeta,
   )
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
-import Control.Monad (mapAndUnzipM, replicateM, when)
+import Control.Monad (mapAndUnzipM, when)
 import Control.Monad.Except (catchError, throwError)
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, get, put, modify)
 import Data.Foldable (find)
 import Data.List (sort, sortBy)
-import Data.Map (Map, lookup, (!?))
+import Data.Map (Map, lookup, insert, (!?))
 import Data.Maybe (fromJust)
 import Debug.Trace (trace, traceM)
 import Interface.Pretty (Print (..), indentedFst)
@@ -95,10 +92,9 @@ import Lang
     locatedAt,
     mapTermM,
     piTypeToList,
-    termDataAt,
-    typedAs,
+    typedAs, termDataAt,
   )
-import Lang as DI (DeclItem (..), PiMode (Explicit, Implicit), TermMappable (mapTermMappable))
+import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -202,8 +198,8 @@ checkSomeReprItem _ (ReprDecl d) = ReprDecl <$> checkReprDeclItem d
 -- | Check that a term (t x1..xn) is a valid (full) application of a pi type.
 --
 -- Also takes a closure to run more stuff in the same context, given the goal.
-checkBindAppMatchesPi :: Term -> [Pat] -> Type -> (Type -> Tc a) -> Tc ([Pat], a)
-checkBindAppMatchesPi subject binds ty f = do
+checkBindAppMatchesPi :: Pat -> Type -> (Type -> Tc a) -> Tc (Pat, a)
+checkBindAppMatchesPi src ty f = do
   let (params, ret) = piTypeToList ty
   holeSub <-
     Sub
@@ -216,43 +212,42 @@ checkBindAppMatchesPi subject binds ty f = do
   let retApplied = sub holeSub ret
 
   enterCtx $ do
-    binds' <- mapM patToTerm binds
-    let lhs = listToApp (subject, map (Explicit,) binds')
-    _ <- enterPat $ checkTerm lhs retApplied
+    (src', retApplied') <- enterPat $ checkTerm src retApplied
     representCtx
-    ret' <- representTerm retApplied
+    ret' <- representTerm retApplied'
     res <- f ret'
-    return (binds', res)
+    return (src', res)
 
 -- | Check a repr data item.
 checkReprDataItem :: String -> ReprDataItem -> Tc ReprDataItem
-checkReprDataItem rName (ReprDataItem name binds target ctors cse) = do
+checkReprDataItem rName (ReprDataItem src target ctors cse) = do
   -- Ensure that the name exists
+  name <- globalAppSubjectNameM src
   decl <- inSignature (lookupItemOrCtor name)
   case decl of
     Just (Left (Data d)) -> do
       -- Check the type:
-      (binds', target') <- checkBindAppMatchesPi (genTerm (Global name)) binds d.ty $ \ret -> do
+      (src', target') <- checkBindAppMatchesPi src d.ty $ \ret -> do
         -- Check that the target is also of the same (represented!) type
         (target', _) <- checkTerm target ret
         return target'
 
-      -- Check that all the constructors are present
-      let given = map (\c -> c.name) ctors
-      let expected = map (\c -> c.name) d.ctors
-      when (sort given /= sort expected) $ throwError $ WrongConstructors given expected
-
       -- Add the data type to the context without constructors
-      modifySignature $ addEmptyDataItemToRepr rName name binds' target'
+      modifySignature $ addEmptyDataItemToRepr rName src' target'
 
       -- Check each constructor
       ctors' <- mapM (checkReprDataCtorItem rName d.name) ctors
+
+      -- Check that all the constructors are present
+      let given = map (\c -> globalAppSubjectName c.src) ctors
+      let expected = map (\c -> c.name) d.ctors
+      when (sort given /= sort expected) $ throwError $ WrongConstructors given expected
 
       -- Check the case expression
       cse' <- traverse (checkReprDataCaseItem rName d) cse
 
       -- Add the final data type to the context
-      let result = ReprDataItem name binds' target' ctors' cse'
+      let result = ReprDataItem src' target' ctors' cse'
       modifySignature $ addItemToRepr rName (ReprData result)
 
       return result
@@ -260,19 +255,20 @@ checkReprDataItem rName (ReprDataItem name binds target ctors cse) = do
 
 -- | Check a repr data constructor item.
 checkReprDataCtorItem :: String -> String -> ReprDataCtorItem -> Tc ReprDataCtorItem
-checkReprDataCtorItem rName dName (ReprDataCtorItem name binds target) = do
+checkReprDataCtorItem rName dName (ReprDataCtorItem src target) = do
   -- Ensure that the name exists
+  name <- globalAppSubjectNameM src
   decl <- inSignature (lookupItemOrCtor name)
   case decl of
     Just (Right (CtorItem _ ty _ _)) -> do
       -- Check the target against the represented constructor type
-      (binds', target') <- checkBindAppMatchesPi (genTerm (Global name)) binds ty $ \ret -> do
+      (src', target') <- checkBindAppMatchesPi src ty $ \ret -> do
         -- Check that the target is also of the same type
         (target', _) <- checkTerm target ret
         return target'
 
       -- Add the constructor to the context
-      let result = ReprDataCtorItem name binds' target'
+      let result = ReprDataCtorItem src' target'
       modifySignature $ addCtorItemToRepr rName dName result
 
       return result
@@ -281,9 +277,6 @@ checkReprDataCtorItem rName dName (ReprDataCtorItem name binds target) = do
 -- | Check a repr data case item.
 checkReprDataCaseItem :: String -> DataItem -> ReprDataCaseItem -> Tc ReprDataCaseItem
 checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
-  subjectAsVar <- patVarToVar subject
-  subjectAsTerm <- patToTerm subject
-
   -- Ensure that all the constructors are present
   let given = map fst ctors
   let expected = map (\c -> c.name) dat.ctors
@@ -292,73 +285,76 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
   -- Type of the subject is the represented data type
   let (params, _) = piTypeToList dat.ty
   let subjectTy = listToApp (genTerm (Global dat.name), map (\(m, p, _) -> (m, genTerm (V p))) params)
-  subjectReprIndices <- mapM (\(_, a, b) -> (a,) <$> representTerm b) params
+  subjectReprIndices <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) params
   subjectReprTy <- representTerm subjectTy
+  enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
 
-  -- Form the elimination type family
-  elimTySubjectVar <- freshVar
-  let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
-  elimReprFam <- representTerm elimFam
-  elimName <- freshVar
+    -- Form the elimination type family
+    elimTySubjectVar <- freshVar
+    let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
+    elimReprFam <- representTerm elimFam
+    elimName <- freshVar
 
-  -- Form the elimination type
-  let elimTy = listToApp (genTerm (V elimName), map ((Explicit,) . genTerm . V . fst) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
+    enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
+      (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
 
-  -- Gather all the eliminators
-  (ctors', eliminators) <-
-    mapAndUnzipM
-      ( \(cName, cBind) -> do
-          -- Represented constructor parameters
-          let c = fromJust (find (\n -> n.name == cName) dat.ctors)
-          let (ctorParams, ctorRet) = piTypeToList c.ty
-          ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
+      -- Form the elimination type
+      let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
 
-          -- Represented constructor return indices
-          let (_, ctorRetIndices) = appToList ctorRet
-          ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
+      -- Gather all the eliminators
+      ctors' <-
+        mapM
+          ( \(cName, cBind) -> do
+              -- Represented constructor parameters
+              let c = fromJust (find (\n -> n.name == cName) dat.ctors)
+              let (ctorParams, ctorRet) = piTypeToList c.ty
+              ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
 
-          -- Represented constructor return type
-          let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
-          let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
-          ctorReprRetTy <- representTerm ctorRetTy
+              -- Represented constructor return indices
+              let (_, ctorRetIndices) = appToList ctorRet
+              ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
 
-          -- Form the eliminator type
-          let elimCtorTy =
-                listToPiType
-                  ( ctorReprParams,
-                    listToApp
-                      ( genTerm (V elimName),
-                        ctorReprRetIndices
-                          ++ [(Explicit, ctorReprRetTy)]
+              -- Represented constructor return type
+              let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
+              let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
+              ctorReprRetTy <- representTerm ctorRetTy
+
+              -- Form the eliminator type
+              let elimCtorTy =
+                    listToPiType
+                      ( ctorReprParams,
+                        listToApp
+                          ( genTerm (V elimName),
+                            ctorReprRetIndices
+                              ++ [(Explicit, ctorReprRetTy)]
+                          )
                       )
-                  )
 
-          -- The eliminator is bound to the given binding in the case
-          -- representation.
-          cBindAsVar <- patVarToVar cBind
-          cBindAsTerm <- patToTerm cBind
-          return ((cName, cBindAsTerm), (cBindAsVar, elimCtorTy))
-      )
-      ctors
+              -- The eliminator is bound to the given binding in the case
+              -- representation.
+              (cBindAsTerm, _) <- enterPat $ checkTerm cBind elimCtorTy
+              return (cName, cBindAsTerm)
+          )
+          ctors
 
-  -- Overall the RHS of a case representation should have in context:
-  -- 1. The subject indices
-  -- 2. The subject type
-  -- 3. The subject itself
-  -- 4. The elimination indices
-  -- 5. The elimination type
-  -- 6. For each constructor, the eliminator
-  target' <- enterCtxMod (addTypings (subjectReprIndices ++ [(subjectAsVar, subjectReprTy), (elimName, elimReprFam)] ++ eliminators)) $ do
-    -- Check the target
-    (target', _) <- checkTerm target elimTy
-    return target'
+      -- Overall the RHS of a case representation should have in context:
+      -- 1. The subject indices
+      -- 2. The subject type
+      -- 3. The subject itself
+      -- 4. The elimination indices
+      -- 5. The elimination type
+      -- 6. For each constructor, the eliminator
+      target' <- do
+        -- Check the target
+        (target', _) <- checkTerm target elimTy
+        return target'
 
-  -- @@TODO: hide eliminators from the context in the end!
+      -- @@TODO: hide eliminators from the context in the end!
 
-  -- Add the case representation to the context
-  let result = ReprDataCaseItem (subjectAsTerm, ctors') target'
-  modifySignature $ addCaseItemToRepr rName dat.name result
-  return result
+      -- Add the case representation to the context
+      let result = ReprDataCaseItem (subjectAsTerm, ctors') target'
+      modifySignature $ addCaseItemToRepr rName dat.name result
+      return result
 
 -- | Check a repr decl item.
 checkReprDeclItem :: ReprDeclItem -> Tc ReprDeclItem
@@ -621,9 +617,8 @@ inferOrCheckCase f s cs = do
   (cs', tys) <-
     mapAndUnzipM
       ( \(p, t) -> enterCtx $ do
-          pt <- patToTerm p
           pt' <- enterPat $ do
-            (pt', _) <- checkTerm pt sTy
+            (pt', _) <- checkTerm p sTy
 
             -- If the subject is a variable,
             -- then we can unify with the pattern for dependent
@@ -638,6 +633,27 @@ inferOrCheckCase f s cs = do
       )
       cs
   return ((s', cs'), tys)
+
+-- | Register a hole.
+registerHole :: Loc -> Var -> Tc Term
+registerHole l v = do
+  m <- freshMetaAt l
+  s <- get
+  put $ s {holeLocs = insert l (Just v) s.holeLocs}
+  return m
+
+-- | Register an underscore/wild.
+registerWild :: Loc -> Tc Term
+registerWild l = do
+  p <- gets (\s -> s.inPat)
+  if p
+    then do
+      v <- freshVar
+      return $ Term (V v) (termDataAt l)
+    else do
+      m <- freshMetaAt l
+      modify $ \s -> s {holeLocs = insert l Nothing s.holeLocs}
+      return m
 
 -- | Check the type of a term. (The type itself should already be checked.)
 --
@@ -755,6 +771,7 @@ unifyTerms a' b' = do
             Nothing -> throwError $ Mismatch vOrigin t
 
     unifyTerms' :: Term -> Term -> Tc ()
+    unifyTerms' (Term (Meta m1) _) (Term (Meta m2) _) | m1 == m2 = return ()
     unifyTerms' (Term (PiT m1 lv l1 l2) d1) (Term (PiT m2 rv r1 r2) _) | m1 == m2 = do
       unifyTerms l1 r1
       unifyTerms l2 (alphaRename rv (lv, d1) r2)

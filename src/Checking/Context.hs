@@ -18,7 +18,6 @@ module Checking.Context
     findReprForGlobal,
     classifyApp,
     ctx,
-    patToTerm,
     patVarToVar,
     emptyTcState,
     enterCtx,
@@ -42,13 +41,16 @@ module Checking.Context
     modifyItem,
     addItemToRepr,
     modifySignature,
-    registerHole,
-    registerWild,
     addEmptyRepr,
     runTc,
     setType,
     solveMeta,
     withinCtx,
+    globalAppSubjectNameM,
+    globalAppSubjectName,
+    appVarArgs,
+    appVarUncheckedArgs,
+    ensurePatIsVar,
   )
 where
 
@@ -66,7 +68,6 @@ import Lang
     HasLoc (..),
     Item (..),
     Loc (..),
-    MapResult (..),
     Pat,
     PiMode (Explicit),
     ReprDataCaseItem (..),
@@ -80,6 +81,7 @@ import Lang
     TermValue (..),
     Type,
     Var (..),
+    appToList,
     genTerm,
     itemName,
     lams,
@@ -349,21 +351,6 @@ freshMetaAt h = do
 freshMeta :: Tc Term
 freshMeta = freshMetaAt NoLoc
 
--- | Register a hole.
-registerHole :: Loc -> Var -> Tc Term
-registerHole l v = do
-  m <- freshMetaAt l
-  s <- get
-  put $ s {holeLocs = insert l (Just v) s.holeLocs}
-  return m
-
--- | Register an underscore/wild.
-registerWild :: Loc -> Tc Term
-registerWild l = do
-  m <- freshMetaAt l
-  modify $ \s -> s {holeLocs = insert l Nothing s.holeLocs}
-  return m
-
 -- | Solve a meta.
 solveMeta :: Var -> Term -> Tc ()
 solveMeta h t = modify $ \s -> s {metaValues = insert h t s.metaValues}
@@ -396,8 +383,8 @@ addItemToRepr rName item = modifyItem rName $ \case
 -- | Add an empty data item to a representation in a signature.
 --
 -- Assumes that the representation is already present and empty.
-addEmptyDataItemToRepr :: String -> String -> [Pat] -> Term -> Signature -> Signature
-addEmptyDataItemToRepr rName name binds target = addItemToRepr rName $ ReprData (ReprDataItem name binds target [] Nothing)
+addEmptyDataItemToRepr :: String -> Pat -> Term -> Signature -> Signature
+addEmptyDataItemToRepr rName src target = addItemToRepr rName $ ReprData (ReprDataItem src target [] Nothing)
 
 -- | Modify representation items in a signature.
 modifyReprItems :: String -> (ReprSomeItem -> ReprSomeItem) -> Signature -> Signature
@@ -412,7 +399,7 @@ addCtorItemToRepr :: String -> String -> ReprDataCtorItem -> Signature -> Signat
 addCtorItemToRepr rName dName item = modifyReprItems rName go
   where
     go t@(ReprData d)
-      | d.name == dName = ReprData $ d {ctors = d.ctors ++ [item]}
+      | globalAppSubjectName d.src == dName = ReprData $ d {ctors = d.ctors ++ [item]}
       | otherwise = t
     go t = t
 
@@ -421,20 +408,16 @@ addCaseItemToRepr :: String -> String -> ReprDataCaseItem -> Signature -> Signat
 addCaseItemToRepr rName dName item = modifyReprItems rName go
   where
     go t@(ReprData d)
-      | d.name == dName = ReprData $ d {cse = Just item}
+      | globalAppSubjectName d.src == dName = ReprData $ d {cse = Just item}
       | otherwise = t
     go t = t
 
--- | Convert a pattern to a term, converting wildcards to fresh variables.
-patToTerm :: Pat -> Tc Term
-patToTerm =
-  mapTermM
-    ( \t -> case t.value of
-        Wild -> do
-          v <- freshVar
-          return . Replace $ Term (V v) t.dat
-        _ -> return Continue
-    )
+-- | Ensure a pattern is a variable or wildcard.
+ensurePatIsVar :: Pat -> Tc Pat
+ensurePatIsVar p = case p.value of
+  V _ -> return p
+  Wild -> return p
+  _ -> throwError $ PatternNotSupported p
 
 -- | Convert a pattern to a variable, converting wildcards to fresh variables.
 patVarToVar :: Pat -> Tc Var
@@ -442,6 +425,34 @@ patVarToVar p = case p.value of
   V v -> return v
   Wild -> freshVar
   _ -> throwError $ PatternNotSupported p
+
+-- | Get the variable arguments x1 ... xn of an application P x1 ... xn
+appVarArgs :: Pat -> Tc [(PiMode, Var)]
+appVarArgs p =
+  let (_, a) = appToList p
+   in mapM (\(m, p') -> (m,) <$> patVarToVar p') a
+
+-- | Get the variable arguments x1 ... xn of an application P x1 ... xn (where the term is unchecked and so is the result).
+appVarUncheckedArgs :: Pat -> Tc [(PiMode, Pat)]
+appVarUncheckedArgs p =
+  let (_, a) = appToList p
+   in mapM (\(m, p') -> (m,) <$> ensurePatIsVar p') a
+
+-- | Get the name "P" of a global application P x1 ... xn
+globalAppSubjectName :: Pat -> String
+globalAppSubjectName p =
+  let (s, _) = appToList p
+   in case s.value of
+        Global s' -> s'
+        _ -> error $ "Pattern " ++ printVal p ++ " is not a global application"
+
+-- | Get the name "P" of a global application P x1 ... xn (monadic)
+globalAppSubjectNameM :: Pat -> Tc String
+globalAppSubjectNameM p =
+  let (s, _) = appToList p
+   in case s.value of
+        Global s' -> return s'
+        _ -> throwError $ PatternNotSupported p
 
 -- | Find a representation for the given global name.
 -- Returns the name of the representation and the term.
@@ -454,19 +465,19 @@ findReprForGlobal name = do
     findRepr _ = return Nothing
 
     findReprData rName (ReprDecl d)
-      | d.name == name = return $ Just (rName, d.target)
+      | d.src == name = return $ Just (rName, d.target)
       | otherwise = return Nothing
     findReprData rName (ReprData d)
-      | d.name == name = do
-          bindsAsVars <- mapM patVarToVar d.binds
-          return $ Just (rName, lams (map (Explicit,) bindsAsVars) d.target)
+      | globalAppSubjectName d.src == name = do
+          params <- appVarArgs d.src
+          return $ Just (rName, lams params d.target)
       | otherwise = join . find isJust <$> mapM (findReprDataCtor rName) d.ctors
 
     findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, Term))
     findReprDataCtor rName c
-      | c.name == name = do
-          bindsAsVars <- mapM patVarToVar c.binds
-          return $ Just (rName, lams (map (Explicit,) bindsAsVars) c.target)
+      | globalAppSubjectName c.src == name = do
+          params <- appVarArgs c.src
+          return $ Just (rName, lams params c.target)
       | otherwise = return Nothing
 
 -- | Find a representation for the case expression of the given global type name.
@@ -479,7 +490,7 @@ findReprForCase tyName = do
     findRepr _ = return Nothing
 
     findReprData rName (ReprData d)
-      | d.name == tyName =
+      | globalAppSubjectName d.src == tyName =
           case d.cse of
             Just reprCase -> do
               let (subjectBind, ctors) = reprCase.binds

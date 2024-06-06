@@ -138,11 +138,9 @@ instance Print ReprSomeItem where
   printVal (ReprDecl d) = printVal d
 
 instance Print ReprDataItem where
-  printVal (ReprDataItem name binds target ctors cse) =
+  printVal (ReprDataItem src target ctors cse) =
     "data "
-      ++ name
-      ++ (if null binds then "" else " ")
-      ++ intercalate " " (map printVal binds)
+      ++ printVal src
       ++ " as "
       ++ printVal target
       ++ " "
@@ -155,7 +153,7 @@ instance Print ReprDataItem where
         )
 
 instance Print ReprDataCtorItem where
-  printVal (ReprDataCtorItem name binds target) = name ++ (if null binds then "" else " ") ++ intercalate " " (map printVal binds) ++ " as " ++ printVal target
+  printVal (ReprDataCtorItem src target) = printVal src ++ " as " ++ printVal target
 
 instance Print ReprDataCaseItem where
   printVal (ReprDataCaseItem (subject, ctors) target) =
