@@ -73,6 +73,7 @@ import Lang
     Loc,
     MapResult (..),
     Pat,
+    PiMode (..),
     Program (..),
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
@@ -94,9 +95,10 @@ import Lang
     locatedAt,
     mapTermM,
     piTypeToList,
+    termDataAt,
     typedAs,
   )
-import Lang as DI (DeclItem (..), PiMode (Explicit), TermMappable (mapTermMappable))
+import Lang as DI (DeclItem (..), PiMode (Explicit, Implicit), TermMappable (mapTermMappable))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -147,9 +149,9 @@ resolveShallow (Term (Meta h) d) = do
   case metas !? h of
     Just t -> resolveShallow t
     Nothing -> return $ Term (Meta h) d
-resolveShallow (Term (App Explicit t1 t2) d) = do
+resolveShallow (Term (App m t1 t2) d) = do
   t1' <- resolveShallow t1
-  return $ normaliseTermFully (Term (App Explicit t1' t2) d)
+  return $ normaliseTermFully (Term (App m t1' t2) d)
 resolveShallow t = return t
 
 -- | Represent a checked program
@@ -424,7 +426,6 @@ representTermRec = \case
     case sTy of
       Just t -> do
         t' <- resolveShallow t
-        traceM $ "Case subject type of " ++ printVal s ++ " is " ++ printVal t'
         case appToList t' of
           (Term (Global g) _, _) -> do
             r <- findReprForCase g
@@ -462,7 +463,7 @@ checkDataItem (DataItem name ty ctors) = do
 checkCtorItem :: Type -> CtorItem -> Tc CtorItem
 checkCtorItem dTy (CtorItem name ty i dTyName) = do
   -- The amount of arguments of the data type
-  let dTyArgCount = length . fst $ piTypeToList dTy
+  let dTyArgs = fst (piTypeToList dTy)
 
   -- Check the signature of the constructor.
   (ty', _) <- checkTerm ty (genTerm TyT)
@@ -471,8 +472,8 @@ checkCtorItem dTy (CtorItem name ty i dTyName) = do
   -- \| Add all the arguments to the context
   enterCtxMod (\c -> foldr (\(_, v, t) c' -> addTyping v t c') c tys) $ do
     -- \| Check that the return type is the data type.
-    dummyArgs <- replicateM dTyArgCount freshMeta
-    let dummyRet = listToApp (genTerm (Global dTyName), map (Explicit,) dummyArgs)
+    dummyArgs <- mapM (\(m, _, _) -> (m,) <$> freshMeta) dTyArgs
+    let dummyRet = listToApp (genTerm (Global dTyName), dummyArgs)
     unifyTerms ret dummyRet
 
   return (CtorItem name ty' i dTyName)
@@ -499,7 +500,8 @@ checkDeclItem decl = do
 -- | Check the type of a term, and set the type in the context.
 checkTerm :: Term -> Type -> Tc (Term, Type)
 checkTerm v t = do
-  (v', t') <- checkTerm' v t
+  tResolved <- resolveShallow t
+  (v', t') <- checkTerm' v tResolved
   setType v t' -- @@FIXME: store on terms!!
   return (v', t')
 
@@ -515,25 +517,54 @@ unifyTermsTo t1 t2 = do
   unifyTerms t1 t2
   return t1
 
+-- | Insert an implicit application.
+applyImplicitUnchecked :: Term -> Term
+applyImplicitUnchecked t = genTerm (App Implicit t (genTerm Wild))
+
+-- | Apply implicits to an already checked term.
+fullyApplyImplicits :: Term -> Type -> Tc (Term, Type)
+fullyApplyImplicits t ty = do
+  case ty of
+    (Term (PiT Implicit v _ b) _) -> do
+      m <- freshMeta
+      fullyApplyImplicits (genTerm (App Implicit t m)) (subVar v m b)
+    _ -> return (t, ty)
+
+-- | Infer the type of a term.
+inferTerm :: Term -> Tc (Term, Type)
+inferTerm t = do
+  ty <- freshMeta
+  checkTerm t ty
+
+-- | Infer the type of a term and apply implicits.
+inferAtomicTerm :: Term -> Tc (Term, Type)
+inferAtomicTerm t = do
+  ty <- freshMeta
+  (t', ty') <- checkTerm t ty
+  fullyApplyImplicits t' ty'
+
 -- | Check the type of a term. (The type itself should already be checked.)
 --
 -- This also performs elaboration by filling named holes and wildcards with metavariables.
 checkTerm' :: Term -> Type -> Tc (Term, Type)
-checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2)) | m1 == m2 = do
-  (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
-  return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
-checkTerm' ((Term (Lam Explicit v t1) d1)) typ = do
+checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2))
+  | m1 == m2 = do
+      (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
+      return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
+checkTerm' t ty@((Term (PiT Implicit var' _ _) _)) = do
+  checkTerm (genTerm (Lam Implicit var' t)) ty
+checkTerm' ((Term (Lam m v t1) d1)) typ = do
   varTy <- freshMeta
-  (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferTerm t1
-  typ' <- unifyTermsTo typ $ locatedAt d1 (PiT Explicit v varTy bodyTy)
-  return (locatedAt d1 (Lam Explicit v t1'), typ')
+  (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferAtomicTerm t1
+  typ' <- unifyTermsTo typ $ locatedAt d1 (PiT m v varTy bodyTy)
+  return (locatedAt d1 (Lam m v t1'), typ')
 checkTerm' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
   (t1', ty1') <- checkTerm t1 ty1
   (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
   return (locatedAt d1 (Pair t1' t2'), locatedAt d2 (SigmaT v ty1' ty2'))
 checkTerm' (Term (Pair t1 t2) d1) typ = do
-  (t1', ty1) <- inferTerm t1
-  (t2', ty2) <- inferTerm t2
+  (t1', ty1) <- inferAtomicTerm t1
+  (t2', ty2) <- inferAtomicTerm t2
   v <- freshVar
   typ' <- unifyTermsTo typ $ locatedAt d1 (SigmaT v ty1 ty2)
   return (locatedAt d1 (Pair t1' t2'), typ')
@@ -568,46 +599,50 @@ checkTerm' t@(Term (V v) _) typ = do
           return (t, typ)
         else throwError $ VariableNotFound v
     Just vTyp' -> do
+      -- (t', vTyp'') <- fullyApplyImplicits t vTyp'
       typ' <- unifyTermsTo typ vTyp'
       return (t, typ')
-checkTerm' (Term (App Explicit t1 t2) _) typ = do
+checkTerm' a@(Term (App m t1 t2) d1) typ = do
+  traceM $ "Checking application: " ++ printVal a ++ " : " ++ printVal typ
   (t1', subjectTy) <- inferTerm t1
   subjectTyRes <- resolveShallow subjectTy
+  traceM $ "Inferred subject to: " ++ printVal subjectTyRes
 
   let go v varTy bodyTy = do
         (t2', _) <- checkTerm t2 varTy
         typ' <- unifyTermsTo typ $ subVar v t2' bodyTy
-        return (locatedAt t1 (App Explicit t1' t2'), typ')
+        return (locatedAt t1 (App m t1' t2'), typ')
+
+  let goImplicit = do
+        let t1Ins = applyImplicitUnchecked t1
+        checkTerm (Term (App m t1Ins t2) d1) typ
 
   -- Try to normalise to a pi type.
   case subjectTyRes of
-    (Term (PiT Explicit v varTy bodyTy) _) -> do
-      go v varTy bodyTy
+    (Term (PiT m' v varTy bodyTy) _) | m == m' -> go v varTy bodyTy
+    (Term (PiT Implicit _ _ _) _) -> goImplicit
     _ -> do
       let subjectTy' = normaliseTerm subjectTyRes
       subjectTyRes' <- case subjectTy' of
         Just t -> Just <$> resolveShallow t
         Nothing -> return Nothing
       case subjectTyRes' of
-        Just (Term (PiT Explicit v varTy bodyTy) _) -> go v varTy bodyTy
+        Just (Term (PiT m' v varTy bodyTy) _) | m == m' -> go v varTy bodyTy
+        Just (Term (PiT Implicit _ _ _) _) -> goImplicit
         _ -> throwError $ NotAFunction subjectTy
 checkTerm' t@(Term (Global g) _) typ = do
   decl <- inSignature (lookupItemOrCtor g)
-  case decl of
+  expectedTyp <- case decl of
     Nothing -> throwError $ ItemNotFound g
-    Just (Left (Decl decl')) -> do
-      typ' <- unifyTermsTo typ decl'.ty
-      return (t, typ')
-    Just (Left (Data dat)) -> do
-      typ' <- unifyTermsTo typ dat.ty
-      return (t, typ')
-    Just (Left (Repr _)) -> do
-      throwError $ CannotUseReprAsTerm g
-    Just (Right ctor) -> do
-      typ' <- unifyTermsTo typ ctor.ty
-      return (t, typ')
+    Just (Left (Decl decl')) -> return decl'.ty
+    Just (Left (Data dat)) -> return dat.ty
+    Just (Left (Repr _)) -> throwError $ CannotUseReprAsTerm g
+    Just (Right ctor) -> return ctor.ty
+  -- (t', expectedTyp') <- fullyApplyImplicits t expectedTyp
+  typ' <- unifyTermsTo typ expectedTyp
+  return (t, typ')
 checkTerm' (Term (Case s cs) _) typ = do
-  (s', sTy) <- inferTerm s
+  (s', sTy) <- inferAtomicTerm s
   cs' <-
     mapM
       ( \(p, t) -> enterCtx $ do
@@ -648,17 +683,12 @@ showContext = do
   cNorm <- mapTermMappableM fillAllMetas (mapTermMappable (ReplaceAndContinue . normaliseTermFully) c)
   traceM $ "Context:\n" ++ indentedFst (show cNorm)
 
--- | Infer the type of a term.
-inferTerm :: Term -> Tc (Term, Type)
-inferTerm t = do
-  ty <- freshMeta
-  checkTerm t ty
-
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Term -> Maybe Term
-normaliseTerm (Term (App Explicit (Term (Lam Explicit v t1) _) t2) _) =
-  return $ subVar v t2 t1
+normaliseTerm (Term (App m (Term (Lam m' v t1) _) t2) _)
+  | m == m' =
+      return $ subVar v t2 t1
 normaliseTerm (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm t1
   return (Term (App m t1' t2) d1)

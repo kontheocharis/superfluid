@@ -16,6 +16,10 @@
     {
       "name": "constant.numeric.superfluid",
       "match": "\\b\\d+\\b"
+    },
+    {
+      "name": "storage.superfluid",
+      "match": "\\b[A-Z]\\w*\\b"
     }
   ],
   "repository": {
