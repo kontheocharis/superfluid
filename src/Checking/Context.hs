@@ -350,14 +350,19 @@ freshMeta :: Tc Term
 freshMeta = freshMetaAt NoLoc
 
 -- | Register a hole.
-registerHole :: Loc -> Var -> Tc ()
+registerHole :: Loc -> Var -> Tc Term
 registerHole l v = do
+  m <- freshMetaAt l
   s <- get
   put $ s {holeLocs = insert l (Just v) s.holeLocs}
+  return m
 
 -- | Register an underscore/wild.
-registerWild :: Loc -> Tc ()
-registerWild l = modify $ \s -> s {holeLocs = insert l Nothing s.holeLocs}
+registerWild :: Loc -> Tc Term
+registerWild l = do
+  m <- freshMetaAt l
+  modify $ \s -> s {holeLocs = insert l Nothing s.holeLocs}
+  return m
 
 -- | Solve a meta.
 solveMeta :: Var -> Term -> Tc ()

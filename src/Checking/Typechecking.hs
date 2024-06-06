@@ -511,12 +511,6 @@ checkTerm v t = do
 checkTermExpected :: Term -> TypeValue -> Tc (Term, Type)
 checkTermExpected v t = checkTerm v (locatedAt v t)
 
--- | Unify two terms and return the first one.
-unifyTermsTo :: Term -> Term -> Tc Term
-unifyTermsTo t1 t2 = do
-  unifyTerms t1 t2
-  return t1
-
 -- | Insert an implicit application.
 applyImplicitUnchecked :: Term -> Term
 applyImplicitUnchecked t = genTerm (App Implicit t (genTerm Wild))
@@ -530,92 +524,44 @@ fullyApplyImplicits t ty = do
       fullyApplyImplicits (genTerm (App Implicit t m)) (subVar v m b)
     _ -> return (t, ty)
 
--- | Infer the type of a term.
-inferTerm :: Term -> Tc (Term, Type)
-inferTerm t = do
-  ty <- freshMeta
-  checkTerm t ty
-
 -- | Infer the type of a term and apply implicits.
 inferAtomicTerm :: Term -> Tc (Term, Type)
 inferAtomicTerm t = do
-  ty <- freshMeta
-  (t', ty') <- checkTerm t ty
+  (t', ty') <- inferTerm t
   fullyApplyImplicits t' ty'
 
--- | Check the type of a term. (The type itself should already be checked.)
---
--- This also performs elaboration by filling named holes and wildcards with metavariables.
-checkTerm' :: Term -> Type -> Tc (Term, Type)
-checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2))
-  | m1 == m2 = do
-      (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
-      return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
-checkTerm' t ty@((Term (PiT Implicit var' _ _) _)) = do
-  checkTerm (genTerm (Lam Implicit var' t)) ty
-checkTerm' ((Term (Lam m v t1) d1)) typ = do
+-- | Infer the type of a term.
+inferTerm :: Term -> Tc (Term, Type)
+inferTerm ((Term (Lam m v t1) d1)) = do
   varTy <- freshMeta
   (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferAtomicTerm t1
-  typ' <- unifyTermsTo typ $ locatedAt d1 (PiT m v varTy bodyTy)
-  return (locatedAt d1 (Lam m v t1'), typ')
-checkTerm' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
-  (t1', ty1') <- checkTerm t1 ty1
-  (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
-  return (locatedAt d1 (Pair t1' t2'), locatedAt d2 (SigmaT v ty1' ty2'))
-checkTerm' (Term (Pair t1 t2) d1) typ = do
+  return (locatedAt d1 (Lam m v t1'), locatedAt d1 (PiT m v varTy bodyTy))
+inferTerm (Term (Pair t1 t2) d1) = do
   (t1', ty1) <- inferAtomicTerm t1
   (t2', ty2) <- inferAtomicTerm t2
   v <- freshVar
-  typ' <- unifyTermsTo typ $ locatedAt d1 (SigmaT v ty1 ty2)
-  return (locatedAt d1 (Pair t1' t2'), typ')
-checkTerm' (Term (PiT m v t1 t2) d1) typ = do
+  return (locatedAt d1 (Pair t1' t2'), locatedAt d1 (SigmaT v ty1 ty2))
+inferTerm (Term (PiT m v t1 t2) d1) = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
-  typ' <- unifyTermsTo typ (locatedAt d1 TyT)
-  return (locatedAt d1 (PiT m v t1' t2'), typ')
-checkTerm' (Term (SigmaT v t1 t2) d1) typ = do
+  return (locatedAt d1 (PiT m v t1' t2'), locatedAt d1 TyT)
+inferTerm (Term (SigmaT v t1 t2) d1) = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
-  typ' <- unifyTermsTo typ (locatedAt d1 TyT)
-  return (locatedAt d1 (SigmaT v t1' t2'), typ')
-checkTerm' (Term TyT d1) typ = do
-  typ' <- unifyTermsTo typ (locatedAt d1 TyT)
-  return (Term TyT d1, typ')
-checkTerm' (Term (Let var ty tm ret) d1) typ = do
-  (ty', _) <- checkTermExpected ty TyT
-  (tm', ty'') <- checkTerm tm ty'
-  (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxMod (addSubst var tm') $ checkTerm ret typ
-  return (locatedAt d1 (Let var ty'' tm' ret'), subVar var tm' typ')
-checkTerm' t@(Term (V v) _) typ = do
-  vTyp <- inCtx (lookupType v)
-  case vTyp of
-    Nothing -> do
-      -- If we are in a pattern, then this is a bound variable so we can add it
-      -- to the context.
-      p <- gets (\s -> s.inPat)
-      if p
-        then do
-          modifyCtx (addTyping v typ)
-          return (t, typ)
-        else throwError $ VariableNotFound v
-    Just vTyp' -> do
-      -- (t', vTyp'') <- fullyApplyImplicits t vTyp'
-      typ' <- unifyTermsTo typ vTyp'
-      return (t, typ')
-checkTerm' a@(Term (App m t1 t2) d1) typ = do
-  traceM $ "Checking application: " ++ printVal a ++ " : " ++ printVal typ
+  return (locatedAt d1 (SigmaT v t1' t2'), locatedAt d1 TyT)
+inferTerm (Term TyT d1) = do
+  return (Term TyT d1, locatedAt d1 TyT)
+inferTerm (Term (App m t1 t2) d1) = do
   (t1', subjectTy) <- inferTerm t1
   subjectTyRes <- resolveShallow subjectTy
-  traceM $ "Inferred subject to: " ++ printVal subjectTyRes
 
   let go v varTy bodyTy = do
         (t2', _) <- checkTerm t2 varTy
-        typ' <- unifyTermsTo typ $ subVar v t2' bodyTy
-        return (locatedAt t1 (App m t1' t2'), typ')
+        return (locatedAt t1 (App m t1' t2'), subVar v t2' bodyTy)
 
   let goImplicit = do
         let t1Ins = applyImplicitUnchecked t1
-        checkTerm (Term (App m t1Ins t2) d1) typ
+        inferTerm (Term (App m t1Ins t2) d1)
 
   -- Try to normalise to a pi type.
   case subjectTyRes of
@@ -630,7 +576,7 @@ checkTerm' a@(Term (App m t1 t2) d1) typ = do
         Just (Term (PiT m' v varTy bodyTy) _) | m == m' -> go v varTy bodyTy
         Just (Term (PiT Implicit _ _ _) _) -> goImplicit
         _ -> throwError $ NotAFunction subjectTy
-checkTerm' t@(Term (Global g) _) typ = do
+inferTerm t@(Term (Global g) _) = do
   decl <- inSignature (lookupItemOrCtor g)
   expectedTyp <- case decl of
     Nothing -> throwError $ ItemNotFound g
@@ -638,13 +584,42 @@ checkTerm' t@(Term (Global g) _) typ = do
     Just (Left (Data dat)) -> return dat.ty
     Just (Left (Repr _)) -> throwError $ CannotUseReprAsTerm g
     Just (Right ctor) -> return ctor.ty
-  -- (t', expectedTyp') <- fullyApplyImplicits t expectedTyp
-  typ' <- unifyTermsTo typ expectedTyp
-  return (t, typ')
-checkTerm' (Term (Case s cs) _) typ = do
+  return (t, expectedTyp)
+inferTerm t@(Term (V v) _) = do
+  vTyp <- inCtx (lookupType v)
+  case vTyp of
+    Nothing -> throwError $ VariableNotFound v
+    Just vTyp' -> return (t, vTyp')
+inferTerm (Term (Let var ty tm ret) d1) = do
+  ((ty'', tm', ret'), typ') <- inferOrCheckLet inferTerm var ty tm ret
+  return (locatedAt d1 (Let var ty'' tm' ret'), typ')
+inferTerm (Term (Case s cs) _) = do
+  ((s', cs'), tys) <- inferOrCheckCase inferTerm s cs
+  ty <- unifyAllTerms tys
+  return (locatedAt s (Case s' cs'), ty)
+inferTerm (Term Wild d1) = do
+  typ <- freshMetaAt d1
+  m <- registerWild (getLoc d1)
+  return (m, typ)
+inferTerm hole@(Term (Hole h) d1) = do
+  typ <- freshMetaAt d1
+  m <- registerHole (getLoc d1) h
+  showHole hole Nothing
+  return (m, typ)
+inferTerm t@(Term (Meta _) _) = error $ "Found metavar during inference: " ++ show t
+
+inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> Tc ((Type, Term, Term), Type)
+inferOrCheckLet f var ty tm ret = do
+  (ty', _) <- checkTermExpected ty TyT
+  (tm', ty'') <- checkTerm tm ty'
+  (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxMod (addSubst var tm') $ f ret
+  return ((ty'', tm', ret'), subVar var tm' typ')
+
+inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Term)] -> Tc ((Term, [(Pat, Term)]), [Type])
+inferOrCheckCase f s cs = do
   (s', sTy) <- inferAtomicTerm s
-  cs' <-
-    mapM
+  (cs', tys) <-
+    mapAndUnzipM
       ( \(p, t) -> enterCtx $ do
           pt <- patToTerm p
           pt' <- enterPat $ do
@@ -658,24 +633,62 @@ checkTerm' (Term (Case s cs) _) typ = do
               _ -> return ()
 
             return pt'
-          (t', _) <- checkTerm t typ
-          return (pt', t')
+          (t', ty) <- f t
+          return ((pt', t'), ty)
       )
       cs
-  return (locatedAt s (Case s' cs'), typ)
+  return ((s', cs'), tys)
 
--- Wild and hole are turned into metavars:
+-- | Check the type of a term. (The type itself should already be checked.)
+--
+-- This also performs elaboration by filling named holes and wildcards with metavariables.
+checkTerm' :: Term -> Type -> Tc (Term, Type)
+checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2))
+  | m1 == m2 = do
+      (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
+      return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
+checkTerm' t ty@((Term (PiT Implicit var' _ _) _)) = do
+  checkTerm (genTerm (Lam Implicit var' t)) ty
+checkTerm' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
+  (t1', ty1') <- checkTerm t1 ty1
+  (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
+  return (locatedAt d1 (Pair t1' t2'), locatedAt d2 (SigmaT v ty1' ty2'))
+checkTerm' t@(Term (V v) _) typ = do
+  p <- gets (\s -> s.inPat)
+  if p
+    then do
+      modifyCtx (addTyping v typ)
+      return (t, typ)
+    else checkByInfer t typ
+checkTerm' (Term (Let var ty tm ret) d1) typ = do
+  ((ty'', tm', ret'), typ') <- inferOrCheckLet (`checkTerm` typ) var ty tm ret
+  return (locatedAt d1 (Let var ty'' tm' ret'), typ')
+checkTerm' (Term (Case s cs) _) typ = do
+  ((s', cs'), _) <- inferOrCheckCase (`checkTerm` typ) s cs
+  return (locatedAt s (Case s' cs'), typ)
 checkTerm' (Term Wild d1) typ = do
-  m <- freshMetaAt d1
-  registerWild (getLoc d1)
+  m <- registerWild (getLoc d1)
   return (m, typ)
-checkTerm' (Term (Hole h) d1) typ = do
-  m <- freshMetaAt d1
-  registerHole (getLoc d1) h
-  traceM $ "Hole: " ++ printVal (Hole h) ++ " : " ++ printVal typ
-  showContext
+checkTerm' hole@(Term (Hole h) d1) typ = do
+  m <- registerHole (getLoc d1) h
+  showHole hole (Just typ)
   return (m, typ)
 checkTerm' t@(Term (Meta _) _) typ = error $ "Found metavar during checking: " ++ show t ++ " : " ++ show typ
+checkTerm' t typ = checkByInfer t typ
+
+checkByInfer :: Term -> Type -> Tc (Term, Type)
+checkByInfer t typ = do
+  (t', typ') <- inferAtomicTerm t
+  unifyTerms typ typ'
+  return (t', typ')
+
+showHole :: Term -> Maybe Type -> Tc ()
+showHole h ty = do
+  traceM $
+    "Hole: " ++ printVal h ++ case ty of
+      Just ty' -> " : " ++ printVal ty'
+      Nothing -> ""
+  showContext
 
 showContext :: Tc ()
 showContext = do
@@ -697,6 +710,13 @@ normaliseTerm _ = Nothing -- @@Todo: normalise declarations
 -- | Reduce a term to normal form (fully).
 normaliseTermFully :: Term -> Term
 normaliseTermFully t = maybe t normaliseTermFully (normaliseTerm t)
+
+-- | Unify the list of terms together into a meta.
+unifyAllTerms :: [Term] -> Tc Term
+unifyAllTerms ts = do
+  m <- freshMeta
+  mapM_ (unifyTerms m) ts
+  return m
 
 -- \| Unify two terms.
 -- This might produce a substitution.
