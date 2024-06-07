@@ -1,34 +1,40 @@
-
-def id : [A : Type] -> A -> A {
-  \x => x
-}
-
-data Equal : [A : Type] -> A -> A -> Type {
-  refl : [A : Type] -> [x : A] -> Equal x x
-}
-
-def sym : [A : Type] -> [x : A] -> [y : A] -> Equal x y -> Equal y x {
-  \e => case e {
-    refl => refl
-  }
-}
-
 data Nat : Type {
   z : Nat,
   s : Nat -> Nat
 }
-
-def plus : Nat -> Nat -> Nat {
-  \x => case x {
-    z => \y => y,
-    s => \y => s (plus y)
-  }
-}
-
-
 
 data Vect : (A : Type) -> Nat -> Type {
   nil : [A : Type] -> Vect A z,
   cons : [A : Type] -> [n : Nat] -> A -> Vect A n -> Vect A (s n)
 }
 
+data Vect2 : (A : Type) -> Nat -> Type {
+  nil2 : [A : Type] -> Vect2 A z,
+  cons2 : [A : Type] -> [n : Nat] -> A -> Vect2 A n -> Vect2 A (s n)
+}
+
+repr VectRepr {
+  data Vect A n as Vect2 A n {
+    nil as nil2,
+    cons x xs as cons2 x xs,
+    case v {
+      nil => n,
+      cons => c
+    } as {
+      case v {
+        cons2 x xs => c x xs,
+        nil2 => n,
+      }
+    }
+  }
+}
+
+def tst : [n : Nat] -> Vect Nat n -> Vect Nat n {
+  \v => {
+    let n = v;
+    case ((\a => a) n) {
+      nil => nil,
+      cons x xs => cons x xs
+    }
+  }
+}

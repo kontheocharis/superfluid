@@ -42,7 +42,6 @@ module Checking.Context
     addItemToRepr,
     modifySignature,
     addEmptyRepr,
-    runTc,
     setType,
     solveMeta,
     withinCtx,
@@ -56,7 +55,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (join)
-import Control.Monad.Except (throwError)
+import Control.Monad.Except (throwError, MonadError (catchError))
 import Control.Monad.State (MonadState (..), StateT (runStateT), gets, modify)
 import Data.List (find, intercalate)
 import Data.Map (Map, empty, insert, (!?))
@@ -87,7 +86,7 @@ import Lang
     lams,
     listToApp,
     locatedAt,
-    mapTermM,
+    mapTermM, annotTy,
   )
 
 -- | A typing judgement.
@@ -125,6 +124,12 @@ data TcError
   | WrongConstructors [String] [String]
   | CannotUseReprAsTerm String
 
+instance TermMappable TcError where
+  mapTermMappableM f (NotAFunction t) = NotAFunction <$> mapTermM f t
+  mapTermMappableM f (PatternNotSupported p) = PatternNotSupported <$> mapTermM f p
+  mapTermMappableM f (Mismatch t1 t2) = Mismatch <$> mapTermM f t1 <*> mapTermM f t2
+  mapTermMappableM _ e = return e
+
 instance Show TcError where
   show (VariableNotFound v) = "Variable not found: " ++ printVal v
   show (Mismatch t1 t2) =
@@ -147,8 +152,6 @@ data TcState = TcState
     varCounter :: Int,
     -- | Whether we are in a pattern
     inPat :: Bool,
-    -- | Term types, indexed by location.
-    termTypes :: Map Loc Type,
     -- | Meta values, indexed by variable.
     metaValues :: Map Var Term,
     -- | Hole/wild locations, to substitute in the end.
@@ -160,16 +163,10 @@ data TcState = TcState
 
 -- | The empty typechecking state.
 emptyTcState :: TcState
-emptyTcState = TcState (Ctx []) (Signature []) 0 False empty empty empty []
+emptyTcState = TcState (Ctx []) (Signature []) 0 False empty empty []
 
 -- | The typechecking monad.
 type Tc a = StateT TcState (Either TcError) a
-
--- | Run a typechecking computation.
-runTc :: Tc a -> Either TcError (a, TcState)
-runTc tc = do
-  (res, endState) <- runStateT tc emptyTcState
-  return (res, endState)
 
 -- | Map over some context.
 withSomeCtx :: (TcState -> c) -> (c -> Tc a) -> Tc a
@@ -203,15 +200,11 @@ inSignature f = withSomeCtx sig (return . f)
 
 -- | Get the type of a term.
 getType :: Term -> Tc (Maybe Type)
-getType t = do
-  tys <- gets (\s -> s.termTypes)
-  case tys !? getLoc t of
-    Just ty -> return $ Just ty
-    Nothing -> return Nothing
+getType t = return t.dat.annotTy
 
 -- | Set the type of a term.
-setType :: Term -> Type -> Tc ()
-setType t ty = modify $ \s -> s {termTypes = insert (getLoc t) ty s.termTypes}
+setType :: Term -> Type -> Tc Term
+setType t ty = return $ t {dat = t.dat {annotTy = Just ty}}
 
 -- | Enter a pattern by setting the inPat flag to True.
 enterPat :: Tc a -> Tc a

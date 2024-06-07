@@ -4,9 +4,11 @@
 module Checking.Typechecking
   ( checkTerm,
     unifyTerms,
+    runTc,
     inferTerm,
     normaliseTermFully,
     checkProgram,
+    fillAllMetasAndNormalise,
     representProgram,
   )
 where
@@ -27,6 +29,7 @@ import Checking.Context
     addTyping,
     addTypings,
     classifyApp,
+    emptyTcState,
     enterCtx,
     enterCtxMod,
     enterPat,
@@ -53,11 +56,12 @@ import Checking.Context
   )
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
+import Control.Monad.Error.Class (mapError)
 import Control.Monad.Except (catchError, throwError)
-import Control.Monad.State (gets, get, put, modify)
+import Control.Monad.State (StateT (runStateT), get, gets, modify, put)
 import Data.Foldable (find)
-import Data.List (sort, sortBy)
-import Data.Map (Map, lookup, insert, (!?))
+import Data.List (sort, sortBy, intercalate)
+import Data.Map (Map, insert, lookup, (!?), toList)
 import Data.Maybe (fromJust)
 import Debug.Trace (trace, traceM)
 import Interface.Pretty (Print (..), indentedFst)
@@ -90,9 +94,11 @@ import Lang
     listToApp,
     listToPiType,
     locatedAt,
+    mapTerm,
     mapTermM,
     piTypeToList,
-    typedAs, termDataAt,
+    termDataAt,
+    typedAs,
   )
 import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
 
@@ -100,20 +106,29 @@ import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
 checkProgram :: Program -> Tc Program
 checkProgram (Program decls) = do
   p <- Program <$> mapM checkItem decls
-  types <- gets (\s -> s.termTypes)
-  p' <- mapTermMappableM fillAllMetas p
-  mapTermMappableM (fillType types) p'
-  where
-    fillType :: Map Loc Type -> Term -> Tc (MapResult Term)
-    fillType types t = case types !? getLoc t of
-      Just ty -> do
-        ty' <- mapTermM fillAllMetas ty
-        return $ ReplaceAndContinue (typedAs ty' t)
-      Nothing -> return Continue
+  mapTermMappableM fillAllMetas p
 
 -- | Fill all the metavariables in a term.
 fillAllMetas :: Term -> Tc (MapResult Term)
 fillAllMetas t = ReplaceAndContinue <$> resolveFinal t
+
+-- | Run a typechecking computation.
+runTc :: Tc a -> Either TcError (a, TcState)
+runTc tc = do
+  runStateT
+    ( catchError
+        tc
+        ( \e -> do
+            -- e' <- fillAllMetasAndNormalise e
+            throwError e
+        )
+    )
+    emptyTcState
+
+fillAllMetasAndNormalise :: (TermMappable t) => t -> Tc t
+fillAllMetasAndNormalise t = do
+  t' <- mapTermMappableM fillAllMetas t
+  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) t'
 
 -- | Resolve a term by filling in metas if present, or turning them back into holes.
 resolveFinal :: Term -> Tc Term
@@ -149,6 +164,9 @@ resolveShallow (Term (App m t1 t2) d) = do
   t1' <- resolveShallow t1
   return $ normaliseTermFully (Term (App m t1' t2) d)
 resolveShallow t = return t
+
+resolveDeep :: Term -> Tc Term
+resolveDeep = mapTermM (fmap ReplaceAndContinue . resolveShallow)
 
 -- | Represent a checked program
 representProgram :: Program -> Tc Program
@@ -287,8 +305,8 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
   let subjectTy = listToApp (genTerm (Global dat.name), map (\(m, p, _) -> (m, genTerm (V p))) params)
   subjectReprIndices <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) params
   subjectReprTy <- representTerm subjectTy
+  (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
   enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
-
     -- Form the elimination type family
     elimTySubjectVar <- freshVar
     let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
@@ -296,8 +314,6 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
     elimName <- freshVar
 
     enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
-      (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
-
       -- Form the elimination type
       let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
 
@@ -332,7 +348,9 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
 
               -- The eliminator is bound to the given binding in the case
               -- representation.
-              (cBindAsTerm, _) <- enterPat $ checkTerm cBind elimCtorTy
+              (cBindAsTerm, _) <- enterPat $ do
+                r <- checkTerm cBind elimCtorTy
+                return r
               return (cName, cBindAsTerm)
           )
           ctors
@@ -344,10 +362,7 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
       -- 4. The elimination indices
       -- 5. The elimination type
       -- 6. For each constructor, the eliminator
-      target' <- do
-        -- Check the target
-        (target', _) <- checkTerm target elimTy
-        return target'
+      (target', _) <- checkTerm target elimTy
 
       -- @@TODO: hide eliminators from the context in the end!
 
@@ -416,7 +431,9 @@ representTermRec = \case
     r <- findReprForGlobal g
     case r of
       Nothing -> return Continue
-      Just (_, term) -> return $ ReplaceAndContinue term
+      Just (_, term) -> do
+        term' <- resolveDeep term
+        return $ ReplaceAndContinue term'
   Term (Case s cs) _ -> do
     sTy <- getType s
     case sTy of
@@ -428,8 +445,11 @@ representTermRec = \case
             case r of
               Nothing -> return Continue
               Just (_, term) -> do
+                term' <- resolveDeep term
                 xs <- caseElimsToAppArgs g cs
-                return $ ReplaceAndContinue (listToApp (term, map (Explicit,) (s : xs)))
+                s' <- resolveDeep s
+                xs' <- mapM resolveDeep xs
+                return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (s' : xs')))
           _ -> error $ "Case subject is not a global type: " ++ printVal t'
       _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
   _ -> return Continue
@@ -493,30 +513,25 @@ checkDeclItem decl = do
 
   return decl'
 
--- | Check the type of a term, and set the type in the context.
-checkTerm :: Term -> Type -> Tc (Term, Type)
-checkTerm v t = do
-  tResolved <- resolveShallow t
-  (v', t') <- checkTerm' v tResolved
-  setType v t' -- @@FIXME: store on terms!!
-  return (v', t')
-
--- | Check the type of a term.
---
--- The location of the type is inherited from the term.
-checkTermExpected :: Term -> TypeValue -> Tc (Term, Type)
-checkTermExpected v t = checkTerm v (locatedAt v t)
-
 -- | Insert an implicit application.
 applyImplicitUnchecked :: Term -> Term
 applyImplicitUnchecked t = genTerm (App Implicit t (genTerm Wild))
+
+freshMetaOrPat :: Tc Term
+freshMetaOrPat = do
+  p <- gets (\s -> s.inPat)
+  if p
+    then do
+      v <- freshVar
+      return $ genTerm (V v)
+    else freshMeta
 
 -- | Apply implicits to an already checked term.
 fullyApplyImplicits :: Term -> Type -> Tc (Term, Type)
 fullyApplyImplicits t ty = do
   case ty of
     (Term (PiT Implicit v _ b) _) -> do
-      m <- freshMeta
+      m <- freshMetaOrPat
       fullyApplyImplicits (genTerm (App Implicit t m)) (subVar v m b)
     _ -> return (t, ty)
 
@@ -526,28 +541,34 @@ inferAtomicTerm t = do
   (t', ty') <- inferTerm t
   fullyApplyImplicits t' ty'
 
--- | Infer the type of a term.
 inferTerm :: Term -> Tc (Term, Type)
-inferTerm ((Term (Lam m v t1) d1)) = do
+inferTerm t = do
+  (t', ty) <- inferTerm' t
+  t'' <- setType t' ty
+  return (t'', ty)
+
+-- | Infer the type of a term.
+inferTerm' :: Term -> Tc (Term, Type)
+inferTerm' ((Term (Lam m v t1) d1)) = do
   varTy <- freshMeta
   (t1', bodyTy) <- enterCtxMod (addTyping v varTy) $ inferAtomicTerm t1
   return (locatedAt d1 (Lam m v t1'), locatedAt d1 (PiT m v varTy bodyTy))
-inferTerm (Term (Pair t1 t2) d1) = do
+inferTerm' (Term (Pair t1 t2) d1) = do
   (t1', ty1) <- inferAtomicTerm t1
   (t2', ty2) <- inferAtomicTerm t2
   v <- freshVar
   return (locatedAt d1 (Pair t1' t2'), locatedAt d1 (SigmaT v ty1 ty2))
-inferTerm (Term (PiT m v t1 t2) d1) = do
+inferTerm' (Term (PiT m v t1 t2) d1) = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
   return (locatedAt d1 (PiT m v t1' t2'), locatedAt d1 TyT)
-inferTerm (Term (SigmaT v t1 t2) d1) = do
+inferTerm' (Term (SigmaT v t1 t2) d1) = do
   (t1', _) <- checkTermExpected t1 TyT
   (t2', _) <- enterCtxMod (addTyping v t1) $ checkTermExpected t2 TyT
   return (locatedAt d1 (SigmaT v t1' t2'), locatedAt d1 TyT)
-inferTerm (Term TyT d1) = do
+inferTerm' (Term TyT d1) = do
   return (Term TyT d1, locatedAt d1 TyT)
-inferTerm (Term (App m t1 t2) d1) = do
+inferTerm' (Term (App m t1 t2) d1) = do
   (t1', subjectTy) <- inferTerm t1
   subjectTyRes <- resolveShallow subjectTy
 
@@ -572,7 +593,7 @@ inferTerm (Term (App m t1 t2) d1) = do
         Just (Term (PiT m' v varTy bodyTy) _) | m == m' -> go v varTy bodyTy
         Just (Term (PiT Implicit _ _ _) _) -> goImplicit
         _ -> throwError $ NotAFunction subjectTy
-inferTerm t@(Term (Global g) _) = do
+inferTerm' t@(Term (Global g) _) = do
   decl <- inSignature (lookupItemOrCtor g)
   expectedTyp <- case decl of
     Nothing -> throwError $ ItemNotFound g
@@ -581,28 +602,28 @@ inferTerm t@(Term (Global g) _) = do
     Just (Left (Repr _)) -> throwError $ CannotUseReprAsTerm g
     Just (Right ctor) -> return ctor.ty
   return (t, expectedTyp)
-inferTerm t@(Term (V v) _) = do
+inferTerm' t@(Term (V v) _) = do
   vTyp <- inCtx (lookupType v)
   case vTyp of
     Nothing -> throwError $ VariableNotFound v
     Just vTyp' -> return (t, vTyp')
-inferTerm (Term (Let var ty tm ret) d1) = do
+inferTerm' (Term (Let var ty tm ret) d1) = do
   ((ty'', tm', ret'), typ') <- inferOrCheckLet inferTerm var ty tm ret
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
-inferTerm (Term (Case s cs) _) = do
+inferTerm' (Term (Case s cs) _) = do
   ((s', cs'), tys) <- inferOrCheckCase inferTerm s cs
   ty <- unifyAllTerms tys
   return (locatedAt s (Case s' cs'), ty)
-inferTerm (Term Wild d1) = do
+inferTerm' (Term Wild d1) = do
   typ <- freshMetaAt d1
   m <- registerWild (getLoc d1)
   return (m, typ)
-inferTerm hole@(Term (Hole h) d1) = do
+inferTerm' hole@(Term (Hole h) d1) = do
   typ <- freshMetaAt d1
   m <- registerHole (getLoc d1) h
   showHole hole Nothing
   return (m, typ)
-inferTerm t@(Term (Meta _) _) = error $ "Found metavar during inference: " ++ show t
+inferTerm' t@(Term (Meta _) _) = error $ "Found metavar during inference: " ++ show t
 
 inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> Tc ((Type, Term, Term), Type)
 inferOrCheckLet f var ty tm ret = do
@@ -655,6 +676,20 @@ registerWild l = do
       modify $ \s -> s {holeLocs = insert l Nothing s.holeLocs}
       return m
 
+-- | Check the type of a term, and set the type in the context.
+checkTerm :: Term -> Type -> Tc (Term, Type)
+checkTerm v t = do
+  tResolved <- resolveShallow t
+  (v', t') <- checkTerm' v tResolved
+  v'' <- setType v' t'
+  return (v'', t')
+
+-- | Check the type of a term.
+--
+-- The location of the type is inherited from the term.
+checkTermExpected :: Term -> TypeValue -> Tc (Term, Type)
+checkTermExpected v t = checkTerm v (locatedAt v t)
+
 -- | Check the type of a term. (The type itself should already be checked.)
 --
 -- This also performs elaboration by filling named holes and wildcards with metavariables.
@@ -664,33 +699,39 @@ checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2))
       (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
       return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
 checkTerm' t ty@((Term (PiT Implicit var' _ _) _)) = do
-  checkTerm (genTerm (Lam Implicit var' t)) ty
-checkTerm' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
+  p <- gets (\s -> s.inPat)
+  if p
+    then checkTerm'' t ty
+    else checkTerm (genTerm (Lam Implicit var' t)) ty
+checkTerm' t ty = checkTerm'' t ty
+
+checkTerm'' :: Term -> Term -> Tc (Term, Type)
+checkTerm'' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
   (t1', ty1') <- checkTerm t1 ty1
   (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
   return (locatedAt d1 (Pair t1' t2'), locatedAt d2 (SigmaT v ty1' ty2'))
-checkTerm' t@(Term (V v) _) typ = do
+checkTerm'' t@(Term (V v) _) typ = do
   p <- gets (\s -> s.inPat)
   if p
     then do
       modifyCtx (addTyping v typ)
       return (t, typ)
     else checkByInfer t typ
-checkTerm' (Term (Let var ty tm ret) d1) typ = do
+checkTerm'' (Term (Let var ty tm ret) d1) typ = do
   ((ty'', tm', ret'), typ') <- inferOrCheckLet (`checkTerm` typ) var ty tm ret
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
-checkTerm' (Term (Case s cs) _) typ = do
+checkTerm'' (Term (Case s cs) _) typ = do
   ((s', cs'), _) <- inferOrCheckCase (`checkTerm` typ) s cs
   return (locatedAt s (Case s' cs'), typ)
-checkTerm' (Term Wild d1) typ = do
+checkTerm'' (Term Wild d1) typ = do
   m <- registerWild (getLoc d1)
   return (m, typ)
-checkTerm' hole@(Term (Hole h) d1) typ = do
+checkTerm'' hole@(Term (Hole h) d1) typ = do
   m <- registerHole (getLoc d1) h
   showHole hole (Just typ)
   return (m, typ)
-checkTerm' t@(Term (Meta _) _) typ = error $ "Found metavar during checking: " ++ show t ++ " : " ++ show typ
-checkTerm' t typ = checkByInfer t typ
+checkTerm'' t@(Term (Meta _) _) typ = error $ "Found metavar during checking: " ++ show t ++ " : " ++ show typ
+checkTerm'' t typ = checkByInfer t typ
 
 checkByInfer :: Term -> Type -> Tc (Term, Type)
 checkByInfer t typ = do
@@ -700,16 +741,20 @@ checkByInfer t typ = do
 
 showHole :: Term -> Maybe Type -> Tc ()
 showHole h ty = do
+  ty'' <- case ty of
+    Just ty' -> Just <$> fillAllMetasAndNormalise ty'
+    Nothing -> return Nothing
   traceM $
-    "Hole: " ++ printVal h ++ case ty of
-      Just ty' -> " : " ++ printVal ty'
+    "Hole: " ++ printVal h ++ case ty'' of
+      Just ty' -> do
+        " : " ++ printVal ty'
       Nothing -> ""
   showContext
 
 showContext :: Tc ()
 showContext = do
   c <- inCtx id
-  cNorm <- mapTermMappableM fillAllMetas (mapTermMappable (ReplaceAndContinue . normaliseTermFully) c)
+  cNorm <- fillAllMetasAndNormalise c
   traceM $ "Context:\n" ++ indentedFst (show cNorm)
 
 -- | Reduce a term to normal form (one step).
@@ -808,6 +853,11 @@ unifyTerms a' b' = do
             unifyTerms l2 r2
             `catchError` (\_ -> normaliseAndUnifyTerms a b)
     unifyTerms' l r = normaliseAndUnifyTerms l r
+
+showSolvedMetas :: Tc ()
+showSolvedMetas = do
+  m <- gets (\s -> s.metaValues)
+  traceM $ "Solved metas: " ++ intercalate "\n" (map (\(m, t) -> printVal m ++ " := " ++ printVal t) (toList m))
 
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()

@@ -1,7 +1,7 @@
 module Interface.Cli (runCli) where
 
-import Checking.Context (Tc, TcState, runTc)
-import Checking.Typechecking (checkProgram, inferTerm, normaliseTermFully, representProgram)
+import Checking.Context (Tc, TcState)
+import Checking.Typechecking (checkProgram, runTc, inferTerm, normaliseTermFully, representProgram, fillAllMetasAndNormalise)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (MonadState (..))
@@ -168,5 +168,6 @@ handleParse er res = do
 handleTc :: (String -> InputT IO (a, TcState)) -> Tc a -> InputT IO (a, TcState)
 handleTc er a = do
   case runTc a of
-    Left e -> er $ "Error: " ++ show e
+    Left e -> do
+      er $ "Error: " ++ show e
     Right (p, s) -> return (p, s)
