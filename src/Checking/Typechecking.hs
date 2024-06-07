@@ -348,9 +348,7 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
 
               -- The eliminator is bound to the given binding in the case
               -- representation.
-              (cBindAsTerm, _) <- enterPat $ do
-                r <- checkTerm cBind elimCtorTy
-                return r
+              (cBindAsTerm, _) <- enterPat $ checkTerm cBind elimCtorTy
               return (cName, cBindAsTerm)
           )
           ctors
@@ -522,8 +520,7 @@ freshMetaOrPat = do
   p <- gets (\s -> s.inPat)
   if p
     then do
-      v <- freshVar
-      return $ genTerm (V v)
+      genTerm . V <$> freshVar
     else freshMeta
 
 -- | Apply implicits to an already checked term.

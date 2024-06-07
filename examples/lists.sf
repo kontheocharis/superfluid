@@ -220,13 +220,18 @@ def to-double : [A : Type] -> List A -> DoubleList A {
   }
 }
 
+def and : Bool -> Bool -> Bool {
+  \x y => case x {
+    true => y,
+    false => false
+  }
+}
+
 def is-palindrome : [A : Type] -> Eq A -> List A -> Bool {
   \eq l => case to-double l {
     double-nil => true,
     double-one _ => true,
-    double-cons x xs y => if-then-else (is-equal eq x y)
-      (\_ => is-palindrome eq xs)
-      (\_ => false)
+    double-cons x xs y => and (is-equal eq x y) (is-palindrome eq xs)
   }
 }
 

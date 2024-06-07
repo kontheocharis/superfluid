@@ -1,131 +1,54 @@
-
-data Equal : (A: Type) -> A -> A -> Type {
-  refl : (A : Type) -> (x : A) -> Equal A x x
-}
-
 data Bool : Type {
   true : Bool,
   false : Bool
 }
 
-data Maybe : Type -> Type {
-  nothing : (A : Type) -> Maybe A,
-  just : (A : Type) -> A -> Maybe A
+data Ty : Type {
+  alpha : Ty,
+  fn : Ty -> Ty -> Ty
 }
 
-data Unit : Type {
-  tt : Unit
+data Con : Type {
+  empty : Con,
+  extend : Con -> Ty -> Con
 }
 
-def rewrite : (A : Type) -> (P : A -> Type) -> (x : A) -> (y : A) -> Equal A x y -> P x -> P y {
-  \A P x y e px => case e {
-    refl _ _ => px
-  }
+data Var : Con -> Ty -> Type {
+  here : [c : Con] -> [t : Ty] -> Var (extend c t) t,
+  there : [c : Con] -> [t : Ty] -> [t' : Ty] -> Var c t -> Var (extend c t') t
 }
 
-data List : Type -> Type {
-  nil : (A : Type) -> List A,
-  cons : (A : Type) -> A -> List A -> List A
-}
-
-data Elem : (A : Type) -> A -> List A -> Type {
-  here : (A : Type) -> (x : A) -> (xs : List A) -> Elem A x (cons A x xs),
-  there : (A : Type) -> (x : A) -> (y : A) -> (xs : List A) -> Elem A x xs -> Elem A x (cons A y xs)
-}
-
-data SnocList : Type -> Type {
-  lin : (A : Type) -> SnocList A,
-  snoc : (A : Type) -> SnocList A -> A -> SnocList A
-}
-
-def prepend : (A : Type) -> List A -> List A -> List A {
-  \A xs ys => case xs {
-    nil _ => ys,
-    cons _ x xs' => cons A x (prepend A xs' ys)
-  }
-}
-
-def last : (A : Type) -> A -> List A -> A {
-  \A x xs => case xs {
-    nil _ => x,
-    cons _ y ys => last A y ys
-  }
-}
-
-def init : (A : Type) -> A -> List A -> List A {
-  \A x xs => case xs {
-    nil _ => nil A,
-    cons _ y ys => cons A x (init A y ys)
-  }
-}
-
-def prepend-init-last-is-cons :
-  (A : Type) ->
-  (x : A) ->
-  (xs : List A) ->
-  Equal (List A) (cons A x xs) (prepend A (init A x xs) (cons A (last A x xs) (nil A)))
-{
-  ?prepend-init-last-is-cons
-}
-
--- let x : X = y in (z : Z x)
-
-def letting : (X : Type) -> (Z : X -> Type) -> (y : X) -> (z : (w : X) -> Z w) -> Z y {
-  \X Z y z => z y
-}
-
-def UNSAFE-cast : (A : Type) -> (B : Type) -> A -> B {
-  ?UNSAFE-cast
-}
-
-def testing : Unit {
-  let a : Unit = tt;
-  let b = tt;
-  a
-}
-
-repr SnocListAsList {
-  data SnocList A as List A {
-    lin _ as nil _,
-    snoc _ xs x as prepend _ xs (cons _ x (nil _)),
-    case l {
-      lin => b,
-      snoc => r
-    } as case l {
-      nil _ => b _,
-      cons _ x xs => UNSAFE-cast _ _ (r _ (init _ x xs) (last _ x xs)),
+def var-eq : [c : Con] -> [t : Ty] -> Var c t -> Var c t -> Bool {
+  \a b => case a {
+    here => case b {
+      here => true,
+      there _ => false
+    },
+    there a' => case b {
+      here => false,
+      there b' => ?h34
     }
   }
 }
 
-
-
-def find-rev : (A : Type) -> (l : SnocList A) -> (pred : A -> Bool) -> Maybe A {
-  \A l pred => case l {
-    lin _ => nothing _,
-    snoc _ xs x => {
-      let result = pred x;
-      case result {
-        true => just _ x,
-        false => find-rev _ xs pred
-      }
-    }
+def without : [t : Ty] -> (c : Con) -> Var c t -> Con {
+  \c v => case v {
+    here [c'] => c',
+    there [c'] [_] [t'] v' => extend (without c' v') t'
   }
 }
 
-        -- let V : ((s : Type) -> List s -> Type)) = _ in ( ... :  V a l )
-        -- UNSAFE-cast _ _ ((r _ (init _ x xs) (last _ x xs)))
-        -- let ?h3 (\n => ?h2) (r _ (init _ x xs) (last _ x xs)) (\n => ?h1)
-        -- let
-        --   ((s : Type) -> List s -> Type)
-        --   (\V => (V a (prepend a (init a x xs) (cons a (last a x xs) (nil a)))))
-        --   _
-        --   (\V =>
-        --     rewrite
-        --       (List a)
-        --       (\l => V a l)
-        --       (cons a x xs)
-        --       (prepend a (init a x xs) (cons a (last a x xs) (nil a)))
-        --       (prepend-init-last-is-cons a x xs)
-        --       (r _ (init _ x xs) (last _ x xs))
-        --   )
+data Tm : Con -> Ty -> Type {
+  var : [c : Con] -> [t : Ty] -> Var c t -> Tm c t,
+  lam : [c : Con] -> [t1 : Ty] -> [t2 : Ty] -> Tm (extend c t1) t2 -> Tm c (fn t1 t2),
+  app : [c : Con] -> [t1 : Ty] -> [t2 : Ty] -> Tm c (fn t1 t2) -> Tm c t1 -> Tm c t2
+}
+
+def subst : [t : Ty] -> [t' : Ty] -> [c : Con] -> (v : Var c t') -> Tm c t' -> Tm c t -> Tm (without c v) t {
+  \v tm' tm => case tm { }
+}
+
+def id : [c : Con] -> Tm c (fn alpha alpha) {
+  lam (var here)
+}
+

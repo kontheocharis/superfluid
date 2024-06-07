@@ -65,6 +65,7 @@ import Text.Parsec.Combinator (sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 import Interface.Pretty (Print(printVal))
+import Text.Parsec.Combinator (sepEndBy)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
@@ -124,7 +125,7 @@ square :: Parser a -> Parser a
 square = between (symbol "[") (symbol "]")
 
 commaSep :: Parser a -> Parser [a]
-commaSep p = p `sepEndBy1` comma
+commaSep p = p `sepEndBy` comma
 
 comment :: Parser ()
 comment = do
