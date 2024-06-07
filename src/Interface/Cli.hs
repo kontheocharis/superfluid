@@ -1,8 +1,11 @@
 module Interface.Cli (runCli) where
 
 import Checking.Context (Tc, TcState)
-import Checking.Typechecking (checkProgram, runTc, inferTerm, normaliseTermFully, representProgram, fillAllMetasAndNormalise)
-import Control.Monad (void, when)
+import Checking.Normalisation (normaliseTermFully)
+import Checking.Representation (representProgram)
+import Checking.Typechecking (checkProgram, inferTerm)
+import Checking.Utils (runTc)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (MonadState (..))
 import Data.Char (isSpace)

@@ -4,7 +4,6 @@ module Checking.Context
     Signature (..),
     TcState (..),
     Tc,
-    TcError (..),
     FlexApp (..),
     addEmptyDataItemToRepr,
     addCtorItemToRepr,
@@ -53,12 +52,14 @@ module Checking.Context
   )
 where
 
+import Checking.Errors (TcError (..))
 import Control.Applicative ((<|>))
 import Control.Monad (join)
-import Control.Monad.Except (throwError, MonadError (catchError))
-import Control.Monad.State (MonadState (..), StateT (runStateT), gets, modify)
+import Control.Monad.Except (throwError)
+import Control.Monad.State (MonadState (..), gets, modify)
+import Control.Monad.State.Lazy (StateT)
 import Data.List (find, intercalate)
-import Data.Map (Map, empty, insert, (!?))
+import Data.Map (Map, empty, insert)
 import Data.Maybe (isJust)
 import Interface.Pretty
 import Lang
@@ -80,13 +81,14 @@ import Lang
     TermValue (..),
     Type,
     Var (..),
+    annotTy,
     appToList,
     genTerm,
     itemName,
     lams,
     listToApp,
     locatedAt,
-    mapTermM, annotTy,
+    mapTermM,
   )
 
 -- | A typing judgement.
@@ -113,34 +115,6 @@ instance Show Ctx where
 newtype Signature = Signature [Item] deriving (Show)
 
 -- | A typechecking error.
-data TcError
-  = VariableNotFound Var
-  | Mismatch Term Term
-  | ItemNotFound String
-  | CannotUnifyTwoHoles Var Var
-  | CannotInferHoleType Var
-  | NotAFunction Term
-  | PatternNotSupported Pat
-  | WrongConstructors [String] [String]
-  | CannotUseReprAsTerm String
-
-instance TermMappable TcError where
-  mapTermMappableM f (NotAFunction t) = NotAFunction <$> mapTermM f t
-  mapTermMappableM f (PatternNotSupported p) = PatternNotSupported <$> mapTermM f p
-  mapTermMappableM f (Mismatch t1 t2) = Mismatch <$> mapTermM f t1 <*> mapTermM f t2
-  mapTermMappableM _ e = return e
-
-instance Show TcError where
-  show (VariableNotFound v) = "Variable not found: " ++ printVal v
-  show (Mismatch t1 t2) =
-    "Term mismatch: " ++ printSingleVal t1 ++ " vs " ++ printSingleVal t2 ++ " (at " ++ printVal (getLoc t1) ++ " and " ++ printVal (getLoc t2) ++ ")"
-  show (ItemNotFound s) = "Item not found: " ++ s
-  show (CannotUnifyTwoHoles h1 h2) = "Cannot unify two holes: " ++ printSingleVal h1 ++ " and " ++ printSingleVal h2
-  show (CannotInferHoleType h) = "Cannot infer hole type: " ++ printSingleVal h
-  show (NotAFunction t) = "Not a function: " ++ printSingleVal t
-  show (PatternNotSupported p) = "Pattern is not supported yet: " ++ printVal p
-  show (WrongConstructors cs1 cs2) = "Wrong constructors: got " ++ intercalate ", " cs1 ++ " but expected " ++ intercalate ", " cs2
-  show (CannotUseReprAsTerm r) = "Cannot use representation " ++ r ++ " as a term yet!"
 
 -- | The typechecking state.
 data TcState = TcState

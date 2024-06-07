@@ -1,22 +1,12 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TupleSections #-}
-
 module Checking.Typechecking
   ( checkTerm,
-    unifyTerms,
-    runTc,
     inferTerm,
-    normaliseTermFully,
     checkProgram,
-    fillAllMetasAndNormalise,
-    representProgram,
   )
 where
 
 import Checking.Context
-  ( FlexApp (..),
-    Tc,
-    TcError (..),
+  ( Tc,
     TcState (..),
     addCaseItemToRepr,
     addCtorItemToRepr,
@@ -24,47 +14,39 @@ import Checking.Context
     addEmptyRepr,
     addItem,
     addItemToRepr,
-    addItems,
     addSubst,
     addTyping,
     addTypings,
-    classifyApp,
-    emptyTcState,
     enterCtx,
     enterCtxMod,
     enterPat,
     enterSignatureMod,
-    findReprForCase,
-    findReprForGlobal,
     freshMeta,
     freshMetaAt,
     freshVar,
-    getDataItem,
-    getType,
     globalAppSubjectName,
     globalAppSubjectNameM,
     inCtx,
     inSignature,
     lookupItemOrCtor,
-    lookupSubst,
     lookupType,
     modifyCtx,
-    modifyCtxM,
     modifySignature,
     setType,
-    solveMeta,
   )
+import Checking.Errors (TcError (..))
+import Checking.Normalisation (fillAllMetas, normaliseTerm, resolveShallow)
+import Checking.Representation (representCtx, representTerm)
+import Checking.Unification (unifyAllTerms, unifyTerms)
+import Checking.Utils (showHole)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
-import Control.Monad.Error.Class (mapError)
-import Control.Monad.Except (catchError, throwError)
-import Control.Monad.State (StateT (runStateT), get, gets, modify, put)
+import Control.Monad.Except (throwError)
+import Control.Monad.State (get, gets, modify, put)
 import Data.Foldable (find)
-import Data.List (sort, sortBy, intercalate)
-import Data.Map (Map, insert, lookup, (!?), toList)
+import Data.List (sort)
+import Data.Map (insert)
 import Data.Maybe (fromJust)
-import Debug.Trace (trace, traceM)
-import Interface.Pretty (Print (..), indentedFst)
 import Lang
   ( CtorItem (..),
     DataItem (..),
@@ -72,7 +54,6 @@ import Lang
     HasLoc (..),
     Item (..),
     Loc,
-    MapResult (..),
     Pat,
     PiMode (..),
     Program (..),
@@ -90,109 +71,19 @@ import Lang
     Var,
     appToList,
     genTerm,
-    lams,
     listToApp,
     listToPiType,
     locatedAt,
-    mapTerm,
-    mapTermM,
     piTypeToList,
     termDataAt,
-    typedAs,
   )
-import Lang as DI (DeclItem (..), TermMappable (mapTermMappable))
+import Lang as DI (DeclItem (..))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
 checkProgram (Program decls) = do
   p <- Program <$> mapM checkItem decls
   mapTermMappableM fillAllMetas p
-
--- | Fill all the metavariables in a term.
-fillAllMetas :: Term -> Tc (MapResult Term)
-fillAllMetas t = ReplaceAndContinue <$> resolveFinal t
-
--- | Run a typechecking computation.
-runTc :: Tc a -> Either TcError (a, TcState)
-runTc tc = do
-  runStateT
-    ( catchError
-        tc
-        ( \e -> do
-            -- e' <- fillAllMetasAndNormalise e
-            throwError e
-        )
-    )
-    emptyTcState
-
-fillAllMetasAndNormalise :: (TermMappable t) => t -> Tc t
-fillAllMetasAndNormalise t = do
-  t' <- mapTermMappableM fillAllMetas t
-  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) t'
-
--- | Resolve a term by filling in metas if present, or turning them back into holes.
-resolveFinal :: Term -> Tc Term
-resolveFinal t = do
-  case classifyApp t of
-    Just (Flex h ts) -> do
-      metas <- gets (\s -> s.metaValues)
-      case metas !? h of
-        Just t' -> do
-          -- If the meta is already solved, then we can resolve the term.
-          r <- resolveShallow (listToApp (t', map (Explicit,) ts))
-          return $ normaliseTermFully r
-        Nothing -> do
-          -- If the meta is not resolved, then substitute the original hole
-          let tLoc = getLoc t
-          hole <- gets (\s -> Data.Map.lookup tLoc s.holeLocs)
-          case hole of
-            Just (Just v) -> return $ locatedAt tLoc (Hole v)
-            Just Nothing -> return $ locatedAt tLoc Wild
-            Nothing -> do
-              -- If the hole is not registered, then it is a fresh hole.
-              locatedAt tLoc . Hole <$> freshVar
-    _ -> return t
-
--- | Resolve a term by filling in metas if present.
-resolveShallow :: Term -> Tc Term
-resolveShallow (Term (Meta h) d) = do
-  metas <- gets (\s -> s.metaValues)
-  case metas !? h of
-    Just t -> resolveShallow t
-    Nothing -> return $ Term (Meta h) d
-resolveShallow (Term (App m t1 t2) d) = do
-  t1' <- resolveShallow t1
-  return $ normaliseTermFully (Term (App m t1' t2) d)
-resolveShallow t = return t
-
-resolveDeep :: Term -> Tc Term
-resolveDeep = mapTermM (fmap ReplaceAndContinue . resolveShallow)
-
--- | Represent a checked program
-representProgram :: Program -> Tc Program
-representProgram (Program decls) = do
-  -- Filter out all the (checked) repr items from the program
-  let (reprs, rest) =
-        foldr
-          ( \x (reprs', rest') -> case x of
-              Repr r -> (Repr r : reprs', rest')
-              _ -> (reprs', x : rest')
-          )
-          ([], [])
-          decls
-
-  -- Add them to the signature
-  modifySignature $ addItems reprs
-
-  -- Then, represent all the items in the program
-  Program rest' <- mapTermMappableM representTermRec (Program rest)
-
-  -- Finally, normalise the program
-  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
-
--- | Represent the current context.
-representCtx :: Tc ()
-representCtx = modifyCtxM $ mapTermMappableM representTermRec
 
 -- | Check some item in the program.
 checkItem :: Item -> Tc Item
@@ -383,78 +274,6 @@ checkReprDeclItem (ReprDeclItem name target) = do
       modifySignature $ addItemToRepr name (ReprDecl result)
       return result
     _ -> throwError $ ItemNotFound name
-
--- | Convert a list of case eliminations to a list of arguments for the "represented" application.
--- Assumes the case expression has already been checked.
-caseElimsToAppArgs :: String -> [(Pat, Term)] -> Tc [Term]
-caseElimsToAppArgs dName clauses = do
-  dCtors <- inSignature (getDataItem dName)
-  clauses' <-
-    sortBy
-      (\(p1, _) (p2, _) -> compare p1 p2)
-      <$> mapM
-        ( \(p, t) -> do
-            let (h, xs) = appToList p
-            -- Ensure the pattern head is a global variable that corresponds to
-            -- a constructor.
-            (c, idx) <- case h of
-              Term (Global c) _ ->
-                return
-                  ( c,
-                    (fromJust $ find (\n -> n.name == c) dCtors.ctors).idx
-                  )
-              _ -> throwError $ PatternNotSupported p
-
-            -- Ensure the pattern arguments are variables.
-            xs' <-
-              mapM
-                ( \(m, t') -> case t' of
-                    Term (V v) _ -> return (m, v)
-                    _ -> throwError (PatternNotSupported p)
-                )
-                xs
-            return (idx, (c, lams xs' t))
-        )
-        clauses
-
-  -- Ensure all the constructors are present
-  if map fst clauses' /= [0 .. length dCtors.ctors - 1]
-    then throwError $ WrongConstructors (map (fst . snd) clauses') (map (\c -> c.name) dCtors.ctors)
-    else return $ map (snd . snd) clauses'
-
--- | Represent a checked term through defined representations.
-representTermRec :: Term -> Tc (MapResult Term)
-representTermRec = \case
-  Term (Global g) _ -> do
-    r <- findReprForGlobal g
-    case r of
-      Nothing -> return Continue
-      Just (_, term) -> do
-        term' <- resolveDeep term
-        return $ ReplaceAndContinue term'
-  Term (Case s cs) _ -> do
-    sTy <- getType s
-    case sTy of
-      Just t -> do
-        t' <- resolveShallow t
-        case appToList t' of
-          (Term (Global g) _, _) -> do
-            r <- findReprForCase g
-            case r of
-              Nothing -> return Continue
-              Just (_, term) -> do
-                term' <- resolveDeep term
-                xs <- caseElimsToAppArgs g cs
-                s' <- resolveDeep s
-                xs' <- mapM resolveDeep xs
-                return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (s' : xs')))
-          _ -> error $ "Case subject is not a global type: " ++ printVal t'
-      _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
-  _ -> return Continue
-
--- | Represent a checked term through defined representations.
-representTerm :: Term -> Tc Term
-representTerm = mapTermM representTermRec
 
 -- | Check a data item.
 checkDataItem :: DataItem -> Tc DataItem
@@ -735,158 +554,3 @@ checkByInfer t typ = do
   (t', typ') <- inferAtomicTerm t
   unifyTerms typ typ'
   return (t', typ')
-
-showHole :: Term -> Maybe Type -> Tc ()
-showHole h ty = do
-  ty'' <- case ty of
-    Just ty' -> Just <$> fillAllMetasAndNormalise ty'
-    Nothing -> return Nothing
-  traceM $
-    "Hole: " ++ printVal h ++ case ty'' of
-      Just ty' -> do
-        " : " ++ printVal ty'
-      Nothing -> ""
-  showContext
-
-showContext :: Tc ()
-showContext = do
-  c <- inCtx id
-  cNorm <- fillAllMetasAndNormalise c
-  traceM $ "Context:\n" ++ indentedFst (show cNorm)
-
--- | Reduce a term to normal form (one step).
--- If this is not possible, return Nothing.
-normaliseTerm :: Term -> Maybe Term
-normaliseTerm (Term (App m (Term (Lam m' v t1) _) t2) _)
-  | m == m' =
-      return $ subVar v t2 t1
-normaliseTerm (Term (App m t1 t2) d1) = do
-  t1' <- normaliseTerm t1
-  return (Term (App m t1' t2) d1)
-normaliseTerm _ = Nothing -- @@Todo: normalise declarations
-
--- | Reduce a term to normal form (fully).
-normaliseTermFully :: Term -> Term
-normaliseTermFully t = maybe t normaliseTermFully (normaliseTerm t)
-
--- | Unify the list of terms together into a meta.
-unifyAllTerms :: [Term] -> Tc Term
-unifyAllTerms ts = do
-  m <- freshMeta
-  mapM_ (unifyTerms m) ts
-  return m
-
--- \| Unify two terms.
--- This might produce a substitution.
--- Unification is symmetric.
-unifyTerms :: Term -> Term -> Tc ()
-unifyTerms a' b' = do
-  a <- resolveShallow a'
-  b <- resolveShallow b'
-  case (classifyApp a, classifyApp b) of
-    (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> unifyTerms' a b
-    (Just (Flex h1 ts1), _) -> do
-      res <- solve h1 ts1 b
-      if res
-        then return ()
-        else unifyTerms' a b
-    (_, Just (Flex h2 ts2)) -> do
-      res <- solve h2 ts2 a
-      if res
-        then return ()
-        else unifyTerms' a b
-    _ -> unifyTerms' a b
-  where
-    -- \| Unify a variable with a term. Returns True if successful.
-    unifyVarWithTerm :: Term -> Var -> Term -> Tc ()
-    unifyVarWithTerm vOrigin v t = do
-      -- If in a pattern, then we can add a substitution straight away.
-      pt <- gets (\s -> s.inPat)
-      if pt
-        then modifyCtx (addSubst v t)
-        else do
-          -- Check if the variable exists in a substitution in
-          -- the context.
-          subst <- inCtx (lookupSubst v)
-          case subst of
-            Just s -> unifyTerms s t
-            Nothing -> throwError $ Mismatch vOrigin t
-
-    unifyTerms' :: Term -> Term -> Tc ()
-    unifyTerms' (Term (Meta m1) _) (Term (Meta m2) _) | m1 == m2 = return ()
-    unifyTerms' (Term (PiT m1 lv l1 l2) d1) (Term (PiT m2 rv r1 r2) _) | m1 == m2 = do
-      unifyTerms l1 r1
-      unifyTerms l2 (alphaRename rv (lv, d1) r2)
-    unifyTerms' (Term (SigmaT lv l1 l2) d1) (Term (SigmaT rv r1 r2) _) = do
-      unifyTerms l1 r1
-      unifyTerms l2 (alphaRename rv (lv, d1) r2)
-    unifyTerms' (Term (Lam m1 lv l) d1) (Term (Lam m2 rv r) _) | m1 == m2 = do
-      unifyTerms l (alphaRename rv (lv, d1) r)
-    unifyTerms' (Term (Pair l1 l2) _) (Term (Pair r1 r2) _) = do
-      unifyTerms l1 r1
-      unifyTerms l2 r2
-    unifyTerms' (Term TyT _) (Term TyT _) = return ()
-    unifyTerms' (Term (V l) _) (Term (V r) _) | l == r = return ()
-    unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = do
-      unifyVarWithTerm a l b `catchError` (\_ -> unifyVarWithTerm b r a)
-    unifyTerms' a@(Term (V l) _) b = unifyVarWithTerm a l b
-    unifyTerms' a b@(Term (V r) _) = unifyVarWithTerm b r a
-    unifyTerms' a@(Term (Global l) _) b@(Term (Global r) _) =
-      if l == r
-        then return ()
-        else normaliseAndUnifyTerms a b
-    unifyTerms' (Term (Case su1 cs1) _) (Term (Case su2 cs2) _) = do
-      unifyTerms su1 su2
-      mapM_
-        ( \((p1, t1), (p2, t2)) -> do
-            unifyTerms p1 p2
-            unifyTerms t1 t2
-        )
-        (zip cs1 cs2)
-    unifyTerms' a@(Term (App m1 l1 l2) _) b@(Term (App m2 r1 r2) _)
-      | m1 == m2 =
-          do
-            unifyTerms l1 r1
-            unifyTerms l2 r2
-            `catchError` (\_ -> normaliseAndUnifyTerms a b)
-    unifyTerms' l r = normaliseAndUnifyTerms l r
-
-showSolvedMetas :: Tc ()
-showSolvedMetas = do
-  m <- gets (\s -> s.metaValues)
-  traceM $ "Solved metas: " ++ intercalate "\n" (map (\(m, t) -> printVal m ++ " := " ++ printVal t) (toList m))
-
--- | Unify two terms, normalising them first.
-normaliseAndUnifyTerms :: Term -> Term -> Tc ()
-normaliseAndUnifyTerms l r = do
-  let l' = normaliseTerm l
-  case l' of
-    Nothing -> do
-      let r' = normaliseTerm r
-      case r' of
-        Nothing -> throwError $ Mismatch l r
-        Just r'' -> unifyTerms l r''
-    Just l'' -> do
-      unifyTerms l'' r
-
--- | Validate a pattern unification problem, returning the spine variables.
-validateProb :: Var -> [Term] -> Term -> Tc (Maybe [Var])
-validateProb _ [] _ = return (Just [])
-validateProb hole (x : xs) rhs = do
-  x' <- resolveShallow x
-  case x'.value of
-    V v -> do
-      xs' <- validateProb hole xs rhs
-      return $ (v :) <$> xs'
-    _ -> return Nothing
-
--- | Solve a pattern unification problem.
-solve :: Var -> [Term] -> Term -> Tc Bool
-solve hole spine rhs = do
-  vars <- validateProb hole spine rhs
-  case vars of
-    Nothing -> return False
-    Just vars' -> do
-      let solution = normaliseTermFully (lams (map (Explicit,) vars') rhs)
-      solveMeta hole solution
-      return True

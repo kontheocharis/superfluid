@@ -26,7 +26,12 @@ source-repository head
 library
   exposed-modules:
       Checking.Context
+      Checking.Errors
+      Checking.Normalisation
+      Checking.Representation
       Checking.Typechecking
+      Checking.Unification
+      Checking.Utils
       Checking.Vars
       Interface.Cli
       Interface.Pretty

@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Checking.Vars (var, Sub (..), Subst, sub, subVar, alphaRename, noSub) where
 
 import Checking.Context (Ctx (..), Judgement (..))
