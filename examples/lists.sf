@@ -11,8 +11,8 @@ def TT : Unit {
 }
 
 data FlatArray : Type -> Type {
-  flat-nil : (A : Type) -> FlatArray A,
-  flat-cons : (A : Type) -> A -> FlatArray A -> FlatArray A
+  flat-nil : [A : Type] -> FlatArray A,
+  flat-cons : [A : Type] -> A -> FlatArray A -> FlatArray A
 }
 
 data Bool : Type {
@@ -27,8 +27,8 @@ def FALSE : Bool {
   false
 }
 
-def if-then-else : (A : Type) -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
-  \A b t e => case b {
+def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+  \b t e => case b {
     true => t TT,
     false => e TT
   }
@@ -64,10 +64,10 @@ def sub : Size -> Size -> Size {
   }
 }
 
-def len : (A : Type) -> FlatArray A -> Size {
-  \A arr => case arr {
-    flat-nil A => zero,
-    flat-cons A _ arr => succ (len A arr)
+def len : [A : Type] -> FlatArray A -> Size {
+  \arr => case arr {
+    flat-nil => zero,
+    flat-cons _ arr => succ (len arr)
   }
 }
 
@@ -88,151 +88,145 @@ def is-one : Size -> Bool {
   }
 }
 
-def slice : (A : Type) -> FlatArray A -> Size -> Size -> FlatArray A {
-  \A arr start end => case start {
+def slice : [A : Type] -> FlatArray A -> Size -> Size -> FlatArray A {
+  \arr start end => case start {
     zero => case end {
-      zero => flat-nil A,
+      zero => flat-nil,
       succ end' => case arr {
-        flat-nil A => flat-nil A,
-        flat-cons A x arr' => flat-cons A x (slice A arr' zero end')
+        flat-nil => flat-nil,
+        flat-cons x arr' => flat-cons x (slice arr' zero end')
       }
     },
     succ start' => case arr {
-      flat-nil A => flat-nil A,
-      flat-cons A _ arr' => slice A arr' start' end
+      flat-nil => flat-nil,
+      flat-cons _ arr' => slice arr' start' end
     }
   }
 }
 
-def unsafe-cast : (A : Type) -> (B : Type) -> A -> B {
+def unsafe-cast : [A : Type] -> [B : Type] -> A -> B {
   ?unsafe-cast
 }
 
-def push-front : (A : Type) -> A -> FlatArray A -> FlatArray A {
-  \A x arr => flat-cons A x arr
+def push-front : [A : Type] -> A -> FlatArray A -> FlatArray A {
+  \x arr => flat-cons x arr
 }
 
-def push-back : (A : Type) -> A -> FlatArray A -> FlatArray A {
-  \A x arr => case arr {
-    flat-nil A => flat-cons A x (flat-nil A),
-    flat-cons A y arr' => flat-cons A y (push-back A x arr')
+def push-back : [A : Type] -> A -> FlatArray A -> FlatArray A {
+  \x arr => case arr {
+    flat-nil => flat-cons x (flat-nil),
+    flat-cons y arr' => flat-cons y (push-back x arr')
   }
 }
 
-def empty : (A : Type) -> FlatArray A {
-  \A => flat-nil A
+def empty : [A : Type] -> FlatArray A {
+  flat-nil
 }
 
-def index : (A : Type) -> FlatArray A -> Size -> A {
-  \A arr i => case i {
+def index : [A : Type] -> FlatArray A -> Size -> A {
+  \arr i => case i {
     zero => case arr {
-      flat-nil A => ?index-out-of-bounds,
-      flat-cons A x _ => x
+      flat-nil => ?index-out-of-bounds,
+      flat-cons x _ => x
     },
     succ i' => case arr {
-      flat-nil A => ?index-out-of-bounds,
-      flat-cons A _ arr' => index A arr' i'
+      flat-nil => ?index-out-of-bounds,
+      flat-cons _ arr' => index arr' i'
     }
   }
 }
 
 -- HIGH LEVEL TYPES
 
-def id : (A : Type) -> A -> A {
-  \A x => x
+def id : [A : Type] -> A -> A {
+  \x => x
 }
 
 data List : Type -> Type {
-  nil : (A : Type) -> List A,
-  cons : (A : Type) -> A -> List A -> List A
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A
 }
 
 data SnocList : Type -> Type {
-  lin : (A : Type) -> SnocList A,
-  snoc : (A : Type) -> SnocList A -> A -> SnocList A
+  lin : [A : Type] -> SnocList A,
+  snoc : [A : Type] -> SnocList A -> A -> SnocList A
 }
 
-def append-snoc : (A : Type) -> SnocList A -> SnocList A -> SnocList A {
-  \A l1 l2 => case l2 {
-    lin A => l1,
-    snoc A l2' x => snoc A (append-snoc A l1 l2') x
+def append-snoc : [A : Type] -> SnocList A -> SnocList A -> SnocList A {
+  \l1 l2 => case l2 {
+    lin => l1,
+    snoc l2' x => snoc (append-snoc l1 l2') x
   }
 }
 
-def append : (A : Type) -> List A -> List A -> List A {
-  \A l1 l2 => case l1 {
-    nil A => l2,
-    cons A x xs => cons A x (append A xs l2)
+def append : [A : Type] -> List A -> List A -> List A {
+  \l1 l2 => case l1 {
+    nil => l2,
+    cons x xs => cons x (append xs l2)
   }
 }
 
-def last : (A : Type) -> A -> List A -> A {
-  \A x xs => case xs {
-    nil _ => x,
-    cons _ y ys => last A y ys
+def last : [A : Type] -> A -> List A -> A {
+  \x xs => case xs {
+    nil => x,
+    cons y ys => last y ys
   }
 }
 
-def init : (A : Type) -> A -> List A -> List A {
-  \A x xs => case xs {
-    nil _ => nil A,
-    cons _ y ys => cons A x (init A y ys)
+def init : [A : Type] -> A -> List A -> List A {
+  \x xs => case xs {
+    nil => nil,
+    cons y ys => cons x (init y ys)
   }
 }
 
-def to-snoc : (A : Type) -> List A -> SnocList A {
-  \A l => case l {
-    nil A => lin A,
-    cons A x xs => append-snoc A (snoc _ (lin _) x) (to-snoc _ xs)
+def to-snoc : [A : Type] -> List A -> SnocList A {
+  \l => case l {
+    nil => lin,
+    cons x xs => append-snoc (snoc lin x) (to-snoc xs)
   }
 }
 
-def from-snoc : (A : Type) -> SnocList A -> List A {
-  \A l => case l {
-    lin A => nil A,
-    snoc A l' x => append A (from-snoc _ l') (cons _ x (nil _))
+def from-snoc : [A : Type] -> SnocList A -> List A {
+  \l => case l {
+    lin => nil,
+    snoc l' x => append (from-snoc l') (cons x nil)
   }
 }
 
 data Eq : Type -> Type {
-  mk-eq : (A : Type) -> (is-equal : A -> A -> Bool) -> Eq A
+  mk-eq : [A : Type] -> (is-equal : A -> A -> Bool) -> Eq A
 }
 
-def is-equal : (A : Type) -> Eq A -> A -> A -> Bool {
-  \A eq x y => case eq {
-    mk-eq _ is-equal' => is-equal' x y
+def is-equal : [A : Type] -> Eq A -> A -> A -> Bool {
+  \eq x y => case eq {
+    mk-eq is-equal' => is-equal' x y
   }
 }
 
 data DoubleList : Type -> Type {
-  double-nil : (A : Type) -> DoubleList A,
-  double-one : (A : Type) -> A -> DoubleList A,
-  double-cons : (A : Type) -> A -> List A -> A -> DoubleList A
+  double-nil : [A : Type] -> DoubleList A,
+  double-one : [A : Type] -> A -> DoubleList A,
+  double-cons : [A : Type] -> A -> List A -> A -> DoubleList A
 }
 
-def to-double : (A : Type) -> List A -> DoubleList A {
-  \A l => case l {
-    nil A => double-nil A,
-    cons A x xs => {
-      let xs' = to-snoc _ xs;
-      case xs' {
-        lin _ => double-one A x,
-        snoc _ ys y => double-cons A x (from-snoc _ ys) y
-      }
+def to-double : [A : Type] -> List A -> DoubleList A {
+  \l => case l {
+    nil => double-nil,
+    cons x xs => case to-snoc xs {
+      lin => double-one x,
+      snoc ys y => double-cons x (from-snoc ys) y
     }
   }
 }
 
-def is-palindrome : (A : Type) -> Eq A -> List A -> Bool {
-  \A eq l => {
-    let l' = to-double _ l;
-    case l' {
-      double-nil _ => true,
-      double-one _ _ => true,
-      double-cons _ x xs y => if-then-else _ (is-equal _ eq x y)
-        (\_ => is-palindrome _ eq xs)
-        (\_ => false)
-    }
+def is-palindrome : [A : Type] -> Eq A -> List A -> Bool {
+  \eq l => case to-double l {
+    double-nil => true,
+    double-one _ => true,
+    double-cons x xs y => if-then-else (is-equal eq x y)
+      (\_ => is-palindrome eq xs)
+      (\_ => false)
   }
 }
 
@@ -255,57 +249,57 @@ def is-palindrome : (A : Type) -> Eq A -> List A -> Bool {
 
 repr FlatLists {
   data List A as FlatArray A {
-    nil _ as empty _,
-    cons _ x xs as push-front _ x xs,
+    nil as empty,
+    cons x xs as push-front x xs,
 
     case l {
       nil => b,
       cons => r
     } as {
-      if-then-else _ (is-zero (len _ l))
-        (\_ => unsafe-cast _ _ (b _))
-        (\_ => unsafe-cast _ _ (r _ (index _ l ZERO) (slice _ l ONE (len _ l))))
+      if-then-else (is-zero (len l))
+        (\_ => unsafe-cast b)
+        (\_ => unsafe-cast (r (index l ZERO) (slice l ONE (len l))))
     }
   }
 
   data SnocList A as FlatArray A {
-    lin _ as empty _,
-    snoc _ xs x as push-back _ x xs,
+    lin as empty,
+    snoc xs x as push-back x xs,
 
     case l {
       lin => b,
       snoc => r
     } as {
-      if-then-else _ (is-zero (len _ l))
-        (\_ => unsafe-cast _ _ (b _))
-        (\_ => unsafe-cast _ _ (r _ (slice _ l ZERO (sub (len _ l) ONE)) (index _ l (sub (len _ l) ONE))))
+      if-then-else (is-zero (len l))
+        (\_ => unsafe-cast b)
+        (\_ => unsafe-cast (r (slice l ZERO (sub (len l) ONE)) (index l (sub (len l) ONE))))
     }
   }
 
   data DoubleList A as FlatArray A {
-    double-nil _ as empty _,
-    double-one _ x as push-front _ x (empty _),
-    double-cons _ x xs y as push-front _ x (push-back _ y xs),
+    double-nil as empty,
+    double-one x as push-front x empty,
+    double-cons x xs y as push-front x (push-back y xs),
 
     case l {
       double-nil => b,
       double-one => r1,
       double-cons => r2
     } as {
-      if-then-else _ (is-zero (len _ l))
-        (\_ => unsafe-cast _ _ (b _))
-        (\_ => if-then-else _ (is-one (len _ l))
-          (\_ => unsafe-cast _ _ (r1 _ (index _ l ZERO)))
-          (\_ => unsafe-cast _ _
-            (r2 _ (index _ l ZERO)
-              (slice _ l ONE (sub (len _ l) ONE))
-              (index _ l (sub (len _ l) ONE)))))
+      if-then-else (is-zero (len l))
+        (\_ => unsafe-cast b)
+        (\_ => if-then-else (is-one (len l))
+          (\_ => unsafe-cast (r1 (index l ZERO)))
+          (\_ => unsafe-cast
+            (r2 (index l ZERO)
+              (slice l ONE (sub (len l) ONE))
+              (index l (sub (len l) ONE)))))
     }
   }
 
-  def to-snoc as \_ x => x
+  def to-snoc as \x => x
 
-  def from-snoc as \_ x => x
+  def from-snoc as \x => x
 
-  def to-double as \_ x => x
+  def to-double as \x => x
 }

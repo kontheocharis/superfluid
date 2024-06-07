@@ -29,10 +29,21 @@ repr VectRepr {
   }
 }
 
+data Unit : Type {
+  unit : Unit
+}
+
+def SigmaN : (n : Nat) -> Type -> Type {
+  \n A => case n {
+    z => Unit,
+    s n' => (a : A) ** SigmaN n' A
+  }
+}
+
+
 def tst : [n : Nat] -> Vect Nat n -> Vect Nat n {
   \v => {
-    let n = v;
-    case ((\a => a) n) {
+    case v {
       nil => nil,
       cons x xs => cons x xs
     }
