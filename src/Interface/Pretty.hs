@@ -160,7 +160,7 @@ instance Print ReprDataCtorItem where
   printVal (ReprDataCtorItem src target) = printVal src ++ " as " ++ printVal target
 
 instance Print ReprDataCaseItem where
-  printVal (ReprDataCaseItem (subject, ctors) target) =
+  printVal (ReprDataCaseItem (subject, _, ctors) target) =
     "case "
       ++ printVal subject
       ++ " "

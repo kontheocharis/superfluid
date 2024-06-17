@@ -36,7 +36,7 @@ import Lang
     itemName,
     lams,
     listToApp,
-    mapTermM,
+    mapTermM, annotTy,
   )
 
 -- | Represent a checked program
@@ -117,10 +117,9 @@ representTermRec = \case
       Just (_, term) -> do
         term' <- resolveDeep term
         return $ ReplaceAndContinue term'
-  Term (Case s cs) _ -> do
-    sTy <- getType s
-    case sTy of
-      Just t -> do
+  Term (Case s cs) d -> do
+    case (s.dat.annotTy, d.annotTy) of
+      (Just t, Just elimTy) -> do
         t' <- resolveShallow t
         case appToList t' of
           (Term (Global g) _, _) -> do
@@ -132,7 +131,8 @@ representTermRec = \case
                 xs <- caseElimsToAppArgs g cs
                 s' <- resolveDeep s
                 xs' <- mapM resolveDeep xs
-                return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (s' : xs')))
+                -- @@FIXME: This is not the right elimination type!
+                return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (elimTy : s' : xs')))
           _ -> error $ "Case subject is not a global type: " ++ printVal t'
       _ -> trace ("No type found for subject " ++ printVal s) $ return Continue
   _ -> return Continue

@@ -145,15 +145,15 @@ def is-palindrome : [A : Type] -> Eq A -> List A -> Bool {
 
 -- OUTPUT:
 --
--- def is-palindrome : (A : Type) -> (n190 : Eq A) -> (n191 : FlatArray A) -> Bool {
---   \A eq l => {
+-- def is-palindrome : [A : Type] -> (n190 : Eq A) -> (n191 : FlatArray A) -> Bool {
+--   \[A] eq l => {
 --     let l' : FlatArray A = l;
---     if-then-else _ (is-zero (len _ l'))
+--     if-then-else (is-zero (len l'))
 --     (\_ => true)
---     (\_ => if-then-else _ (is-one (len _ l'))
+--     (\_ => if-then-else (is-one (len l'))
 --       (\_ => true)
---       (\_ => if-then-else _ (is-equal _ eq (index _ l' ZERO) (index _ l' (sub (len _ l') ONE)))
---         (\_ => is-palindrome _ eq (slice _ l' ONE (sub (len _ l') ONE)))
+--       (\_ => if-then-else (is-equal eq (index l' ZERO) (index l' (sub (len l') ONE)))
+--         (\_ => is-palindrome eq (slice l' ONE (sub (len l') ONE)))
 --         (\_ => false)))
 --   }
 -- }
@@ -199,6 +199,7 @@ repr FlatLists {
       double-one => r1,
       double-cons => r2
     } as {
+      let x = ?h1;
       if-then-else (is-zero (len l))
         (\_ => unsafe-cast b)
         (\_ => if-then-else (is-one (len l))

@@ -255,6 +255,7 @@ reprCtorItem = do
 reprCaseItem :: Parser ReprDataCaseItem
 reprCaseItem = do
   symbol "case"
+  elim <- freshVar
   subject <- singlePat
   ctors <-
     curlies
@@ -267,7 +268,7 @@ reprCaseItem = do
           )
       )
   symbol "as"
-  ReprDataCaseItem (subject, ctors) <$> term
+  ReprDataCaseItem (subject, elim, ctors) <$> term
 
 -- | Parse a constructor item.
 ctorItem :: GlobalName -> Parser (Int -> CtorItem)

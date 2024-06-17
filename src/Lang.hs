@@ -246,7 +246,7 @@ data ReprSomeItem = ReprData ReprDataItem | ReprDecl ReprDeclItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
 data ReprDataCaseItem = ReprDataCaseItem
-  { binds :: (Pat, [(String, Pat)]), -- subjectBind, [(ctorName, elimBind)]
+  { binds :: (Pat, Var, [(String, Pat)]), -- subjectBind, elimBind, [(ctorName, elimBind)]
     target :: Term
   }
   deriving (Eq, Generic, Data, Typeable, Show)

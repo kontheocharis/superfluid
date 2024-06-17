@@ -38,7 +38,7 @@ import Checking.Errors (TcError (..))
 import Checking.Normalisation (fillAllMetas, normaliseTerm, resolveShallow)
 import Checking.Representation (representCtx, representTerm)
 import Checking.Unification (unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole)
+import Checking.Utils (showHole, showContext)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
 import Control.Monad.Except (throwError)
@@ -78,6 +78,8 @@ import Lang
     termDataAt, PrimItem (..),
   )
 import Lang as DI (DeclItem (..))
+import Debug.Trace (traceM)
+import Interface.Pretty (Print(printVal))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -194,7 +196,7 @@ checkReprDataCtorItem rName dName (ReprDataCtorItem src target) = do
 
 -- | Check a repr data case item.
 checkReprDataCaseItem :: String -> DataItem -> ReprDataCaseItem -> Tc ReprDataCaseItem
-checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
+checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) target) = do
   -- Ensure that all the constructors are present
   let given = map fst ctors
   let expected = map (\c -> c.name) dat.ctors
@@ -205,69 +207,75 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, ctors) target) = do
   let subjectTy = listToApp (genTerm (Global dat.name), map (\(m, p, _) -> (m, genTerm (V p))) params)
   subjectReprIndices <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) params
   subjectReprTy <- representTerm subjectTy
-  (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
-  enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
-    -- Form the elimination type family
-    elimTySubjectVar <- freshVar
-    let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
-    elimReprFam <- representTerm elimFam
-    elimName <- freshVar
+  enterCtxMod id $ do
+    (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
+    traceM "a"
+    showContext
+    enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
+      traceM "A"
+      showContext
+      -- Form the elimination type family
+      elimTySubjectVar <- freshVar
+      let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
+      elimReprFam <- representTerm elimFam
 
-    enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
-      -- Form the elimination type
-      let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
+      enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
+        traceM "B"
+        showContext
+        -- Form the elimination type
+        let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
 
-      -- Gather all the eliminators
-      ctors' <-
-        mapM
-          ( \(cName, cBind) -> do
-              -- Represented constructor parameters
-              let c = fromJust (find (\n -> n.name == cName) dat.ctors)
-              let (ctorParams, ctorRet) = piTypeToList c.ty
-              ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
+        -- Gather all the eliminators
+        ctors' <-
+          mapM
+            ( \(cName, cBind) -> do
+                -- Represented constructor parameters
+                let c = fromJust (find (\n -> n.name == cName) dat.ctors)
+                let (ctorParams, ctorRet) = piTypeToList c.ty
+                ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
 
-              -- Represented constructor return indices
-              let (_, ctorRetIndices) = appToList ctorRet
-              ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
+                -- Represented constructor return indices
+                let (_, ctorRetIndices) = appToList ctorRet
+                ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
 
-              -- Represented constructor return type
-              let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
-              let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
-              ctorReprRetTy <- representTerm ctorRetTy
+                -- Represented constructor return type
+                let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
+                let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
+                ctorReprRetTy <- representTerm ctorRetTy
 
-              -- Form the eliminator type
-              let elimCtorTy =
-                    listToPiType
-                      ( ctorReprParams,
-                        listToApp
-                          ( genTerm (V elimName),
-                            ctorReprRetIndices
-                              ++ [(Explicit, ctorReprRetTy)]
-                          )
-                      )
+                -- Form the eliminator type
+                let elimCtorTy =
+                      listToPiType
+                        ( ctorReprParams,
+                          listToApp
+                            ( genTerm (V elimName),
+                              ctorReprRetIndices
+                                ++ [(Explicit, ctorReprRetTy)]
+                            )
+                        )
 
-              -- The eliminator is bound to the given binding in the case
-              -- representation.
-              (cBindAsTerm, _) <- enterPat $ checkTerm cBind elimCtorTy
-              return (cName, cBindAsTerm)
-          )
-          ctors
+                -- The eliminator is bound to the given binding in the case
+                -- representation.
+                (cBindAsTerm, _) <- enterPat $ checkTerm cBind elimCtorTy
+                return (cName, cBindAsTerm)
+            )
+            ctors
 
-      -- Overall the RHS of a case representation should have in context:
-      -- 1. The subject indices
-      -- 2. The subject type
-      -- 3. The subject itself
-      -- 4. The elimination indices
-      -- 5. The elimination type
-      -- 6. For each constructor, the eliminator
-      (target', _) <- checkTerm target elimTy
+        -- Overall the RHS of a case representation should have in context:
+        -- 1. The subject indices
+        -- 2. The subject type
+        -- 3. The subject itself
+        -- 4. The elimination indices
+        -- 5. The elimination type
+        -- 6. For each constructor, the eliminator
+        (target', _) <- checkTerm target elimTy
 
-      -- @@TODO: hide eliminators from the context in the end!
+        -- @@TODO: hide eliminators from the context in the end!
 
-      -- Add the case representation to the context
-      let result = ReprDataCaseItem (subjectAsTerm, ctors') target'
-      modifySignature $ addCaseItemToRepr rName dat.name result
-      return result
+        -- Add the case representation to the context
+        let result = ReprDataCaseItem (subjectAsTerm, elimName, ctors') target'
+        modifySignature $ addCaseItemToRepr rName dat.name result
+        return result
 
 -- | Check a repr decl item.
 checkReprDeclItem :: ReprDeclItem -> Tc ReprDeclItem

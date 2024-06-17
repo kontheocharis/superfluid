@@ -460,8 +460,8 @@ findReprForCase tyName = do
       | globalAppSubjectName d.src == tyName =
           case d.cse of
             Just reprCase -> do
-              let (subjectBind, ctors) = reprCase.binds
-              bindsAsVars <- mapM patVarToVar (subjectBind : map snd ctors)
+              let (subjectBind, elim, ctors) = reprCase.binds
+              bindsAsVars <- (elim :) <$> mapM patVarToVar (subjectBind : map snd ctors)
               return $ Just (rName, lams (map (Explicit,) bindsAsVars) reprCase.target)
             Nothing -> return Nothing
     findReprData _ _ = return Nothing

@@ -1,12 +1,99 @@
+-- Foo
 
--- LOW LEVEL TYPES
--- Never mind their implementations, these are opaque (TODO: Add definitions without implementations)
-
-
--- HIGH LEVEL TYPES
-
-data Nat : Type {
-  zero : Nat,
-  succ : Nat -> Nat
+data Bool : Type {
+  true : Bool,
+  false : Bool,
 }
 
+data Equal : (A : Type) -> A -> A -> Type {
+  refl : (A : Type) -> (x : A) -> Equal A x x
+}
+
+def if-then-else : (T : Type) -> Bool -> T -> T -> T {
+  \T b t e => case b {
+    true => t,
+    false => e,
+  }
+}
+
+def if-then-else-dep : (T : Bool -> Type) -> (b : Bool) -> T true -> T false -> T b {
+  \T b t e => case b {
+    true => t,
+    false => e,
+  }
+}
+
+def if-then-else-eq : (T : Type) -> (b : Bool) -> (Equal Bool b true -> T) -> (Equal Bool b false -> T) -> T {
+  \T b t e => case b {
+    true => t (refl _ _),
+    false => e (refl _ _),
+  }
+}
+
+prim Word : Type
+
+prim word-zero : Word
+
+prim word-add : Word -> Word -> Word
+
+prim word-mul : Word -> Word -> Word
+
+prim word-one : Word
+
+prim word-is-zero : Word -> Bool
+
+prim word-sub : Word -> Word -> Word
+
+prim switch-word : [F : Word -> Type] -> (w : Word) -> F word-zero -> ((m : Word) -> F (word-add m word-one)) -> F w
+
+---
+
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat,
+}
+
+def add : Nat -> Nat -> Nat {
+  \m n => case m {
+    z => n,
+    s m' => s (add m' n),
+  }
+}
+
+def mul : Nat -> Nat -> Nat {
+  \m n => case m {
+    z => z,
+    s m' => add n (mul m' n),
+  }
+}
+
+repr NatWord {
+  data Nat as Word {
+    z as word-zero,
+    s n as word-add n word-one,
+    case n {
+      z => b,
+      s => r,
+    } as switch-word n b r
+  }
+
+  def add as word-add
+  def mul as word-mul
+}
+
+def fib : Nat -> Nat {
+  \n => case n {
+    z => z,
+    s i => case i {
+      z => s z,
+      s j => add (fib i) (fib j),
+    },
+  }
+}
+
+def factorial : Nat -> Nat {
+  \n => case n {
+    z => s z,
+    s i => mul n (factorial i),
+  }
+}
