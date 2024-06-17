@@ -14,7 +14,7 @@ import Checking.Context
     modifySignature,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTermFully, resolveDeep, resolveShallow)
+import Checking.Normalisation (normaliseTermFully, resolveDeep, resolveShallow, normaliseProgram)
 import Control.Monad.Except (throwError)
 import Data.Foldable (find, foldrM)
 import Data.List (sortBy)
@@ -38,7 +38,6 @@ import Lang
     listToApp,
     mapTermM,
   )
-import Lang as DI (TermMappable (mapTermMappable))
 
 -- | Represent a checked program
 representProgram :: Program -> Tc Program
@@ -63,8 +62,8 @@ representProgram (Program decls) = do
   -- Then, represent all the items in the program
   Program rest' <- mapTermMappableM representTermRec (Program rest)
 
-  -- Finally, normalise the program
-  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program rest')
+  -- Finally, return the program
+  return (Program rest')
 
 -- | Represent the current context.
 representCtx :: Tc ()

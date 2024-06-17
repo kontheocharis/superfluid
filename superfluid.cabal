@@ -33,6 +33,7 @@ library
       Checking.Unification
       Checking.Utils
       Checking.Vars
+      Codegen.Generate
       Interface.Cli
       Interface.Pretty
       Lang
@@ -56,6 +57,7 @@ library
     , criterion ==1.6.*
     , deepseq ==1.4.*
     , haskeline ==0.8.*
+    , language-c ==0.9.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*
@@ -88,6 +90,7 @@ executable superfluid-exe
     , criterion ==1.6.*
     , deepseq ==1.4.*
     , haskeline ==0.8.*
+    , language-c ==0.9.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*
@@ -122,6 +125,7 @@ test-suite superfluid-test
     , criterion ==1.6.*
     , deepseq ==1.4.*
     , haskeline ==0.8.*
+    , language-c ==0.9.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*

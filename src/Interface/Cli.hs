@@ -1,7 +1,7 @@
 module Interface.Cli (runCli) where
 
 import Checking.Context (Tc, TcState)
-import Checking.Normalisation (normaliseTermFully)
+import Checking.Normalisation (normaliseTermFully, normaliseProgram)
 import Checking.Representation (representProgram)
 import Checking.Typechecking (checkProgram, inferTerm)
 import Checking.Utils (runTc)
@@ -21,6 +21,8 @@ import Parsing.Parser (parseProgram, parseTerm)
 import System.Console.Haskeline (InputT, defaultSettings, getInputLine, outputStrLn, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
+import Codegen.Generate (Gen, runGen, generateProgram)
+import Language.C (CTranslUnit, Pretty (pretty))
 
 -- | What mode to run in.
 data Mode
@@ -32,6 +34,8 @@ data Mode
     RepresentFile String
   | -- | Run a REPL
     Repl
+  | -- | Generate code
+    GenerateCode String
   deriving (Show)
 
 -- | How to apply changes to a file
@@ -43,7 +47,9 @@ data Flags = Flags
   { -- | Whether to dump the program.
     dump :: Bool,
     -- | Whether to be verbose.
-    verbose :: Bool
+    verbose :: Bool,
+    -- | Normalise the program in the end.
+    normalise :: Bool
   }
   deriving (Show)
 
@@ -60,6 +66,7 @@ parseFlags =
   Flags
     <$> switch (long "dump" <> short 'd' <> help "Print the parsed program")
     <*> switch (long "verbose" <> short 'v' <> help "Be verbose")
+    <*> switch (long "normalise" <> short 'n' <> help "Normalise the program")
 
 -- | Parse the mode to run in.
 parseMode :: Parser Mode
@@ -67,6 +74,7 @@ parseMode =
   (CheckFile <$> strOption (long "check" <> short 'c' <> help "File to check"))
     <|> (ParseFile <$> strOption (long "parse" <> short 'p' <> help "File to parse"))
     <|> (RepresentFile <$> strOption (long "represent" <> short 'r' <> help "File to represent"))
+    <|> (GenerateCode <$> strOption (long "generate" <> short 'g' <> help "File to generate code for"))
     <|> pure Repl
 
 -- | Parse the command line arguments.
@@ -105,10 +113,14 @@ replErr m = do
   msg m
   runRepl
 
+-- | Potentially normalise a program.
+andPotentiallyNormalise :: Flags -> Program -> Program
+andPotentiallyNormalise flags p = if flags.normalise then normaliseProgram p else p
+
 -- | Run the compiler.
 runCompiler :: Args -> InputT IO ()
 runCompiler (Args (CheckFile file) flags) = do
-  checked <- checkFile file
+  checked <- andPotentiallyNormalise flags <$> checkFile file
   when flags.verbose $ msg "\nTypechecked program successfully"
   when flags.dump $ msg $ printVal checked
 runCompiler (Args (ParseFile file) flags) = do
@@ -116,9 +128,13 @@ runCompiler (Args (ParseFile file) flags) = do
   parsed <- parseFile file
   when flags.dump $ msg $ printVal parsed
 runCompiler (Args (RepresentFile file) flags) = do
-  represented <- representFile file
+  represented <- andPotentiallyNormalise flags <$> representFile file
   when flags.verbose $ msg "\nTypechecked and represented program successfully"
   when flags.dump $ msg $ printVal represented
+runCompiler (Args (GenerateCode file) flags) = do
+  code <- generateCode file
+  when flags.verbose $ msg "Generated code successfully"
+  when flags.dump $ msg $ show $ pretty code
 runCompiler (Args Repl _) = runRepl
 
 -- | Parse a file.
@@ -141,6 +157,14 @@ representFile file = do
   (checked, s) <- handleTc err (checkProgram parsed)
   (represented, _) <- handleTc err (put s >> representProgram checked)
   return represented
+
+-- | Parse, check and represent a file.
+generateCode :: String -> InputT IO CTranslUnit
+generateCode file = do
+  parsed <- parseFile file
+  (checked, s) <- handleTc err (checkProgram parsed)
+  (represented, _) <- handleTc err (put s >> normaliseProgram <$> representProgram checked)
+  handleGen err (generateProgram represented)
 
 -- | Run the REPL.
 runRepl :: InputT IO a
@@ -172,5 +196,13 @@ handleTc :: (String -> InputT IO (a, TcState)) -> Tc a -> InputT IO (a, TcState)
 handleTc er a = do
   case runTc a of
     Left e -> do
-      er $ "Error: " ++ show e
+      er $ "Typechecking error: " ++ show e
     Right (p, s) -> return (p, s)
+
+-- | Handle a generation result.
+handleGen :: (String -> InputT IO a) -> Gen a -> InputT IO a
+handleGen er a = do
+  case runGen a of
+    Left e -> do
+      er $ "Code generation error: " ++ show e
+    Right p -> return p

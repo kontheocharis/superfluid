@@ -36,6 +36,7 @@ dependencies:
   - th-lift >= 0.8 && < 0.9
   - deepseq >= 1.4 && < 1.5
   - persistent-vector >= 0.2 && < 0.3
+  - language-c >= 0.9 && < 0.10
 
 ghc-options:
   - -Wall

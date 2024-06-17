@@ -30,46 +30,19 @@ def if-then-else-eq : (T : Type) -> (b : Bool) -> (Equal Bool b true -> T) -> (E
   }
 }
 
-data Word : Type {
-  zw : Word,
-  sw : Word -> Word,
-}
+prim Word : Type
 
-def word-zero : Word {
-  zw
-}
+prim word-zero : Word
 
-def word-add : Word -> Word -> Word {
-  \m n => case m {
-    zw => n,
-    sw m' => sw (word-add m' n),
-  }
-}
+prim word-add : Word -> Word -> Word
 
-def word-one : Word {
-  sw zw
-}
+prim word-one : Word
 
-def word-is-zero : Word -> Bool {
-  \m => case m {
-    zw => true,
-    sw m' => false,
-  }
-}
+prim word-is-zero : Word -> Bool
 
-def word-sub : Word -> Word -> Word {
-  \m n => case n {
-    zw => m,
-    sw n' => case m {
-      zw => zw,
-      sw m' => word-sub m' n',
-    },
-  }
-}
+prim word-sub : Word -> Word -> Word
 
-def switch-word : (F : Word -> Type) -> F word-zero -> ((w : Word) -> F (word-add w word-one)) -> (w : Word) -> F w {
-  ?h2
-}
+prim switch-word : (F : Word -> Type) -> F word-zero -> ((w : Word) -> F (word-add w word-one)) -> (w : Word) -> F w
 
 ---
 
@@ -92,9 +65,10 @@ repr NatWord {
     case n {
       z => b,
       s => r,
-    } as (
+    } as {
+      let x = ?h1;
       switch-word _ b r n
-    )
+    }
   }
 
   def add as word-add
