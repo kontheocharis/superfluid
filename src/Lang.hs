@@ -15,6 +15,7 @@ module Lang
     Pos (..),
     Pat,
     Item (..),
+    PrimItem (..),
     DataItem (..),
     ReprItem (..),
     ReprSomeItem (..),
@@ -224,6 +225,7 @@ data Item
   = Decl DeclItem
   | Data DataItem
   | Repr ReprItem
+  | Prim PrimItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | Get the name of an item.
@@ -231,6 +233,7 @@ itemName :: Item -> String
 itemName (Decl (DeclItem name _ _ _)) = name
 itemName (Data (DataItem name _ _)) = name
 itemName (Repr (ReprItem name _)) = name
+itemName (Prim (PrimItem name _)) = name
 
 -- | A representation item is a name, label, inputs, and target term.
 data ReprItem = ReprItem
@@ -295,6 +298,13 @@ data CtorItem = CtorItem
   }
   deriving (Eq, Generic, Data, Typeable, Show)
 
+-- | A primitive item is a primitive name and type.
+data PrimItem = PrimItem
+  { name :: String,
+    ty :: Type
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
 -- | A program is a sequence of items.
 newtype Program = Program [Item]
   deriving (Eq, Generic, Data, Typeable, Show)
@@ -351,6 +361,7 @@ mapItemM :: (Monad m) => (Term -> m (MapResult Term)) -> Item -> m Item
 mapItemM f (Decl (DeclItem name ty term pos)) = Decl <$> (DeclItem name <$> mapTermM f ty <*> mapTermM f term <*> pure pos)
 mapItemM f (Data (DataItem name ty ctors)) = Data <$> (DataItem name <$> mapTermM f ty <*> mapM (mapCtorItemM f) ctors)
 mapItemM f (Repr (ReprItem name c)) = Repr . ReprItem name <$> mapM (mapReprSomeItemM f) c
+mapItemM f (Prim (PrimItem name ty)) = Prim . PrimItem name <$> mapTermM f ty
 
 mapReprSomeItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprSomeItem -> m ReprSomeItem
 mapReprSomeItemM f (ReprData d) = ReprData <$> mapReprDataItemM f d

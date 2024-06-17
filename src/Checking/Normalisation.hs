@@ -30,6 +30,22 @@ import Lang
     mapTermM,
   )
 
+data NormalisationOpts = NormalisationOpts {
+    reduceLets :: Bool,
+    reduceDecls :: Bool
+  }
+
+normaliseTermOpt :: NormalisationOpts -> Term -> Tc (Maybe Term)
+normaliseTermOpt opts (Term (App m (Term (Lam m' v t1) _) t2) _)
+  | m == m' =
+      return $ Just $ subVar v t2 t1
+normaliseTermOpt opts (Term (App m t1 t2) d1) = do
+  t1' <- normaliseTermOpt opts t1
+  case t1' of
+    Nothing -> return Nothing
+    Just t1'' -> return $ Just $ Term (App m t1'' t2) d1
+normaliseTermOpt opts _ = return Nothing
+
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Term -> Maybe Term

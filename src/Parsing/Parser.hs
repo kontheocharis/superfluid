@@ -33,7 +33,7 @@ import Lang
     listToApp,
     mapTermM,
     termDataAt,
-    termLoc,
+    termLoc, PrimItem (PrimItem),
   )
 import Parsing.Resolution (resolveGlobalsRec)
 import Text.Parsec
@@ -61,7 +61,6 @@ import Text.Parsec
     (<|>),
   )
 import Text.Parsec.Char (alphaNum, letter)
-import Text.Parsec.Combinator (sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 import Interface.Pretty (Print(printVal))
@@ -138,7 +137,7 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -205,7 +204,7 @@ parseProgram filename contents = case runParser (program <* eof) initialParserSt
 -- | Parse a program.
 program :: Parser Program
 program = whiteWrap $ do
-  ds <- many (Data <$> dataItem <|> Decl <$> declItem <|> Repr <$> reprItem)
+  ds <- many (Data <$> dataItem <|> Decl <$> declItem <|> Repr <$> reprItem <|> Prim <$> primItem)
   -- Resolve the globals after getting all the declarations.
   return $ mapTermMappable (resolveGlobalsRec (Signature ds)) (Program ds)
 
@@ -289,6 +288,15 @@ dataItem = whiteWrap $ do
       name
       (fromMaybe (genTerm TyT) ty)
       (zipWith ($) ctors [0 ..])
+
+-- | Parse a primitive item
+primItem :: Parser PrimItem
+primItem = whiteWrap $ do
+  symbol "prim"
+  (name, ty) <- declSignature
+  case ty of
+    Nothing -> fail "Primitive items must have a type signature"
+    Just ty' -> return $ PrimItem name ty'
 
 -- | Parse a declaration.
 declItem :: Parser DeclItem

@@ -1,8 +1,10 @@
 module Checking.Representation (representProgram, representCtx, representTerm) where
 
 import Checking.Context
-  ( Tc,
+  ( Signature (Signature),
+    Tc,
     addItems,
+    enterSignatureMod,
     findReprForCase,
     findReprForGlobal,
     getDataItem,
@@ -14,7 +16,7 @@ import Checking.Context
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (normaliseTermFully, resolveDeep, resolveShallow)
 import Control.Monad.Except (throwError)
-import Data.Foldable (find)
+import Data.Foldable (find, foldrM)
 import Data.List (sortBy)
 import Data.Maybe (fromJust)
 import Debug.Trace (trace)
@@ -31,6 +33,7 @@ import Lang
     TermMappable (mapTermMappableM),
     TermValue (..),
     appToList,
+    itemName,
     lams,
     listToApp,
     mapTermM,
@@ -41,14 +44,18 @@ import Lang as DI (TermMappable (mapTermMappable))
 representProgram :: Program -> Tc Program
 representProgram (Program decls) = do
   -- Filter out all the (checked) repr items from the program
-  let (reprs, rest) =
-        foldr
-          ( \x (reprs', rest') -> case x of
-              Repr r -> (Repr r : reprs', rest')
-              _ -> (reprs', x : rest')
-          )
-          ([], [])
-          decls
+  (reprs, rest) <-
+    foldrM
+      ( \x (reprs', rest') -> case x of
+          Repr r -> return (Repr r : reprs', rest')
+          it -> do
+            itRepr <- enterSignatureMod (const (Signature decls)) $ findReprForGlobal (itemName it)
+            case itRepr of
+              Nothing -> return (reprs', x : rest') -- Not a repr item, so retain
+              Just _ -> return (reprs', rest') -- Already represented, so discard
+      )
+      ([], [])
+      decls
 
   -- Add them to the signature
   modifySignature $ addItems reprs

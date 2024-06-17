@@ -18,37 +18,29 @@ data Var : Con -> Ty -> Type {
   there : [c : Con] -> [t : Ty] -> [t' : Ty] -> Var c t -> Var (extend c t') t
 }
 
-def var-eq : [c : Con] -> [t : Ty] -> Var c t -> Var c t -> Bool {
-  \a b => case a {
-    here => case b {
-      here => true,
-      there _ => false
-    },
-    there a' => case b {
-      here => false,
-      there b' => ?h34
-    }
-  }
-}
-
-def without : [t : Ty] -> (c : Con) -> Var c t -> Con {
-  \c v => case v {
-    here [c'] => c',
-    there [c'] [_] [t'] v' => extend (without c' v') t'
-  }
-}
+data Sub : Con -> Con -> Type {}
 
 data Tm : Con -> Ty -> Type {
   var : [c : Con] -> [t : Ty] -> Var c t -> Tm c t,
   lam : [c : Con] -> [t1 : Ty] -> [t2 : Ty] -> Tm (extend c t1) t2 -> Tm c (fn t1 t2),
-  app : [c : Con] -> [t1 : Ty] -> [t2 : Ty] -> Tm c (fn t1 t2) -> Tm c t1 -> Tm c t2
+  app : [c : Con] -> [t1 : Ty] -> [t2 : Ty] -> Tm c (fn t1 t2) -> Tm c t1 -> Tm c t2,
+  subst : [c : Con] -> [d : Con] -> [t : Ty] -> Sub c d -> Tm d t -> Tm c t
 }
 
-def subst : [t : Ty] -> [t' : Ty] -> [c : Con] -> (v : Var c t') -> Tm c t' -> Tm c t -> Tm (without c v) t {
-  \v tm' tm => case tm { }
+data Sub : Con -> Con -> Type {
+  terminal : [c : Con] -> Sub c empty,
+  join : [c1 : Con] -> [c2 : Con] -> [t : Ty] -> Sub c1 c2 -> Tm c1 t -> Sub c1 (extend c2 t),
+  identity : [c : Con] -> Sub c c,
+}
+
+data Setoid : Type -> Type {
+  setoid : (a : Type) -> (a -> a -> Type) -> Setoid a
 }
 
 def id : [c : Con] -> Tm c (fn alpha alpha) {
   lam (var here)
 }
 
+def main : Bool {
+  true
+}

@@ -75,7 +75,7 @@ import Lang
     listToPiType,
     locatedAt,
     piTypeToList,
-    termDataAt,
+    termDataAt, PrimItem (..),
   )
 import Lang as DI (DeclItem (..))
 
@@ -90,6 +90,15 @@ checkItem :: Item -> Tc Item
 checkItem (Decl decl) = Decl <$> checkDeclItem decl
 checkItem (Data dat) = Data <$> checkDataItem dat
 checkItem (Repr r) = Repr <$> checkReprItem r
+checkItem (Prim p) = Prim <$> checkPrimItem p
+
+-- | Check a prim item.
+checkPrimItem :: PrimItem -> Tc PrimItem
+checkPrimItem (PrimItem name ty) = do
+  (ty', _) <- checkTerm ty (locatedAt ty TyT)
+  let result = PrimItem name ty'
+  modifySignature (addItem (Prim result))
+  return result
 
 -- | Check a repr item.
 checkReprItem :: ReprItem -> Tc ReprItem
@@ -416,6 +425,7 @@ inferTerm' t@(Term (Global g) _) = do
     Just (Left (Decl decl')) -> return decl'.ty
     Just (Left (Data dat)) -> return dat.ty
     Just (Left (Repr _)) -> throwError $ CannotUseReprAsTerm g
+    Just (Left (Prim p)) -> return p.ty
     Just (Right ctor) -> return ctor.ty
   return (t, expectedTyp)
 inferTerm' t@(Term (V v) _) = do

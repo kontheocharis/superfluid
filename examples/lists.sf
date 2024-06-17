@@ -1,18 +1,7 @@
 
--- LOW LEVEL TYPES
--- Never mind their implementations, these are opaque (TODO: Add definitions without implementations)
-
+-- PRELUDE
 data Unit : Type {
-  unit : Unit
-}
-
-def TT : Unit {
-  unit
-}
-
-data FlatArray : Type -> Type {
-  flat-nil : [A : Type] -> FlatArray A,
-  flat-cons : [A : Type] -> A -> FlatArray A -> FlatArray A
+  tt : Unit
 }
 
 data Bool : Type {
@@ -20,121 +9,47 @@ data Bool : Type {
   false : Bool
 }
 
-def TRUE : Bool {
-  true
-}
-def FALSE : Bool {
-  false
-}
-
 def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
-  \b t e => case b {
-    true => t TT,
-    false => e TT
+  \b t f => case b {
+    true => t tt,
+    false => f tt
   }
 }
 
-data Size : Type {
-  zero : Size,
-  succ : Size -> Size
-}
-
-def ZERO : Size {
-  zero
-}
-
-def ONE : Size {
-  succ zero
-}
-
-def add : Size -> Size -> Size {
-  \s1 s2 => case s1 {
-    zero => s2,
-    succ s1' => succ (add s1' s2)
+def and : Bool -> Bool -> Bool {
+  \x y => case x {
+    true => y,
+    false => false
   }
 }
 
-def sub : Size -> Size -> Size {
-  \s1 s2 => case s2 {
-    zero => s1,
-    succ s2' => case s1 {
-      zero => zero,
-      succ s1' => sub s1' s2'
-    }
-  }
-}
+-- LOW LEVEL TYPES
+prim FlatArray : Type -> Type
+prim Size : Type
+prim ZERO : Size
+prim ONE : Size
 
-def len : [A : Type] -> FlatArray A -> Size {
-  \arr => case arr {
-    flat-nil => zero,
-    flat-cons _ arr => succ (len arr)
-  }
-}
+prim add : Size -> Size -> Size
 
-def is-zero : Size -> Bool {
-  \s => case s {
-    zero => true,
-    succ _ => false
-  }
-}
+prim sub : Size -> Size -> Size
 
-def is-one : Size -> Bool {
-  \s => case s {
-    zero => false,
-    succ s' => case s' {
-      zero => true,
-      succ _ => false
-    }
-  }
-}
+prim len : [A : Type] -> FlatArray A -> Size
 
-def slice : [A : Type] -> FlatArray A -> Size -> Size -> FlatArray A {
-  \arr start end => case start {
-    zero => case end {
-      zero => flat-nil,
-      succ end' => case arr {
-        flat-nil => flat-nil,
-        flat-cons x arr' => flat-cons x (slice arr' zero end')
-      }
-    },
-    succ start' => case arr {
-      flat-nil => flat-nil,
-      flat-cons _ arr' => slice arr' start' end
-    }
-  }
-}
+prim is-zero : Size -> Bool
 
-def unsafe-cast : [A : Type] -> [B : Type] -> A -> B {
-  ?unsafe-cast
-}
+prim is-one : Size -> Bool
 
-def push-front : [A : Type] -> A -> FlatArray A -> FlatArray A {
-  \x arr => flat-cons x arr
-}
+prim slice : [A : Type] -> FlatArray A -> Size -> Size -> FlatArray A
 
-def push-back : [A : Type] -> A -> FlatArray A -> FlatArray A {
-  \x arr => case arr {
-    flat-nil => flat-cons x (flat-nil),
-    flat-cons y arr' => flat-cons y (push-back x arr')
-  }
-}
+prim unsafe-cast : [A : Type] -> [B : Type] -> A -> B
 
-def empty : [A : Type] -> FlatArray A {
-  flat-nil
-}
+prim push-front : [A : Type] -> A -> FlatArray A -> FlatArray A
 
-def index : [A : Type] -> FlatArray A -> Size -> A {
-  \arr i => case i {
-    zero => case arr {
-      flat-nil => ?index-out-of-bounds,
-      flat-cons x _ => x
-    },
-    succ i' => case arr {
-      flat-nil => ?index-out-of-bounds,
-      flat-cons _ arr' => index arr' i'
-    }
-  }
-}
+prim push-back : [A : Type] -> A -> FlatArray A -> FlatArray A
+
+prim empty : [A : Type] -> FlatArray A
+
+prim index : [A : Type] -> FlatArray A -> Size -> A
 
 -- HIGH LEVEL TYPES
 
@@ -217,13 +132,6 @@ def to-double : [A : Type] -> List A -> DoubleList A {
       lin => double-one x,
       snoc ys y => double-cons x (from-snoc ys) y
     }
-  }
-}
-
-def and : Bool -> Bool -> Bool {
-  \x y => case x {
-    true => y,
-    false => false
   }
 }
 
