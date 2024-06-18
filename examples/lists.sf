@@ -199,7 +199,6 @@ repr FlatLists {
       double-one => r1,
       double-cons => r2
     } as {
-      let x = ?h1;
       if-then-else (is-zero (len l))
         (\_ => unsafe-cast b)
         (\_ => if-then-else (is-one (len l))

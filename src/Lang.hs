@@ -69,7 +69,7 @@ type GlobalName = String
 
 -- | A variable
 -- Represented by a string name and a unique integer identifier (no shadowing).
-data Var = Var String Int deriving (Eq, Ord, Generic, Data, Typeable, Show)
+data Var = Var { name :: String, idx :: Int } deriving (Eq, Ord, Generic, Data, Typeable, Show)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit deriving (Eq, Generic, Data, Typeable, Show)

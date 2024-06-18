@@ -209,19 +209,13 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) tar
   subjectReprTy <- representTerm subjectTy
   enterCtxMod id $ do
     (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
-    traceM "a"
-    showContext
     enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
-      traceM "A"
-      showContext
       -- Form the elimination type family
       elimTySubjectVar <- freshVar
       let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
       elimReprFam <- representTerm elimFam
 
       enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
-        traceM "B"
-        showContext
         -- Form the elimination type
         let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
 

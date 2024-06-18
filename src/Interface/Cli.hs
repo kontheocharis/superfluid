@@ -21,8 +21,9 @@ import Parsing.Parser (parseProgram, parseTerm)
 import System.Console.Haskeline (InputT, defaultSettings, getInputLine, outputStrLn, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Codegen.Generate (Gen, runGen, generateProgram)
+import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 import Language.C (CTranslUnit, Pretty (pretty))
+import Language.JavaScript.Parser (JSAST, renderToString, renderJS)
 
 -- | What mode to run in.
 data Mode
@@ -134,7 +135,7 @@ runCompiler (Args (RepresentFile file) flags) = do
 runCompiler (Args (GenerateCode file) flags) = do
   code <- generateCode file
   when flags.verbose $ msg "Generated code successfully"
-  when flags.dump $ msg $ show $ pretty code
+  when flags.dump $ msg $ renderJsProg code
 runCompiler (Args Repl _) = runRepl
 
 -- | Parse a file.
@@ -159,7 +160,7 @@ representFile file = do
   return represented
 
 -- | Parse, check and represent a file.
-generateCode :: String -> InputT IO CTranslUnit
+generateCode :: String -> InputT IO JsProg
 generateCode file = do
   parsed <- parseFile file
   (checked, s) <- handleTc err (checkProgram parsed)

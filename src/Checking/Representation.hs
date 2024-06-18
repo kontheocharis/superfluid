@@ -8,13 +8,12 @@ import Checking.Context
     findReprForCase,
     findReprForGlobal,
     getDataItem,
-    getType,
     inSignature,
     modifyCtxM,
-    modifySignature,
+    modifySignature, freshMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTermFully, resolveDeep, resolveShallow, normaliseProgram)
+import Checking.Normalisation (resolveDeep, resolveShallow)
 import Control.Monad.Except (throwError)
 import Data.Foldable (find, foldrM)
 import Data.List (sortBy)
@@ -117,9 +116,9 @@ representTermRec = \case
       Just (_, term) -> do
         term' <- resolveDeep term
         return $ ReplaceAndContinue term'
-  Term (Case s cs) d -> do
-    case (s.dat.annotTy, d.annotTy) of
-      (Just t, Just elimTy) -> do
+  Term (Case s cs) _ -> do
+    case s.dat.annotTy of
+      Just t -> do
         t' <- resolveShallow t
         case appToList t' of
           (Term (Global g) _, _) -> do
@@ -131,6 +130,7 @@ representTermRec = \case
                 xs <- caseElimsToAppArgs g cs
                 s' <- resolveDeep s
                 xs' <- mapM resolveDeep xs
+                elimTy <- freshMeta
                 -- @@FIXME: This is not the right elimination type!
                 return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (elimTy : s' : xs')))
           _ -> error $ "Case subject is not a global type: " ++ printVal t'

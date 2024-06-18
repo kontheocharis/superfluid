@@ -1,0 +1,84 @@
+
+
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat,
+}
+
+data Shape : Type {
+  i : Nat -> Shape,
+  cross : Shape -> Shape -> Shape,
+}
+
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n),
+}
+
+data Index : Shape -> Type {
+  here : [n : Nat] -> Fin n -> Index (i n),
+  pair : [s1 : Shape] -> [s2 : Shape] -> Index s1 -> Index s2 -> Index (cross s1 s2),
+}
+
+data Tensor : Shape -> Type -> Type {
+  mk-tensor : [h : Shape] -> [A : Type] -> (Index h -> A) -> Tensor h A,
+}
+
+def ones : [h : Shape] -> [A : Type] -> (one : A) -> Tensor h A {
+  \one => mk-tensor (\_ => one)
+}
+
+data Ring : Type -> Type {
+  mk-ring : [R : Type]
+    -> (zero : R)
+    -> (one : R)
+    -> (plus : R -> R -> R)
+    -> (times : R -> R -> R)
+    -> Ring R,
+}
+
+def tensor-idx : [h : Shape] -> [A : Type] -> Tensor h A -> Index h -> A {
+  \t idx => case t {
+    mk-tensor f => f idx
+  }
+}
+
+data List : Type -> Type {
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A,
+}
+
+def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
+  \f l => case l {
+    nil => nil,
+    cons x xs => cons (f x) (map f xs)
+  }
+}
+
+-- def count-up-to : (n : Nat) -> List (Fin n) {
+--   \n => case n {
+--     z => nil,
+--     s m => cons fz (map fs (count-up-to m))
+--   }
+-- }
+
+-- def tensor-mul : [h1 : Shape]
+--   -> [h2 : Shape]
+--   -> [h3 : Shape]
+--   -> [R : Type]
+--   -> Ring R
+--   -> Tensor (cross h1 h2) R
+--   -> Tensor (cross h2 h3) R
+--   -> Tensor (cross h1 h3) R
+-- {
+--   \ring t1 t2 => case ring {
+--     mk-ring zero one plus times => {
+--       mk-tensor (\idx => case idx {
+--         pair m n => {
+--           ?h1
+--         }
+--       })
+--     }
+--   }
+-- }
+

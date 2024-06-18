@@ -42,7 +42,7 @@ instance Print TermValue where
             ( map
                 ( \(m, v) -> case m of
                     Explicit -> printSingleVal v
-                    Implicit -> "[" ++ printSingleVal v ++ "]"
+                    Implicit -> "[" ++ printVal v ++ "]"
                 )
                 vs
             )
@@ -59,7 +59,7 @@ instance Print TermValue where
             ( map
                 ( \(m, x) -> case m of
                     Explicit -> printSingleVal x
-                    Implicit -> "[" ++ printSingleVal x ++ "]"
+                    Implicit -> "[" ++ printVal x ++ "]"
                 )
                 xs
             )
