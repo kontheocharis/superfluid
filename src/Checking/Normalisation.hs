@@ -16,25 +16,45 @@ import Checking.Context
     classifyApp,
     freshVar,
   )
-import Checking.Vars (Subst (..), subVar, Sub)
+import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Monad.State (gets)
 import Data.Map (lookup, (!?))
 import Lang
   ( HasLoc (..),
     MapResult (..),
+    Pat,
     PiMode (..),
+    Program (..),
     Term (..),
     TermMappable (..),
     TermValue (..),
     listToApp,
     locatedAt,
-    mapTermM, Program (..), Pat,
+    mapTermM,
   )
+import Language.Haskell.TH (noSig)
+import Control.Monad (foldM)
+import Control.Applicative ((<|>))
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
 normaliseProgram (Program decls) = mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program decls)
 
+-- | Match a term against a pattern.
+--
+-- This does not expect wildcards in the pattern.
+caseMatch :: Term -> Pat -> Maybe Sub
+caseMatch (Term (Pair t1 t2) _) (Term (Pair p1 p2) _) = do
+  s1 <- caseMatch t1 p1
+  s2 <- caseMatch t2 p2
+  return $ s1 <> s2
+caseMatch (Term (Global l) _) (Term (Global r) _) | l == r = return noSub
+caseMatch (Term (App m t1 t2) _) (Term (App m' t1' t2') _) | m == m' = do
+  s1 <- caseMatch t1 t1'
+  s2 <- caseMatch t2 t2'
+  return $ s1 <> s2
+caseMatch a (Term (V v) _) = return $ Sub [(v, a)]
+caseMatch _ _ = Nothing
 
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
@@ -45,6 +65,21 @@ normaliseTerm (Term (App m (Term (Lam m' v t1) _) t2) _)
 normaliseTerm (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm t1
   return (Term (App m t1' t2) d1)
+normaliseTerm (Term (Case s cs) d1) = do
+  let s' = normaliseTerm s
+  let s'f = normaliseTermFully s
+  let res =
+        foldr
+          ( \(p, c) acc -> acc <|> do
+                  sb <- caseMatch s'f p
+                  return (sub sb c))
+          Nothing
+          cs
+  case res of
+    Just t -> return t
+    Nothing -> case s' of
+      Just s'' -> return $ Term (Case s'' cs) d1
+      Nothing -> Nothing
 normaliseTerm _ = Nothing -- @@Todo: normalise declarations
 
 -- | Reduce a term to normal form (fully).
