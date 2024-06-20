@@ -9,8 +9,16 @@ data Bool : Type {
 }
 
 data Maybe : Type -> Type {
-  nothing : [a : Type] -> Maybe a,
-  just : [a : Type] -> a -> Maybe a
+  nothing : [A : Type] -> Maybe A,
+  just : [A : Type] -> A -> Maybe A
+}
+
+data Equal : [A : Type] -> A -> A -> Type {
+  refl : [A : Type] -> [x : A] -> Equal x x
+}
+
+data Pair : (A : Type) -> (A -> Type) -> Type {
+  pair : [A : Type] -> [B : A -> Type] -> (x : A) -> B x -> Pair A B
 }
 
 data Nat : Type {
@@ -19,13 +27,13 @@ data Nat : Type {
 }
 
 data List : Type -> Type {
-  nil : [a : Type] -> List a,
-  cons : [a : Type] -> a -> List a -> List a
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A
 }
 
 data Vec : Type -> Nat -> Type {
-  vnil : [a : Type] -> Vec a z,
-  vcons : [a : Type] -> [n : Nat] -> a -> Vec a n -> Vec a (s n)
+  vnil : [A : Type] -> Vec A z,
+  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
 }
 
 data Fin : Nat -> Type {
