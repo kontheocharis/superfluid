@@ -32,8 +32,6 @@ import Lang
     locatedAt,
     mapTermM,
   )
-import Language.Haskell.TH (noSig)
-import Control.Monad (foldM)
 import Control.Applicative ((<|>))
 
 -- | Normalise a program fully.

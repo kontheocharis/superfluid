@@ -2,3 +2,19 @@
 def foo : (b : Bool) * case b { true => Bool, false => Unit } {
   (false, tt)
 }
+
+def not : Bool -> Bool {
+  \b => case b {
+    true => false,
+    false => true
+  }
+}
+
+
+def testing : Unit {
+  let x = true;
+  let y = false;
+  let z = not x;
+
+  tt
+}

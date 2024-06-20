@@ -1,4 +1,5 @@
--- Basic types
+-- General types
+
 data Unit : Type {
   tt : Unit
 }
@@ -36,3 +37,78 @@ data Fin : Nat -> Type {
   fz : [n : Nat] -> Fin (s n),
   fs : [n : Nat] -> Fin n -> Fin (s n)
 }
+
+-- General primitives
+
+prim cast : [A : Type] -> [B : Type] -> A -> B
+
+-- JS primitives
+
+prim JS : Type
+
+prim js-null : JS
+
+prim js-undefined : JS
+
+prim js-true : JS
+
+prim js-false : JS
+
+prim js-zero : JS
+
+prim js-one : JS
+
+prim js-plus : JS -> JS -> JS
+
+prim js-minus : JS -> JS -> JS
+
+prim js-times : JS -> JS -> JS
+
+prim js-div : JS -> JS -> JS
+
+prim js-mod : JS -> JS -> JS
+
+prim js-neg : JS -> JS
+
+prim js-eq : JS -> JS -> JS
+
+prim js-eqq : JS -> JS -> JS
+
+prim js-neq : JS -> JS -> JS
+
+prim js-neqq : JS -> JS -> JS
+
+prim js-lt : JS -> JS -> JS
+
+prim js-lte : JS -> JS -> JS
+
+prim js-gt : JS -> JS -> JS
+
+prim js-gte : JS -> JS -> JS
+
+prim js-and : JS -> JS -> JS
+
+prim js-or : JS -> JS -> JS
+
+prim js-not : JS -> JS
+
+prim js-if : [A : Type] -> JS -> (Unit -> A) -> (Unit -> A) -> A
+
+prim js-typeof : JS -> JS
+
+-- Default representations
+
+repr BoolAsJSBool {
+  data Bool as JS {
+    true as js-true,
+    false as js-false,
+
+    case b {
+      true => t,
+      false => f,
+    } as {
+      js-if b (\_ => cast t) (\_ => cast f)
+    }
+  }
+}
+

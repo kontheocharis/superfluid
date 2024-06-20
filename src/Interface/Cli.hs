@@ -141,27 +141,29 @@ runCompiler (Args Repl _) = runRepl
 
 -- | Parse a file.
 parseFile :: String -> InputT IO Program
-parseFile file = fst <$> parseFile' file
+parseFile file = do
+  (p, _, _) <- parseFile' file
+  return p
 
 -- | Parse a file and return the current TC state.
-parseFile' :: String -> InputT IO (Program, TcState)
+parseFile' :: String -> InputT IO (Program, Program, TcState)
 parseFile' file = do
   (prelude, st) <- parseAndCheckPrelude
   contents <- liftIO $ readFile file
   program <- handleParse err (parseProgram file contents (Just prelude))
-  return (program, st)
+  return (program, prelude, st)
 
 -- | Parse and check a file.
 checkFile :: String -> InputT IO Program
 checkFile file = do
-  (parsed, st) <- parseFile' file
+  (parsed, _, st) <- parseFile' file
   (checked, _) <- handleTc err (put st >> checkProgram parsed)
   return checked
 
 -- | Parse, check and represent a file.
 representFile :: String -> InputT IO Program
 representFile file = do
-  (parsed, st) <- parseFile' file
+  (parsed, _, st) <- parseFile' file
   (checked, st') <- handleTc err (put st >> checkProgram parsed)
   (represented, _) <- handleTc err (put st' >> representProgram checked)
   return represented
@@ -169,9 +171,9 @@ representFile file = do
 -- | Parse, check and represent a file.
 generateCode :: String -> InputT IO JsProg
 generateCode file = do
-  (parsed, st) <- parseFile' file
+  (parsed, prelude, st) <- parseFile' file
   (checked, st') <- handleTc err (put st >> checkProgram parsed)
-  (represented, _) <- handleTc err (put st' >> normaliseProgram <$> representProgram checked)
+  (represented, _) <- handleTc err (put st' >> normaliseProgram <$> representProgram (prelude <> checked))
   handleGen err (generateProgram represented)
 
 -- | Run the REPL.

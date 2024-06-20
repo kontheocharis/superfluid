@@ -5,7 +5,7 @@ import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Interface.Pretty (indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem, Program (Program), Term (..), TermValue (..), appToList, letToList, listToApp, name, piTypeToList, value)
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem (..), Program (Program), Term (..), TermValue (..), appToList, letToList, listToApp, name, piTypeToList, value)
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
@@ -57,6 +57,75 @@ jsName n = concatMap (\c -> if c == '-' then "_" else if c == '\'' then "_p_" el
 jsNull :: JsExpr
 jsNull = JsExpr "null"
 
+jsUndefined :: JsExpr
+jsUndefined = JsExpr "undefined"
+
+jsTrue :: JsExpr
+jsTrue = JsExpr "true"
+
+jsFalse :: JsExpr
+jsFalse = JsExpr "false"
+
+jsZero :: JsExpr
+jsZero = JsExpr "0"
+
+jsOne :: JsExpr
+jsOne = JsExpr "1"
+
+jsPlus :: JsExpr -> JsExpr -> JsExpr
+jsPlus (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") + (" ++ b ++ ")"
+
+jsMinus :: JsExpr -> JsExpr -> JsExpr
+jsMinus (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") - (" ++ b ++ ")"
+
+jsTimes :: JsExpr -> JsExpr -> JsExpr
+jsTimes (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") * (" ++ b ++ ")"
+
+jsDiv :: JsExpr -> JsExpr -> JsExpr
+jsDiv (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") / (" ++ b ++ ")"
+
+jsMod :: JsExpr -> JsExpr -> JsExpr
+jsMod (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") % (" ++ b ++ ")"
+
+jsEq :: JsExpr -> JsExpr -> JsExpr
+jsEq (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") == (" ++ b ++ ")"
+
+jsEqq :: JsExpr -> JsExpr -> JsExpr
+jsEqq (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") === (" ++ b ++ ")"
+
+jsNeq :: JsExpr -> JsExpr -> JsExpr
+jsNeq (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") != (" ++ b ++ ")"
+
+jsNeqq :: JsExpr -> JsExpr -> JsExpr
+jsNeqq (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") !== (" ++ b ++ ")"
+
+jsLt :: JsExpr -> JsExpr -> JsExpr
+jsLt (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") < (" ++ b ++ ")"
+
+jsLte :: JsExpr -> JsExpr -> JsExpr
+jsLte (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") <= (" ++ b ++ ")"
+
+jsGt :: JsExpr -> JsExpr -> JsExpr
+jsGt (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") > (" ++ b ++ ")"
+
+jsGte :: JsExpr -> JsExpr -> JsExpr
+jsGte (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") >= (" ++ b ++ ")"
+
+jsAnd :: JsExpr -> JsExpr -> JsExpr
+jsAnd (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") && (" ++ b ++ ")"
+
+jsOr :: JsExpr -> JsExpr -> JsExpr
+jsOr (JsExpr a) (JsExpr b) = JsExpr $ "(" ++ a ++ ") || (" ++ b ++ ")"
+
+jsNot :: JsExpr -> JsExpr
+jsNot (JsExpr a) = JsExpr $ "!(" ++ a ++ ")"
+
+jsCond :: JsExpr -> JsExpr -> JsExpr -> JsExpr
+jsCond (JsExpr c) (JsExpr t) (JsExpr f) = JsExpr $ "(" ++ c ++ ") ? (" ++ t ++ ") : (" ++ f ++ ")"
+
+jsTypeof :: JsExpr -> JsExpr
+jsTypeof (JsExpr e) = JsExpr $ "typeof (" ++  e ++ ")"
+
 jsLam :: String -> JsExpr -> JsExpr
 jsLam arg (JsExpr b) = JsExpr $ "(" ++ arg ++ ") => " ++ b
 
@@ -87,8 +156,11 @@ jsAccess (JsExpr e) s = JsExpr $ e ++ "." ++ s
 jsObj :: [(String, JsExpr)] -> JsExpr
 jsObj ps = JsExpr $ "{" ++ intercalate ", " (map (\(s, JsExpr e) -> s ++ ": " ++ e) ps) ++ "}"
 
+jsInvoke :: JsExpr -> JsExpr
+jsInvoke (JsExpr e) = JsExpr $ "(" ++ e ++ ")()"
+
 addDecl :: JsStat -> Gen ()
-addDecl d = modify (\s -> s {decls = d : s.decls})
+addDecl d = modify (\s -> s {decls = s.decls ++ [d]})
 
 primAccess :: JsExpr -> String -> JsExpr
 primAccess (JsExpr e) s = JsExpr $ "(" ++ e ++ ")" ++ "." ++ s
@@ -189,4 +261,44 @@ generateDataCtor (CtorItem name ty _ _) = do
   addDecl $ jsConst (jsName name) fn
 
 resolvePrimItem :: PrimItem -> Gen ()
-resolvePrimItem _ = return ()
+resolvePrimItem (PrimItem n@"js-null" _) = do
+  addDecl $ jsConst (jsName n) jsNull
+resolvePrimItem (PrimItem n@"js-undefined" _) = do
+  addDecl $ jsConst (jsName n) jsUndefined
+resolvePrimItem (PrimItem n@"js-true" _) = do
+  addDecl $ jsConst (jsName n) jsTrue
+resolvePrimItem (PrimItem n@"js-false" _) = do
+  addDecl $ jsConst (jsName n) jsFalse
+resolvePrimItem (PrimItem n@"js-zero" _) = do
+  addDecl $ jsConst (jsName n) jsZero
+resolvePrimItem (PrimItem n@"js-one" _) = do
+  addDecl $ jsConst (jsName n) jsOne
+resolvePrimItem (PrimItem n@"js-plus" _) = do
+  addDecl $
+    jsConst
+      (jsName n)
+      ( jsLam
+          "a"
+          ( jsLam
+              "b"
+              (jsPlus (jsVariable "a") (jsVariable "b"))
+          )
+      )
+resolvePrimItem (PrimItem n@"js-if" _) = do
+  addDecl $
+    jsConst
+      (jsName n)
+      ( jsLam
+          "cond"
+          ( jsLam
+              "t"
+              ( jsLam
+                  "f"
+                  ( jsCond (jsVariable "cond") (jsInvoke $ jsVariable "t") (jsInvoke $ jsVariable "f")
+                  )
+              )
+          )
+      )
+resolvePrimItem (PrimItem n@"cast" _) = do
+  addDecl $ jsConst (jsName n) (jsLam "x" (jsVariable "x"))
+resolvePrimItem (PrimItem _ _) = return ()

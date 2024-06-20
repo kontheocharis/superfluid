@@ -309,6 +309,12 @@ data PrimItem = PrimItem
 newtype Program = Program [Item]
   deriving (Eq, Generic, Data, Typeable, Show)
 
+instance Semigroup Program where
+  Program a <> Program b = Program (a <> b)
+
+instance Monoid Program where
+  mempty = Program []
+
 -- | Result of a term map.
 data MapResult a = Continue | Replace a | ReplaceAndContinue a
 
