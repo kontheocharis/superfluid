@@ -5,6 +5,7 @@ import Data.Char (isSpace)
 import Data.Maybe (fromMaybe)
 import Data.String
 import Data.Text (Text)
+import Debug.Trace (trace, traceShow)
 import Interface.Pretty (Print (printVal))
 import Lang
   ( CtorItem (..),
@@ -33,6 +34,7 @@ import Lang
     genTerm,
     isValidPat,
     listToApp,
+    locatedAt,
     mapTermM,
     termDataAt,
     termLoc,
@@ -402,7 +404,7 @@ piTOrSigmaT = try . locatedTerm $ do
   (m, name, ty1) <- named
   binderT <-
     (reservedOp "->" >> return (PiT m))
-      <|> ( reservedOp "**" >> case m of
+      <|> ( reservedOp "*" >> case m of
               Explicit -> return SigmaT
               Implicit -> fail "Cannot use implicit arguments in a sigma type"
           )
@@ -412,7 +414,7 @@ piTOrSigmaT = try . locatedTerm $ do
 app :: Parser Term
 app = do
   t <- singleTerm
-  ts <- many (((Implicit,) <$> try (square singleTerm)) <|> ((Explicit,) <$> singleTerm))
+  ts <- many (((Implicit,) <$> try (square term)) <|> ((Explicit,) <$> singleTerm))
   return $ listToApp (t, ts)
 
 -- | Parse a series of let terms.
@@ -447,8 +449,6 @@ lam = do
   t <- term
   end <- getPos
   return $ foldr (\(m, (x, l)) acc -> Term (Lam m x acc) (termDataAt (l <> Loc end end))) t v
-
--- Lam v <$> term
 
 -- | Parse a pair.
 pairOrParens :: Parser Term

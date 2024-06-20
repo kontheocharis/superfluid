@@ -1,0 +1,4 @@
+
+def foo : (b : Bool) * case b { true => Bool, false => Unit } {
+  (false, tt)
+}

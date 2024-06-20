@@ -17,10 +17,6 @@ data Equal : [A : Type] -> A -> A -> Type {
   refl : [A : Type] -> [x : A] -> Equal x x
 }
 
-data Pair : (A : Type) -> (A -> Type) -> Type {
-  pair : [A : Type] -> [B : A -> Type] -> (x : A) -> B x -> Pair A B
-}
-
 data Nat : Type {
   z : Nat,
   s : Nat -> Nat

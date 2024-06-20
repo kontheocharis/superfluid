@@ -48,7 +48,7 @@ instance Print TermValue where
             )
           ++ " => "
           ++ printVal b
-  printVal (SigmaT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") ** " ++ printVal t2
+  printVal (SigmaT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") * " ++ printVal t2
   printVal (Pair t1 t2) = "(" ++ printVal t1 ++ ", " ++ printVal t2 ++ ")"
   printVal t@(App {}) =
     let (x, xs) = appToList (genTerm t)
@@ -57,9 +57,9 @@ instance Print TermValue where
           ++ intercalate
             " "
             ( map
-                ( \(m, x) -> case m of
-                    Explicit -> printSingleVal x
-                    Implicit -> "[" ++ printVal x ++ "]"
+                ( \(m, x') -> case m of
+                    Explicit -> printSingleVal x'
+                    Implicit -> "[" ++ printVal x' ++ "]"
                 )
                 xs
             )

@@ -16,7 +16,7 @@ import Checking.Context
     classifyApp,
     freshVar,
   )
-import Checking.Vars (Subst (..), subVar)
+import Checking.Vars (Subst (..), subVar, Sub)
 import Control.Monad.State (gets)
 import Data.Map (lookup, (!?))
 import Lang
@@ -28,12 +28,13 @@ import Lang
     TermValue (..),
     listToApp,
     locatedAt,
-    mapTermM, Program (..),
+    mapTermM, Program (..), Pat,
   )
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
 normaliseProgram (Program decls) = mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program decls)
+
 
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
