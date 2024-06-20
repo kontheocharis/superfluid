@@ -1,5 +1,20 @@
-prim JsString : Type
-prim JsBigInt : Type
-prim JsBool : Type
+def JsString : Type {
+  Js
+}
 
+def JsBigInt : Type {
+  Js
+}
+
+def JsBool : Type {
+  Js
+}
+
+prim Js : Type
+
+prim js-access : JsObject -> JsString -> Js
+
+prim js-empty-object : JsObject
+
+prim js-extend-object : JsObject -> JsString -> Js -> JsObject
 

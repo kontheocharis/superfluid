@@ -7,10 +7,11 @@ import Checking.Context
     enterSignatureMod,
     findReprForCase,
     findReprForGlobal,
+    freshMeta,
     getDataItem,
     inSignature,
     modifyCtxM,
-    modifySignature, freshMeta,
+    modifySignature,
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (resolveDeep, resolveShallow)
@@ -28,15 +29,25 @@ import Lang
     Pat,
     PiMode (..),
     Program (..),
+    ReprDataItem (ReprDataItem),
+    ReprItem (..),
+    ReprSomeItem (ReprData),
     Term (..),
     TermMappable (mapTermMappableM),
     TermValue (..),
+    annotTy,
     appToList,
+    genTerm,
     itemName,
     lams,
     listToApp,
-    mapTermM, annotTy,
+    mapTermM,
+    piTypeToList, ReprDataCtorItem (ReprDataCtorItem), ReprDataCaseItem (ReprDataCaseItem),
   )
+
+mcons :: Maybe a -> [a] -> [a]
+mcons Nothing xs = xs
+mcons (Just x) xs = x : xs
 
 -- | Represent a checked program
 representProgram :: Program -> Tc Program
@@ -63,6 +74,25 @@ representProgram (Program decls) = do
 
   -- Finally, return the program
   return (Program rest')
+
+-- -- | Generate a default representation for an item.
+-- genRepr :: Item -> Maybe ReprItem
+-- genRepr (Data d) = Just $ ReprItem (d.name ++ "DefaultRepr") [ReprData reprData]
+--   where
+--     reprData = ReprDataItem reprDataPat primJsObjectType reprDataCtorItems reprDataCaseItem
+--     primJsObjectType = genTerm (Global "JsObject")
+
+--     reprDataPat =
+--       let (params, _) = piTypeToList d.ty
+--        in listToApp (genTerm (Global d.name), map (\(m, n, _) -> (m, genTerm (V n))) params)
+
+--     reprDataCtorItems = map (\c -> ReprDataCaseItem (genTerm (V (freshV))) ) d.ctors
+
+--     reprDataCaseItem = Nothing
+
+-- genRepr (Decl _) = Nothing
+-- genRepr (Prim _) = Nothing
+-- genRepr (Repr _) = Nothing
 
 -- | Represent the current context.
 representCtx :: Tc ()

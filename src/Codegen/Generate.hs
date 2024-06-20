@@ -90,6 +90,9 @@ jsObj ps = JsExpr $ "{" ++ intercalate ", " (map (\(s, JsExpr e) -> s ++ ": " ++
 addDecl :: JsStat -> Gen ()
 addDecl d = modify (\s -> s {decls = d : s.decls})
 
+primAccess :: JsExpr -> String -> JsExpr
+primAccess (JsExpr e) s = JsExpr $ "(" ++ e ++ ")" ++ "." ++ s
+
 generateProgram :: Program -> Gen JsProg
 generateProgram (Program items) = do
   mapM_ generateItem items

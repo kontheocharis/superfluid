@@ -1,0 +1,126 @@
+data Functor : (Type -> Type) -> Type {
+  mk-functor : (F : Type -> Type) -> (fmap : [A : Type] -> [B : Type] -> (A -> B) -> (F A -> F B)) -> Functor F
+}
+
+
+data Monad : (Type -> Type) -> Type {
+  mk-monad : (M : Type -> Type) ->
+    Functor M ->
+    (return : [A : Type] -> A -> M A) ->
+    (bind : [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B) ->
+    Monad M
+}
+
+def monad-functor : [M : Type -> Type] -> Monad M -> Functor M {
+  \m => case m {
+    mk-monad _ f _ _ => f
+  }
+}
+
+def return : [M : Type -> Type] -> Monad M -> [A : Type] -> A -> M A {
+  \m => case m {
+    mk-monad _ _ r _ => r
+  }
+}
+
+def bind : [M : Type -> Type] -> Monad M -> [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B {
+  \m => case m {
+    mk-monad _ _ _ b => b
+  }
+}
+
+def fmap : [F : Type -> Type] -> Functor F -> [A : Type] -> [B : Type] -> (A -> B) -> (F A -> F B) {
+  \m => case m {
+    mk-functor _ f => f
+  }
+}
+
+data Maybe : Type -> Type {
+  nothing : [A : Type] -> Maybe A,
+  just : [A : Type] -> A -> Maybe A
+}
+
+def maybe-functor : Functor Maybe {
+  mk-functor Maybe (\f m =>
+    case m {
+      nothing => nothing,
+      just x => just (f x)
+    }
+  )
+}
+
+def maybe-monad : Monad Maybe {
+  mk-monad Maybe maybe-functor
+    (\a => just a)
+    (\a b => case a {
+      nothing => nothing,
+      just x => b x
+    })
+}
+
+def three-things : [F : Type -> Type] -> Monad F -> [A : Type] -> F A -> F A -> F A -> F (A ** (A ** A)) {
+  \m x y z => bind m x (\a =>
+    bind m y (\b =>
+      bind m z (\c =>
+        return m (a, (b, c))
+      )
+    )
+  )
+}
+
+def three-things-maybe : [A : Type] -> Maybe A -> Maybe A -> Maybe A -> Maybe (A ** (A ** A)) {
+  three-things maybe-monad
+}
+
+data Equal : [A : Type] -> A -> A -> Type {
+  refl : [A : Type] -> [x : A] -> Equal x x
+}
+
+data Iso : Type -> Type -> Type {
+  mk-iso : [A : Type] -> [B : Type]
+    -> (f : A -> B)
+    -> (g : B -> A)
+    -> (fg : [x : A] -> Equal x (g (f x)))
+    -> (gf : [y : B] -> Equal y (f (g y)))
+    -> Iso A B
+}
+
+data Category : Type {
+  mk-category : (Obj : Type) ->
+    (Hom : Obj -> Obj -> Type) ->
+    (id : (a : Obj) -> Hom a a) ->
+    (compose : [a : Obj] -> [b : Obj] -> [c : Obj] -> Hom b c -> Hom a b -> Hom a c) ->
+    (left-id : [a : Obj] -> [b : Obj] -> [f : Hom a b] -> Equal (compose (id a) f)) f ->
+    (right-id : [a : Obj] -> [b : Obj] -> [f : Hom a b] -> Equal (compose f (id b)) f) f ->
+    (assoc :
+      [a : Obj] -> [b : Obj] -> [c : Obj] -> [d : Obj] ->
+      [f : Hom a b] -> [g : Hom b c] -> [h : Hom c d] ->
+      Equal (compose (compose h g) f) (compose h (compose g f))
+    ) ->
+    Category
+}
+
+data NaturalTransformation : (F : Type -> Type) -> (G : Type -> Type) -> Type {
+  mk-nat : [F : Type -> Type] -> [G : Type -> Type]
+    -> (functor-f : Functor F)
+    -> (functor-g : Functor G)
+    -> (t : [A : Type] -> F A -> G A)
+    -> (naturality : [A : Type] -> [B : Type] -> [h : A -> B] -> [x : F A] -> Equal (fmap functor-g h (t x)) (t (fmap functor-f h x)))
+    -> NaturalTransformation F G
+}
+
+data Sigma : (A : Type) -> (B : A -> Type) -> Type {
+  mk-sigma : [A : Type] -> [B : A -> Type] -> (a : A) -> B a -> Sigma A B
+}
+
+data Prod : (A : Type) -> (B : Type) -> Type {
+  mk-prod : [A : Type] -> [B : Type] -> A -> B -> Prod A B
+}
+
+-- def pair-assoc : [A : Type] -> [B : Type] -> [C : Type] -> Iso (Prod (Prod A B) C) (Prod A (Prod B C)) {
+--   mk-iso (\x => case x {
+--     mk-prod (mk-prod a b) c => mk-prod a (mk-prod b c)
+--   }) (\x => case x {
+--     mk-prod a (mk-prod b c) => mk-prod (mk-prod a b) c
+--   }) refl refl
+-- }

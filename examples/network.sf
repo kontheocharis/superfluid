@@ -1,0 +1,168 @@
+prim Bool : Type
+
+prim true : Bool
+
+prim false : Bool
+
+prim Unit : Type
+
+prim unit : Unit
+
+prim if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A
+
+prim ByteArray : Type
+
+prim USize : Type
+
+prim byte-array-len : ByteArray -> USize
+
+prim FlatArray : USize -> Type -> Type
+
+prim usize-zero : USize
+
+prim usize-one : USize
+
+prim usize-add : USize -> USize -> USize
+
+prim usize-sub : USize -> USize -> USize
+
+prim is-usize-zero : USize -> Bool
+
+prim U : USize -> Type
+
+prim uzero : [l : USize] -> U l
+
+prim uone : [l : USize] -> U l
+
+prim uadd : [l : USize] -> U l -> U l -> U l
+
+prim usub : [l : USize] -> U l -> U l -> U l
+
+prim is-uzero : [l : USize] -> U l -> Bool
+
+prim upgrade : [l : USize] -> U l -> U (usize-add l usize-one)
+
+prim upgrade-size : [l : USize] -> U l -> USize
+
+prim unsafe-cast : [A : Type] -> [B : Type] -> A -> B
+
+prim write-usize : USize -> ByteArray -> ByteArray
+
+prim write-u : [l : USize] -> U l -> ByteArray -> ByteArray
+
+prim write-flat-array : [l : USize] -> [A : Type] -> FlatArray l A -> (A -> ByteArray -> ByteArray) -> ByteArray -> ByteArray
+
+prim empty-byte-array : ByteArray
+
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat
+}
+
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n)
+}
+
+def field-len-mo : Nat {
+  ?is65536
+}
+
+def byte-len-mo : Nat {
+  ?is256
+}
+
+data FinVec : [n : Nat] -> Type -> Fin n -> Type {
+  fnil : [A: Type] -> [n : Nat] -> FinVec A (fz [n]),
+  fcons : [A: Type] -> [n : Nat] -> [i : Fin n] -> A -> FinVec A i -> FinVec A (fs i)
+}
+
+data UdpPacket : Type {
+  mk-udp-packet :
+    (src-port : Fin (s field-len-mo)) ->
+    (dst-port : Fin (s field-len-mo)) ->
+    (len : Fin (s field-len-mo)) ->
+    (checksum : Fin (s field-len-mo)) ->
+    (contents : FinVec (Fin (s byte-len-mo)) len) ->
+    UdpPacket
+}
+
+data Status : Type {
+  ok : Status,
+  error : Status
+}
+
+def process-udp-packet : UdpPacket -> Status {
+  \p => case p {
+    mk-udp-packet src-port dst-port len checksum contents => {
+      case len {
+        fz => error, -- empty packet
+        fs n => {
+          -- Ensure the first byte is 0x00
+          let first-byte = case contents {
+            fcons i is => i
+          };
+
+          case first-byte {
+            fz => ok,
+            fs _ => error
+          }
+        }
+      }
+    }
+  }
+}
+
+repr NumRepr {
+  data Nat as USize {
+    z as usize-zero,
+    s i as usize-add i usize-one,
+    case n {
+      z => b,
+      s => r
+    } as {
+      if-then-else (is-usize-zero n) (\_ => unsafe-cast b) (\_ => unsafe-cast (r (usize-sub n usize-one)))
+    }
+  }
+
+  data Fin n as U n {
+    fz [n] as uzero [(usize-add n usize-one)],
+    fs [n] i as uadd (upgrade i) (uone [(usize-add n usize-one)]),
+    case n {
+      fz => b,
+      fs => r
+    } as {
+      if-then-else (is-uzero n) (\_ => unsafe-cast b) (\_ => unsafe-cast (r (usub n uone)))
+    }
+  }
+}
+
+repr VecRepr {
+  data FinVec A n as FlatArray (upgrade-size n) A {
+    fnil as ?v1,
+    fcons x xs as ?v2,
+    case v {
+      fnil => v1,
+      fcons => v2
+    } as {
+      ?v3
+    }
+  }
+}
+
+repr UdpRepr {
+  data UdpPacket as ByteArray {
+    mk-udp-packet src-port dst-port len checksum contents as {
+      (write-flat-array contents write-u
+      (write-u checksum
+      (write-u len
+      (write-u dst-port
+      (write-u src-port empty-byte-array)))))
+    },
+    case p {
+      mk-udp-packet => mk,
+    } as {
+      ?h2
+    }
+  }
+}
