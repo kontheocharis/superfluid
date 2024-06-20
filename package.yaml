@@ -38,6 +38,7 @@ dependencies:
   - persistent-vector >= 0.2 && < 0.3
   - language-c >= 0.9 && < 0.10
   - language-javascript >= 0.7 && < 0.8
+  - file-embed >= 0.0 && < 0.1
 
 ghc-options:
   - -Wall

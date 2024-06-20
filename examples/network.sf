@@ -54,16 +54,6 @@ prim write-flat-array : [l : USize] -> [A : Type] -> FlatArray l A -> (A -> Byte
 
 prim empty-byte-array : ByteArray
 
-data Nat : Type {
-  z : Nat,
-  s : Nat -> Nat
-}
-
-data Fin : Nat -> Type {
-  fz : [n : Nat] -> Fin (s n),
-  fs : [n : Nat] -> Fin n -> Fin (s n)
-}
-
 def field-len-mo : Nat {
   ?is65536
 }

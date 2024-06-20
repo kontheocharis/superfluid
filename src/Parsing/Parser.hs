@@ -5,6 +5,7 @@ import Data.Char (isSpace)
 import Data.Maybe (fromMaybe)
 import Data.String
 import Data.Text (Text)
+import Interface.Pretty (Print (printVal))
 import Lang
   ( CtorItem (..),
     DataItem (..),
@@ -16,6 +17,7 @@ import Lang
     Pat,
     PiMode (..),
     Pos (..),
+    PrimItem (PrimItem),
     Program (..),
     ReprDataCaseItem (ReprDataCaseItem),
     ReprDataCtorItem (ReprDataCtorItem),
@@ -33,7 +35,7 @@ import Lang
     listToApp,
     mapTermM,
     termDataAt,
-    termLoc, PrimItem (PrimItem),
+    termLoc,
   )
 import Parsing.Resolution (resolveGlobalsRec)
 import Text.Parsec
@@ -61,10 +63,9 @@ import Text.Parsec
     (<|>),
   )
 import Text.Parsec.Char (alphaNum, letter)
+import Text.Parsec.Combinator (sepEndBy)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
-import Interface.Pretty (Print(printVal))
-import Text.Parsec.Combinator (sepEndBy)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
@@ -196,17 +197,26 @@ parseTerm contents = case runParser (term <* eof) initialParserState "" (fromStr
   Right p -> Right p
 
 -- | Parse a program from its filename and string contents.
-parseProgram :: String -> String -> Either String Program
-parseProgram filename contents = case runParser (program <* eof) initialParserState filename (fromString contents) of
+parseProgram :: String -> String -> Maybe Program -> Either String Program
+parseProgram filename contents prelude = case runParser
+  (program prelude <* eof)
+  initialParserState
+  filename
+  (fromString contents) of
   Left err -> Left $ show err
   Right p -> Right p
 
 -- | Parse a program.
-program :: Parser Program
-program = whiteWrap $ do
+program :: Maybe Program -> Parser Program
+program prelude = whiteWrap $ do
   ds <- many (Data <$> dataItem <|> Decl <$> declItem <|> Repr <$> reprItem <|> Prim <$> primItem)
+  let ds' =
+        case prelude of
+          Just (Program ds'') -> ds''
+          Nothing -> []
+          ++ ds
   -- Resolve the globals after getting all the declarations.
-  return $ mapTermMappable (resolveGlobalsRec (Signature ds)) (Program ds)
+  return $ mapTermMappable (resolveGlobalsRec (Signature ds')) (Program ds)
 
 -- | Wrap a parser in whitespace.
 whiteWrap :: Parser a -> Parser a

@@ -24,6 +24,7 @@ import System.IO (stderr)
 import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 import Language.C (CTranslUnit, Pretty (pretty))
 import Language.JavaScript.Parser (JSAST, renderToString, renderJS)
+import Resources.Prelude (preludePath, preludeContents)
 
 -- | What mode to run in.
 data Mode
@@ -140,31 +141,37 @@ runCompiler (Args Repl _) = runRepl
 
 -- | Parse a file.
 parseFile :: String -> InputT IO Program
-parseFile file = do
+parseFile file = fst <$> parseFile' file
+
+-- | Parse a file and return the current TC state.
+parseFile' :: String -> InputT IO (Program, TcState)
+parseFile' file = do
+  (prelude, st) <- parseAndCheckPrelude
   contents <- liftIO $ readFile file
-  handleParse err (parseProgram file contents)
+  program <- handleParse err (parseProgram file contents (Just prelude))
+  return (program, st)
 
 -- | Parse and check a file.
 checkFile :: String -> InputT IO Program
 checkFile file = do
-  parsed <- parseFile file
-  (checked, _) <- handleTc err (checkProgram parsed)
+  (parsed, st) <- parseFile' file
+  (checked, _) <- handleTc err (put st >> checkProgram parsed)
   return checked
 
 -- | Parse, check and represent a file.
 representFile :: String -> InputT IO Program
 representFile file = do
-  parsed <- parseFile file
-  (checked, s) <- handleTc err (checkProgram parsed)
-  (represented, _) <- handleTc err (put s >> representProgram checked)
+  (parsed, st) <- parseFile' file
+  (checked, st') <- handleTc err (put st >> checkProgram parsed)
+  (represented, _) <- handleTc err (put st' >> representProgram checked)
   return represented
 
 -- | Parse, check and represent a file.
 generateCode :: String -> InputT IO JsProg
 generateCode file = do
-  parsed <- parseFile file
-  (checked, s) <- handleTc err (checkProgram parsed)
-  (represented, _) <- handleTc err (put s >> normaliseProgram <$> representProgram checked)
+  (parsed, st) <- parseFile' file
+  (checked, st') <- handleTc err (put st >> checkProgram parsed)
+  (represented, _) <- handleTc err (put st' >> normaliseProgram <$> representProgram checked)
   handleGen err (generateProgram represented)
 
 -- | Run the REPL.
@@ -184,6 +191,13 @@ runRepl = do
       (t', _) <- handleTc replErr (return $ normaliseTermFully t)
       outputStrLn $ printVal t'
   runRepl
+
+-- | Parse and check the Prelude, returning the final TC state and the parsed program.
+parseAndCheckPrelude :: InputT IO (Program, TcState)
+parseAndCheckPrelude = do
+  parsed <- handleParse err (parseProgram preludePath preludeContents Nothing)
+  (checked, st) <- handleTc err (checkProgram parsed)
+  return (checked, st)
 
 -- | Handle a parsing result.
 handleParse :: (String -> InputT IO a) -> Either String a -> InputT IO a

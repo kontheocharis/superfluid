@@ -39,6 +39,7 @@ library
       Lang
       Parsing.Parser
       Parsing.Resolution
+      Resources.Prelude
   other-modules:
       Paths_superfluid
   hs-source-dirs:
@@ -56,6 +57,7 @@ library
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*
@@ -90,6 +92,7 @@ executable superfluid-exe
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*
@@ -126,6 +129,7 @@ test-suite superfluid-test
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*

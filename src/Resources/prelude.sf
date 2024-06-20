@@ -1,0 +1,34 @@
+-- Basic types
+data Unit : Type {
+  tt : Unit
+}
+
+data Bool : Type {
+  true : Bool,
+  false : Bool
+}
+
+data Maybe : Type -> Type {
+  nothing : [a : Type] -> Maybe a,
+  just : [a : Type] -> a -> Maybe a
+}
+
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat
+}
+
+data List : Type -> Type {
+  nil : [a : Type] -> List a,
+  cons : [a : Type] -> a -> List a -> List a
+}
+
+data Vec : Type -> Nat -> Type {
+  vnil : [a : Type] -> Vec a z,
+  vcons : [a : Type] -> [n : Nat] -> a -> Vec a n -> Vec a (s n)
+}
+
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n)
+}
