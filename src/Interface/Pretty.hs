@@ -113,7 +113,7 @@ instance Print PrimItem where
   printVal (PrimItem name ty) = "prim " ++ name ++ " : " ++ printVal ty
 
 instance Print DeclItem where
-  printVal (DeclItem v ty term _) =
+  printVal (DeclItem v ty term _ _) =
     "def " ++ v ++ " : " ++ printVal ty ++ " " ++ case term.value of
       Let {} -> printVal term
       _ -> curlies $ printVal term

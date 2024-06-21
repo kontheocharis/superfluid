@@ -110,10 +110,11 @@ unifyTerms a' b' = do
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()
 normaliseAndUnifyTerms l r = do
-  let l' = normaliseTerm l
+  sig <- gets (\s -> s.signature)
+  let l' = normaliseTerm sig l
   case l' of
     Nothing -> do
-      let r' = normaliseTerm r
+      let r' = normaliseTerm sig r
       case r' of
         Nothing -> throwError $ Mismatch l r
         Just r'' -> unifyTerms l r''
@@ -138,6 +139,6 @@ solve hole spine rhs = do
   case vars of
     Nothing -> return False
     Just vars' -> do
-      let solution = normaliseTermFully (lams (map (Explicit,) vars') rhs)
+      let solution = normaliseTermFully mempty (lams (map (Explicit,) vars') rhs)
       solveMeta hole solution
       return True

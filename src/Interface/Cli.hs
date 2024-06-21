@@ -40,10 +40,6 @@ data Mode
     GenerateCode String
   deriving (Show)
 
--- | How to apply changes to a file
-data ApplyChanges = InPlace | Print | NewFile
-  deriving (Show)
-
 -- | Command-line flags.
 data Flags = Flags
   { -- | Whether to dump the program.
@@ -174,7 +170,15 @@ generateCode file = do
   (parsed, prelude, st) <- parseFile' file
   (checked, st') <- handleTc err (put st >> checkProgram parsed)
   (represented, _) <- handleTc err (put st' >> normaliseProgram <$> representProgram (prelude <> checked))
-  handleGen err (generateProgram represented)
+  generated <- handleGen err (generateProgram represented)
+  emitFile (file ++ ".js") (renderJsProg generated)
+  return generated
+
+-- | Emit a file.
+emitFile :: String -> String -> InputT IO ()
+emitFile file contents = do
+  liftIO $ writeFile file contents
+  msg $ "Wrote file " ++ file
 
 -- | Run the REPL.
 runRepl :: InputT IO a
@@ -190,7 +194,7 @@ runRepl = do
     Just inp -> do
       t <- handleParse replErr (parseTerm inp)
       _ <- handleTc replErr (inferTerm t)
-      (t', _) <- handleTc replErr (return $ normaliseTermFully t)
+      (t', _) <- handleTc replErr (return $ normaliseTermFully mempty t)
       outputStrLn $ printVal t'
   runRepl
 

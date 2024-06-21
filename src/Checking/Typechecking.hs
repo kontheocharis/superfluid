@@ -331,12 +331,13 @@ checkDeclItem decl = do
   (ty', _) <- checkTerm ty (genTerm TyT)
 
   -- Add the partially checked decl to the context and check the body
-  (tm', ty'') <- enterSignatureMod (addItem (Decl $ decl {DI.ty = ty'})) $ do
+  let env = if decl.isRecursive then enterSignatureMod (addItem (Decl $ decl {DI.ty = ty'})) else id
+  (tm', ty'') <- env $ do
     let tm = decl.value
     checkTerm tm ty'
 
   -- Add the final decl to the context
-  let decl' = DeclItem decl.name ty'' tm' decl.loc
+  let decl' = DeclItem decl.name ty'' tm' decl.loc decl.isRecursive
   modifySignature (addItem (Decl decl'))
 
   return decl'
@@ -412,7 +413,8 @@ inferTerm' (Term (App m t1 t2) d1) = do
     (Term (PiT m' v varTy bodyTy) _) | m == m' -> go v varTy bodyTy
     (Term (PiT Implicit _ _ _) _) -> goImplicit
     _ -> do
-      let subjectTy' = normaliseTerm subjectTyRes
+      sig <- gets (\s -> s.signature)
+      let subjectTy' = normaliseTerm sig subjectTyRes
       subjectTyRes' <- case subjectTy' of
         Just t -> Just <$> resolveShallow t
         Nothing -> return Nothing

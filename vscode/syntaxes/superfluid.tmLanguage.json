@@ -7,11 +7,11 @@
     },
     {
       "name": "keyword.control.superfluid",
-      "match": "\\b(case|data|def|repr|as|let|prim)\\b"
+      "match": "\\b(case|data|def|repr|as|let|prim|rec)\\b"
     },
     {
       "name": "keyword.operator.superfluid",
-      "match": "=>|->|:|;|=|\\\\"
+      "match": "=>|->|:|\\*|;|=|\\\\"
     },
     {
       "name": "constant.numeric.superfluid",

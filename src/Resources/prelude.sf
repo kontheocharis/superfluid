@@ -9,42 +9,11 @@ data Bool : Type {
   false : Bool
 }
 
-data Maybe : Type -> Type {
-  nothing : [A : Type] -> Maybe A,
-  just : [A : Type] -> A -> Maybe A
-}
-
-data Equal : [A : Type] -> A -> A -> Type {
-  refl : [A : Type] -> [x : A] -> Equal x x
-}
-
-data Nat : Type {
-  z : Nat,
-  s : Nat -> Nat
-}
-
-data List : Type -> Type {
-  nil : [A : Type] -> List A,
-  cons : [A : Type] -> A -> List A -> List A
-}
-
-data Vec : Type -> Nat -> Type {
-  vnil : [A : Type] -> Vec A z,
-  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
-}
-
-data Fin : Nat -> Type {
-  fz : [n : Nat] -> Fin (s n),
-  fs : [n : Nat] -> Fin n -> Fin (s n)
-}
-
--- General primitives
-
-prim cast : [A : Type] -> [B : Type] -> A -> B
-
 -- JS primitives
 
 prim JS : Type
+
+prim to-js : [A : Type] -> A -> JS
 
 prim js-null : JS
 
@@ -67,6 +36,8 @@ prim js-times : JS -> JS -> JS
 prim js-div : JS -> JS -> JS
 
 prim js-mod : JS -> JS -> JS
+
+prim js-pow : JS -> JS -> JS
 
 prim js-neg : JS -> JS
 
@@ -96,6 +67,99 @@ prim js-if : [A : Type] -> JS -> (Unit -> A) -> (Unit -> A) -> A
 
 prim js-typeof : JS -> JS
 
+-- IO
+
+prim IO : Type -> Type
+
+-- JS IO
+
+prim js-console-log : JS -> IO Unit
+
+prim js-prompt : IO JS
+
+-- General primitives
+
+prim cast : [A : Type] -> [B : Type] -> A -> B
+
+prim io-return : [A : Type] -> A -> IO A
+
+prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
+
+def debug-print : [A : Type] -> A -> IO Unit {
+  \a => js-console-log (to-js a)
+}
+
+data Maybe : Type -> Type {
+  nothing : [A : Type] -> Maybe A,
+  just : [A : Type] -> A -> Maybe A
+}
+
+data Equal : [A : Type] -> A -> A -> Type {
+  refl : [A : Type] -> [x : A] -> Equal x x
+}
+
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat
+}
+
+data List : Type -> Type {
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A
+}
+
+data Vec : Type -> Nat -> Type {
+  vnil : [A : Type] -> Vec A z,
+  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
+}
+
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n)
+}
+
+def rec add : Nat -> Nat -> Nat {
+  \m n => case m {
+    z => n,
+    s m' => s (add m' n),
+  }
+}
+
+def rec mul : Nat -> Nat -> Nat {
+  \m n => case m {
+    z => z,
+    s m' => add n (mul m' n),
+  }
+}
+
+def rec pow : Nat -> Nat -> Nat {
+  \m n => case n {
+    z => s z,
+    s n' => mul m (pow m n'),
+  }
+}
+
+def rec and : Bool -> Bool -> Bool {
+  \a b => case a {
+    true => b,
+    false => false,
+  }
+}
+
+def rec or : Bool -> Bool -> Bool {
+  \a b => case a {
+    true => true,
+    false => b,
+  }
+}
+
+def rec not : Bool -> Bool {
+  \a => case a {
+    true => false,
+    false => true,
+  }
+}
+
 -- Default representations
 
 repr BoolAsJSBool {
@@ -110,5 +174,49 @@ repr BoolAsJSBool {
       js-if b (\_ => cast t) (\_ => cast f)
     }
   }
+
+  def and as js-and
+  def or as js-or
+  def not as js-not
 }
 
+repr NatAsJSNumber {
+  data Nat as JS {
+    z as js-zero,
+    s n as js-plus js-one n,
+    case n {
+      z => b,
+      s => r,
+    } as {
+      js-if (js-eqq n js-zero) (\_ => cast b) (\_ => cast (r (js-minus n js-one)))
+    }
+  }
+
+  def add as js-plus
+  def mul as js-times
+  def pow as js-pow
+}
+
+repr MaybeAsNull {
+  data Maybe A as JS {
+    nothing as js-null,
+    just a as to-js a,
+
+    case m {
+      nothing => n,
+      just => j,
+    } as {
+      js-if (js-eqq m js-null) (\_ => cast n) (\_ => cast (j (cast m)))
+    }
+  }
+}
+
+-- More definitions
+
+def Char : Type {
+  Fin (pow (s (s z)) (pow (s (s z)) (s (s (s z)))))
+}
+
+def String : Type {
+  List Char
+}

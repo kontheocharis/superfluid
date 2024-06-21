@@ -2,7 +2,7 @@ module Parsing.Parser (parseProgram, parseTerm) where
 
 import Checking.Context (Signature (Signature))
 import Data.Char (isSpace)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.String
 import Data.Text (Text)
 import Debug.Trace (trace, traceShow)
@@ -140,7 +140,7 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -316,9 +316,11 @@ declItem :: Parser DeclItem
 declItem = whiteWrap $ do
   start <- getPos
   symbol "def"
+  r <- optionMaybe $ symbol "rec"
   (name, ty) <- declSignature
   t <- lets
-  DeclItem name (fromMaybe (genTerm Wild) ty) t . Loc start <$> getPos
+  end <- getPos
+  return $ DeclItem name (fromMaybe (genTerm Wild) ty) t (Loc start end) (isJust r)
 
 -- | Parse the type signature of a declaration.
 declSignature :: Parser (String, Maybe Type)

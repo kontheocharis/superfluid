@@ -1,20 +1,18 @@
 
-def foo : (b : Bool) * case b { true => Bool, false => Unit } {
-  (false, tt)
-}
-
-def not : Bool -> Bool {
-  \b => case b {
-    true => false,
-    false => true
+def rec fib : Nat -> Nat {
+  \n => case n {
+    z => z,
+    s n' => case n' {
+      z => s z,
+      s n'' => add (fib n') (fib n'')
+    }
   }
 }
 
+def ten : Nat {
+  s (s (s (s (s (s (s (s (s (s z)))))))))
+}
 
-def testing : Unit {
-  let x = true;
-  let y = false;
-  let z = not x;
-
-  tt
+def main : IO Unit {
+  debug-print (fib (mul ten (s (s z))))
 }

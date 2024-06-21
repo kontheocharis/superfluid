@@ -14,7 +14,7 @@ import Checking.Context
     Tc,
     TcState (..),
     classifyApp,
-    freshVar,
+    freshVar, lookupItemOrCtor, inSignature, Signature (Signature),
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Monad.State (gets)
@@ -30,13 +30,15 @@ import Lang
     TermValue (..),
     listToApp,
     locatedAt,
-    mapTermM,
+    mapTermM, DeclItem (DeclItem), Item (..), isRecursive,
   )
+import Lang as DI (DeclItem (..))
 import Control.Applicative ((<|>))
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
-normaliseProgram (Program decls) = mapTermMappable (ReplaceAndContinue . normaliseTermFully) (Program decls)
+normaliseProgram (Program decls) = do
+  mapTermMappable (ReplaceAndContinue . normaliseTermFully mempty) (Program decls)
 
 -- | Match a term against a pattern.
 --
@@ -56,16 +58,16 @@ caseMatch _ _ = Nothing
 
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
-normaliseTerm :: Term -> Maybe Term
-normaliseTerm (Term (App m (Term (Lam m' v t1) _) t2) _)
+normaliseTerm :: Signature -> Term -> Maybe Term
+normaliseTerm _ (Term (App m (Term (Lam m' v t1) _) t2) _)
   | m == m' =
       return $ subVar v t2 t1
-normaliseTerm (Term (App m t1 t2) d1) = do
-  t1' <- normaliseTerm t1
+normaliseTerm sig (Term (App m t1 t2) d1) = do
+  t1' <- normaliseTerm sig t1
   return (Term (App m t1' t2) d1)
-normaliseTerm (Term (Case s cs) d1) = do
-  let s' = normaliseTerm s
-  let s'f = normaliseTermFully s
+normaliseTerm sig (Term (Case s cs) d1) = do
+  let s' = normaliseTerm sig s
+  let s'f = normaliseTermFully sig s
   let res =
         foldr
           ( \(p, c) acc -> acc <|> do
@@ -78,11 +80,20 @@ normaliseTerm (Term (Case s cs) d1) = do
     Nothing -> case s' of
       Just s'' -> return $ Term (Case s'' cs) d1
       Nothing -> Nothing
-normaliseTerm _ = Nothing -- @@Todo: normalise declarations
+normaliseTerm sig (Term (Global g) _) = maybeExpand sig g
+normaliseTerm _ _ = Nothing -- @@Todo: normalise declarations
+
+-- | Try to expand the given definition to the given term.
+maybeExpand :: Signature -> String -> Maybe Term
+maybeExpand sig n = do
+  i <- lookupItemOrCtor n sig
+  case i of
+    Left (Decl d) -> Just d.value
+    _ -> Nothing
 
 -- | Reduce a term to normal form (fully).
-normaliseTermFully :: Term -> Term
-normaliseTermFully t = maybe t normaliseTermFully (normaliseTerm t)
+normaliseTermFully :: Signature -> Term -> Term
+normaliseTermFully sig t = maybe t (normaliseTermFully sig) (normaliseTerm sig t)
 
 -- | Fill all the metavariables in a term.
 fillAllMetas :: Term -> Tc (MapResult Term)
@@ -91,7 +102,7 @@ fillAllMetas t = ReplaceAndContinue <$> resolveFinal t
 fillAllMetasAndNormalise :: (TermMappable t) => t -> Tc t
 fillAllMetasAndNormalise t = do
   t' <- mapTermMappableM fillAllMetas t
-  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully) t'
+  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully mempty) t'
 
 -- | Resolve a term by filling in metas if present, or turning them back into holes.
 resolveFinal :: Term -> Tc Term
@@ -103,7 +114,7 @@ resolveFinal t = do
         Just t' -> do
           -- If the meta is already solved, then we can resolve the term.
           r <- resolveShallow (listToApp (t', map (Explicit,) ts))
-          return $ normaliseTermFully r
+          return $ normaliseTermFully mempty r
         Nothing -> do
           -- If the meta is not resolved, then substitute the original hole
           let tLoc = getLoc t
@@ -125,7 +136,7 @@ resolveShallow (Term (Meta h) d) = do
     Nothing -> return $ Term (Meta h) d
 resolveShallow (Term (App m t1 t2) d) = do
   t1' <- resolveShallow t1
-  return $ normaliseTermFully (Term (App m t1' t2) d)
+  return $ normaliseTermFully mempty (Term (App m t1' t2) d)
 resolveShallow t = return t
 
 resolveDeep :: Term -> Tc Term

@@ -114,6 +114,12 @@ instance Show Ctx where
 -- | A signature, represented as a list of items.
 newtype Signature = Signature [Item] deriving (Show)
 
+instance Semigroup Signature where
+  Signature a <> Signature b = Signature (a <> b)
+
+instance Monoid Signature where
+  mempty = Signature []
+
 -- | A typechecking error.
 
 -- | The typechecking state.
