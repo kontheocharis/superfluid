@@ -1,17 +1,18 @@
 module Codegen.Generate (Gen, runGen, generateProgram, JsProg (..), renderJsProg) where
 
-import Checking.Context (classifyApp, patVarToVar)
+import Checking.Context (Signature, asSig, classifyApp, lookupItemOrCtor, patVarToVar)
 import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Interface.Pretty (indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem (..), Program (Program), Term (..), TermValue (..), appToList, letToList, listToApp, name, piTypeToList, value)
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, appToList, letToList, listToApp, name, piTypeToList, value)
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
 
 data GenState = GenState
-  { decls :: [JsStat]
+  { decls :: [JsStat],
+    program :: Program
   }
 
 data GenError = GenError
@@ -24,7 +25,8 @@ type Gen a = StateT GenState (Either GenError) a
 emptyGenState :: GenState
 emptyGenState =
   GenState
-    { decls = []
+    { decls = [],
+      program = Program []
     }
 
 runGen :: Gen a -> Either GenError a
@@ -53,6 +55,9 @@ jsExprStat (JsExpr e) = JsStat e
 jsAccess :: JsExpr -> String -> JsExpr
 jsAccess (JsExpr e) s = JsExpr $ "(" ++ e ++ ")" ++ "." ++ s
 
+jsIndex :: JsExpr -> JsExpr -> JsExpr
+jsIndex (JsExpr e) (JsExpr i) = JsExpr $ "(" ++ e ++ ")" ++ "[" ++ i ++ "]"
+
 jsIntIndex :: JsExpr -> Int -> JsExpr
 jsIntIndex (JsExpr e) i = JsExpr $ "(" ++ e ++ ")" ++ "[" ++ show i ++ "]"
 
@@ -61,6 +66,7 @@ jsName "false" = "FALSE"
 jsName "true" = "TRUE"
 jsName "null" = "NULL"
 jsName "undefined" = "UNDEFINED"
+jsName "String" = "STRING"
 jsName n = concatMap (\c -> if c == '-' then "_" else if c == '\'' then "_p_" else [c]) n
 
 addDecl :: JsStat -> Gen ()
@@ -71,7 +77,8 @@ addStdlibImports = do
   addDecl $ jsConst "prompt" (JsExpr "require('prompt-sync')()")
 
 generateProgram :: Program -> Gen JsProg
-generateProgram (Program items) = do
+generateProgram p@(Program items) = do
+  modify (\s -> s {program = p})
   addStdlibImports
   mapM_ generateItem items
   addDecl $ jsExprStat (jsInvoke $ jsVar "main")
@@ -79,10 +86,10 @@ generateProgram (Program items) = do
   return $ jsProgFromStats ds
 
 generateItem :: Item -> Gen ()
-generateItem (Data d) = generateDataItem d
+generateItem (Data _) = return ()
 generateItem (Repr _) = error "Found repr item in generateItem"
 generateItem (Decl d) = generateDeclItem d
-generateItem (Prim p) = resolvePrimItem p
+generateItem (Prim _) = return ()
 
 generateDeclItem :: DeclItem -> Gen ()
 generateDeclItem d = do
@@ -107,15 +114,22 @@ generateExpr ls@(Term (Let {}) _) = do
       xs
   ret' <- jsReturn <$> generateExpr ret
   return $ jsBlockExpr (statements ++ [ret'])
-generateExpr t@(Term (App _ a b) _) = do
-  case classifyApp t of
-    Just _ -> do
+generateExpr t@(Term (App {}) _) = do
+  let (subject, args) = appToList t
+  args' <- mapM (\(_, x) -> generateExpr x) args
+  case subject.value of
+    Meta _ -> do
       return jsNull
-    Nothing -> do
-      a' <- generateExpr a
-      b' <- generateExpr b
-      return $ jsApp a' b'
-generateExpr (Term (Global s) _) = return $ jsVar (jsName s)
+    Hole _ -> do
+      return jsNull
+    Wild -> do
+      return jsNull
+    Global g -> do
+      generateGlobal g args'
+    _ -> do
+      a' <- generateExpr subject
+      return $ foldl jsApp a' args'
+generateExpr (Term (Global s) _) = generateGlobal s []
 generateExpr (Term (V v) _) = return $ jsVar (jsName v.name)
 generateExpr (Term (Pair t1 t2) _) = do
   t1' <- generateExpr t1
@@ -129,7 +143,7 @@ generateExpr (Term (Case t cs) _) = do
           (p', args) <- generatePat p
           c' <- generateExpr c
           let caseBody = foldr jsLam c' args
-          let c'' = foldr (flip jsApp . jsIntIndex t') caseBody [1 .. length args]
+          let c'' = foldl (\acc x -> jsApp acc (jsIntIndex t' x)) caseBody [1 .. length args]
           return (p', c'')
       )
       cs
@@ -155,121 +169,64 @@ generatePat t = do
       return (jsStringLit (jsName s), ts')
     _ -> error "Non-global in pattern"
 
-generateDataItem :: DataItem -> Gen ()
-generateDataItem (DataItem name ty ctors) = do
-  let (params, _) = piTypeToList ty
-  addDecl $ jsConst (jsName name) (foldr (\(_, n, _) acc -> jsLam (jsName n.name) acc) jsNull params)
-  mapM_ generateDataCtor ctors
+generateGlobal :: String -> [JsExpr] -> Gen JsExpr
+generateGlobal name args = do
+  sig <- gets (\s -> asSig s.program)
+  case lookupItemOrCtor name sig of
+    Just (Left (Decl d)) -> return $ foldl jsApp (jsVar (jsName d.name)) args
+    Just (Left (Data _)) -> return jsNull
+    Just (Left (Repr _)) -> return jsNull
+    Just (Left (Prim p)) -> generatePrim p.name args
+    Just (Right c) -> generateCtor c.name args
+    Nothing -> error $ "Global not found: " ++ name
 
-generateDataCtor :: CtorItem -> Gen ()
-generateDataCtor (CtorItem name ty _ _) = do
-  let (args, _) = piTypeToList ty
-  let fn =
-        foldr
-          (\(_, n, _) acc -> jsLam (jsName n.name) acc)
-          ( jsArray
-              ( jsStringLit (jsName name)
-                  : map (\(_, n, _) -> jsVar (jsName n.name)) args
-              )
-          )
-          args
-  addDecl $ jsConst (jsName name) fn
+generateCtor :: String -> [JsExpr] -> Gen JsExpr
+generateCtor name args = return $ jsArray (jsStringLit (jsName name) : args)
 
-jsPrimArity0 :: String -> JsExpr -> JsStat
-jsPrimArity0 n = jsConst (jsName n)
-
-jsPrimArity1 :: String -> (JsExpr -> JsExpr) -> JsStat
-jsPrimArity1 n f = jsConst (jsName n) (jsLam "a" (f (jsVar "a")))
-
-jsPrimArity2 :: String -> (JsExpr -> JsExpr -> JsExpr) -> JsStat
-jsPrimArity2 n f = jsConst (jsName n) (jsLam "a" (jsLam "b" (f (jsVar "a") (jsVar "b"))))
-
-resolvePrimItem :: PrimItem -> Gen ()
-resolvePrimItem (PrimItem n@"js-null" _) = do
-  addDecl $ jsPrimArity0 n jsNull
-resolvePrimItem (PrimItem n@"js-undefined" _) = do
-  addDecl $ jsPrimArity0 n jsUndefined
-resolvePrimItem (PrimItem n@"js-true" _) = do
-  addDecl $ jsPrimArity0 n jsTrue
-resolvePrimItem (PrimItem n@"js-false" _) = do
-  addDecl $ jsPrimArity0 n jsFalse
-resolvePrimItem (PrimItem n@"js-zero" _) = do
-  addDecl $ jsPrimArity0 n jsZero
-resolvePrimItem (PrimItem n@"js-one" _) = do
-  addDecl $ jsPrimArity0 n jsOne
-resolvePrimItem (PrimItem n@"js-plus" _) = do
-  addDecl $ jsPrimArity2 n jsPlus
-resolvePrimItem (PrimItem n@"js-minus" _) = do
-  addDecl $ jsPrimArity2 n jsMinus
-resolvePrimItem (PrimItem n@"js-times" _) = do
-  addDecl $ jsPrimArity2 n jsTimes
-resolvePrimItem (PrimItem n@"js-div" _) = do
-  addDecl $ jsPrimArity2 n jsDiv
-resolvePrimItem (PrimItem n@"js-mod" _) = do
-  addDecl $ jsPrimArity2 n jsMod
-resolvePrimItem (PrimItem n@"js-pow" _) = do
-  addDecl $ jsPrimArity2 n jsPow
-resolvePrimItem (PrimItem n@"js-neg" _) = do
-  addDecl $ jsPrimArity1 n jsNeg
-resolvePrimItem (PrimItem n@"js-eq" _) = do
-  addDecl $ jsPrimArity2 n jsEq
-resolvePrimItem (PrimItem n@"js-eqq" _) = do
-  addDecl $ jsPrimArity2 n jsEqq
-resolvePrimItem (PrimItem n@"js-neq" _) = do
-  addDecl $ jsPrimArity2 n jsNeq
-resolvePrimItem (PrimItem n@"js-neqq" _) = do
-  addDecl $ jsPrimArity2 n jsNeqq
-resolvePrimItem (PrimItem n@"js-lt" _) = do
-  addDecl $ jsPrimArity2 n jsLt
-resolvePrimItem (PrimItem n@"js-lte" _) = do
-  addDecl $ jsPrimArity2 n jsLte
-resolvePrimItem (PrimItem n@"js-gt" _) = do
-  addDecl $ jsPrimArity2 n jsGt
-resolvePrimItem (PrimItem n@"js-gte" _) = do
-  addDecl $ jsPrimArity2 n jsGte
-resolvePrimItem (PrimItem n@"js-and" _) = do
-  addDecl $ jsPrimArity2 n jsAnd
-resolvePrimItem (PrimItem n@"js-or" _) = do
-  addDecl $ jsPrimArity2 n jsOr
-resolvePrimItem (PrimItem n@"js-not" _) = do
-  addDecl $ jsPrimArity1 n jsNot
-resolvePrimItem (PrimItem n@"js-typeof" _) = do
-  addDecl $ jsPrimArity1 n jsTypeof
-resolvePrimItem (PrimItem n@"js-if" _) = do
-  addDecl $
-    jsConst
-      (jsName n)
-      ( jsLam
-          "A"
-          ( jsLam
-              "cond"
-              ( jsLam
-                  "t"
-                  ( jsLam
-                      "f"
-                      ( jsCond (jsVar "cond") (jsInvoke $ jsVar "t") (jsInvoke $ jsVar "f")
-                      )
-                  )
-              )
-          )
-      )
-resolvePrimItem (PrimItem n@"cast" _) = do
-  addDecl $ jsConst (jsName n) (jsLam "A" (jsLam "B" (jsLam "a" (jsVar "a"))))
-resolvePrimItem (PrimItem "IO" _) = do
-  addDecl $ jsConst (jsName "IO") jsNull
-resolvePrimItem (PrimItem "JS" _) = do
-  addDecl $ jsConst (jsName "JS") jsNull
-resolvePrimItem (PrimItem n@"io-return" _) = do
-  addDecl $ jsConst (jsName n) (jsLam "A" (jsLam "a" (jsLazy $ jsVar "a")))
-resolvePrimItem (PrimItem n@"io-bind" _) = do
-  addDecl $ jsConst (jsName n) (jsLam "A" (jsLam "B" (jsLam "a" (jsLam "f" (jsLazy $ jsApp (jsVar "f") (jsVar "a"))))))
-resolvePrimItem (PrimItem n@"js-console-log" _) = do
-  addDecl $ jsConst (jsName n) (jsLam "a" (jsLazy $ jsApp (jsAccess (jsVar "console") "log") (jsVar "a")))
-resolvePrimItem (PrimItem n@"js-prompt" _) = do
-  addDecl $ jsConst (jsName n) (jsLazy $ jsInvoke (jsVar "prompt"))
-resolvePrimItem (PrimItem n@"to-js" _) = do
-  addDecl $ jsConst (jsName n) (jsLam "A" (jsLam "a" (jsVar "a")))
-resolvePrimItem (PrimItem n _) = error $ "Unknown primitive: " ++ n
+generatePrim :: String -> [JsExpr] -> Gen JsExpr
+generatePrim "js-null" [] = return jsNull
+generatePrim "js-undefined" [] = return jsUndefined
+generatePrim "js-true" [] = return jsTrue
+generatePrim "js-false" [] = return jsFalse
+generatePrim "js-empty-array" [] = return jsEmptyArray
+generatePrim "js-array-extend-l" [a, b] = return $ jsArrayExtendL a b
+generatePrim "js-array-extend-r" [a, b] = return $ jsArrayExtendR a b
+generatePrim "js-map" [f, xs] = return $ jsMap f xs
+generatePrim "js-fold" [f, i, xs] = return $ jsFold f i xs
+generatePrim "js-length" [a] = return $ jsLength a
+generatePrim "js-slice" [a, b, c] = return $ jsSlice a b c
+generatePrim "js-index" [a, b] = return $ jsIndex a b
+generatePrim "js-zero" [] = return jsZero
+generatePrim "js-one" [] = return jsOne
+generatePrim "js-plus" [a, b] = return $ jsPlus a b
+generatePrim "js-minus" [a, b] = return $ jsMinus a b
+generatePrim "js-times" [a, b] = return $ jsTimes a b
+generatePrim "js-div" [a, b] = return $ jsDiv a b
+generatePrim "js-mod" [a, b] = return $ jsMod a b
+generatePrim "js-pow" [a, b] = return $ jsPow a b
+generatePrim "js-neg" [a] = return $ jsNeg a
+generatePrim "js-eq" [a, b] = return $ jsEq a b
+generatePrim "js-eqq" [a, b] = return $ jsEqq a b
+generatePrim "js-neq" [a, b] = return $ jsNeq a b
+generatePrim "js-neqq" [a, b] = return $ jsNeqq a b
+generatePrim "js-lt" [a, b] = return $ jsLt a b
+generatePrim "js-lte" [a, b] = return $ jsLte a b
+generatePrim "js-gt" [a, b] = return $ jsGt a b
+generatePrim "js-gte" [a, b] = return $ jsGte a b
+generatePrim "js-and" [a, b] = return $ jsAnd a b
+generatePrim "js-or" [a, b] = return $ jsOr a b
+generatePrim "js-not" [a] = return $ jsNot a
+generatePrim "js-typeof" [a] = return $ jsTypeof a
+generatePrim "js-if" [_, c, l, r] = return $ jsCond c l r
+generatePrim "cast" [_, _, x] = return x
+generatePrim "IO" _ = return jsNull
+generatePrim "JS" _ = return jsNull
+generatePrim "io-return" [_, a] = return $ jsLazy a
+generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsApp f (jsInvoke a)
+generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsVar "console") "log" `jsApp` a
+generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
+generatePrim "to-js" [_, a] = return a
+generatePrim n _ = error $ "Unknown primitive: " ++ n
 
 jsNull :: JsExpr
 jsNull = JsExpr "null"
@@ -393,3 +350,25 @@ jsObj ps = JsExpr $ "{" ++ intercalate ", " (map (\(s, JsExpr e) -> s ++ ": " ++
 
 jsInvoke :: JsExpr -> JsExpr
 jsInvoke (JsExpr e) = JsExpr $ "(" ++ e ++ ")()"
+
+jsEmptyArray :: JsExpr
+jsEmptyArray = JsExpr "[]"
+
+jsArrayExtendL :: JsExpr -> JsExpr -> JsExpr
+jsArrayExtendL (JsExpr a) (JsExpr b) = JsExpr $ "[" ++ a ++ ", ...(" ++ b ++ ")]"
+
+jsArrayExtendR :: JsExpr -> JsExpr -> JsExpr
+jsArrayExtendR (JsExpr a) (JsExpr b) = JsExpr $ "[...(" ++ a ++ "), " ++ b ++ "]"
+
+jsLength :: JsExpr -> JsExpr
+jsLength (JsExpr a) = JsExpr $ "(" ++ a ++ ").length"
+
+jsSlice :: JsExpr -> JsExpr -> JsExpr -> JsExpr
+jsSlice (JsExpr a) (JsExpr b) (JsExpr c) = JsExpr $ "(" ++ a ++ ").slice(" ++ b ++ ", " ++ c ++ ")"
+
+
+jsFold :: JsExpr -> JsExpr -> JsExpr -> JsExpr
+jsFold (JsExpr f) (JsExpr i) (JsExpr a) = JsExpr $ "(" ++ a ++ ").reduce(" ++ f ++ ", " ++ i ++")"
+
+jsMap :: JsExpr -> JsExpr -> JsExpr
+jsMap (JsExpr f) (JsExpr a) = JsExpr $ "(" ++ a ++ ").map(" ++ f ++ ")"

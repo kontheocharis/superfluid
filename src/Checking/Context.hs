@@ -13,6 +13,7 @@ module Checking.Context
     addSubst,
     addTyping,
     addTypings,
+    asSig,
     findReprForCase,
     findReprForGlobal,
     classifyApp,
@@ -88,7 +89,7 @@ import Lang
     lams,
     listToApp,
     locatedAt,
-    mapTermM,
+    mapTermM, Program (..),
   )
 
 -- | A typing judgement.
@@ -119,6 +120,9 @@ instance Semigroup Signature where
 
 instance Monoid Signature where
   mempty = Signature []
+
+asSig :: Program -> Signature
+asSig (Program items) = Signature items
 
 -- | A typechecking error.
 

@@ -1,3 +1,29 @@
+data Ty : Type {
+  alpha : Ty,
+  nat : Ty,
+  fn : Ty -> Ty -> Ty
+}
+
+data Ctx : Type {
+  empty : Ctx,
+  with : Ctx -> Ty -> Ctx
+}
+
+-- @@FIXME
+repr CtxAsList {
+  data Ctx as List Ty {
+    empty as nil,
+    with c t as cons t c,
+
+    case c {
+      empty => b,
+      with => r
+    } as case c {
+      nil => b,
+      cons x xs => r xs x
+    }
+  }
+}
 
 def rec fib : Nat -> Nat {
   \n => case n {
@@ -9,10 +35,22 @@ def rec fib : Nat -> Nat {
   }
 }
 
+def two : Nat {
+  s (s z)
+}
+
 def ten : Nat {
   s (s (s (s (s (s (s (s (s (s z)))))))))
 }
 
+def twenty : Nat {
+  mul ten two
+}
+
+def test-list : List Nat {
+  cons ten (cons twenty (cons ten (cons twenty nil)))
+}
+
 def main : IO Unit {
-  debug-print (fib (mul ten (s (s z))))
+  debug-print (map (\x => pow x two) test-list)
 }
