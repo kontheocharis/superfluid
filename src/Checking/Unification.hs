@@ -13,7 +13,7 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow)
+import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow, resolveInCtx)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
@@ -21,8 +21,8 @@ import Lang
   ( PiMode (..),
     Term (..),
     TermValue (..),
-    Var,
-    lams,
+    Var (..),
+    lams, TermMappable (mapTermMappableM), MapResult (ReplaceAndContinue),
   )
 
 -- | Unify the list of terms together into a meta.
@@ -41,16 +41,8 @@ unifyTerms a' b' = do
   b <- resolveShallow b'
   case (classifyApp a, classifyApp b) of
     (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> unifyTerms' a b
-    (Just (Flex h1 ts1), _) -> do
-      res <- solve h1 ts1 b
-      if res
-        then return ()
-        else unifyTerms' a b
-    (_, Just (Flex h2 ts2)) -> do
-      res <- solve h2 ts2 a
-      if res
-        then return ()
-        else unifyTerms' a b
+    (Just (Flex h1 ts1), _) -> solveOr h1 ts1 b (unifyTerms' a b)
+    (_, Just (Flex h2 ts2)) -> solveOr h2 ts2 a (unifyTerms' a b)
     _ -> unifyTerms' a b
   where
     -- \| Unify a variable with a term. Returns True if successful.
@@ -122,23 +114,39 @@ normaliseAndUnifyTerms l r = do
       unifyTerms l'' r
 
 -- | Validate a pattern unification problem, returning the spine variables.
-validateProb :: Var -> [Term] -> Term -> Tc (Maybe [Var])
-validateProb _ [] _ = return (Just [])
-validateProb hole (x : xs) rhs = do
-  x' <- resolveShallow x
-  case x'.value of
-    V v -> do
-      xs' <- validateProb hole xs rhs
-      return $ (v :) <$> xs'
-    _ -> return Nothing
+validateProb :: Var -> [Term] -> Term -> Tc ([Var], Term)
+validateProb hole spine rhs = do
+  rhs' <- resolveShallow rhs
+
+  -- Get the spine variables.
+  vars <- mapM (\x -> do
+      x' <- resolveShallow x
+      x'' <- resolveInCtx x'
+      case (x'.value, x''.value) of
+        (_, V v) -> return v
+        (V v, _) -> return v
+        _ -> throwError $ CannotSolveProblem hole spine rhs
+    ) spine
+
+  -- Validate the RHS
+  rhs'' <- mapTermMappableM (\r -> do
+    r' <- resolveInCtx r
+    case r'.value of
+      Meta m | m == hole -> throwError $ CannotSolveProblem hole spine rhs
+      V v | v `notElem` vars -> throwError $ VariableEscapesMeta hole spine rhs v
+      _ -> return $ ReplaceAndContinue r'
+    ) rhs'
+
+  return (vars, rhs'')
+
 
 -- | Solve a pattern unification problem.
-solve :: Var -> [Term] -> Term -> Tc Bool
+solve :: Var -> [Term] -> Term -> Tc ()
 solve hole spine rhs = do
-  vars <- validateProb hole spine rhs
-  case vars of
-    Nothing -> return False
-    Just vars' -> do
-      let solution = normaliseTermFully mempty (lams (map (Explicit,) vars') rhs)
-      solveMeta hole solution
-      return True
+  (vars, rhs') <- validateProb hole spine rhs
+  let solution = normaliseTermFully mempty $ lams (map (Explicit,) vars) rhs'
+  solveMeta hole solution
+
+-- | Solve a pattern unification problem, or try another action if it fails.
+solveOr :: Var -> [Term] -> Term -> Tc () -> Tc ()
+solveOr hole spine rhs action = solve hole spine rhs `catchError` (\e -> action `catchError` (\_ -> throwError e))

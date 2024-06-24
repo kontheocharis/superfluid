@@ -35,7 +35,7 @@ import Checking.Context
     setType,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (fillAllMetas, normaliseTerm, resolveShallow)
+import Checking.Normalisation (fillAllMetas, normaliseTerm, resolveShallow, normaliseTermFully)
 import Checking.Representation (representCtx, representTerm)
 import Checking.Unification (unifyAllTerms, unifyTerms)
 import Checking.Utils (showHole, showContext)
@@ -440,8 +440,8 @@ inferTerm' (Term (Let var ty tm ret) d1) = do
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
 inferTerm' (Term (Case s cs) _) = do
   ((s', cs'), tys) <- inferOrCheckCase inferTerm s cs
-  ty <- unifyAllTerms tys
-  return (locatedAt s (Case s' cs'), ty)
+  ret <- unifyAllTerms tys
+  return (locatedAt s (Case s' cs'), ret)
 inferTerm' (Term Wild d1) = do
   typ <- freshMetaAt d1
   m <- registerWild (getLoc d1)
@@ -509,11 +509,12 @@ checkTerm :: Term -> Type -> Tc (Term, Type)
 checkTerm v t = do
   tResolved <- resolveShallow t
   (v', t') <- checkTerm' v tResolved
-  v'' <- setType v' t'
-  return (v'', t')
+  let t'' = normaliseTermFully mempty t'
+  v'' <- setType v' t''
+  return (v'', t'')
 
 -- | Check the type of a term.
---
+-- mempty
 -- The location of the type is inherited from the term.
 checkTermExpected :: Term -> TypeValue -> Tc (Term, Type)
 checkTermExpected v t = checkTerm v (locatedAt v t)

@@ -8,9 +8,9 @@ data TcError
   = VariableNotFound Var
   | Mismatch Term Term
   | ItemNotFound String
-  | CannotUnifyTwoHoles Var Var
-  | CannotInferHoleType Var
   | NotAFunction Term
+  | CannotSolveProblem Var [Term] Term
+  | VariableEscapesMeta Var [Term] Term Var
   | PatternNotSupported Pat
   | WrongConstructors [String] [String]
   | CannotUseReprAsTerm String
@@ -26,9 +26,9 @@ instance Show TcError where
   show (Mismatch t1 t2) =
     "Term mismatch: " ++ printSingleVal t1 ++ " vs " ++ printSingleVal t2 ++ " (at " ++ printVal (getLoc t1) ++ " and " ++ printVal (getLoc t2) ++ ")"
   show (ItemNotFound s) = "Item not found: " ++ s
-  show (CannotUnifyTwoHoles h1 h2) = "Cannot unify two holes: " ++ printSingleVal h1 ++ " and " ++ printSingleVal h2
-  show (CannotInferHoleType h) = "Cannot infer hole type: " ++ printSingleVal h
   show (NotAFunction t) = "Not a function: " ++ printSingleVal t
+  show (CannotSolveProblem m spine rhs) = "Cannot solve problem: " ++ printVal m ++ " " ++ intercalate " " (map printSingleVal spine) ++ " ?= " ++ printVal rhs
+  show (VariableEscapesMeta m spine rhs rhsVar) = "Variable " ++ printVal rhsVar ++ " in " ++ printVal rhs ++ " escapes meta " ++ printVal m ++ " " ++ intercalate " " (map printSingleVal spine)
   show (PatternNotSupported p) = "Pattern is not supported yet: " ++ printVal p
   show (WrongConstructors cs1 cs2) = "Wrong constructors: got " ++ intercalate ", " cs1 ++ " but expected " ++ intercalate ", " cs2
   show (CannotUseReprAsTerm r) = "Cannot use representation " ++ r ++ " as a term yet!"

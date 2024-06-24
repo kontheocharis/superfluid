@@ -4,6 +4,7 @@ module Checking.Normalisation
     fillAllMetas,
     resolveDeep,
     resolveShallow,
+    resolveInCtx,
     normaliseProgram,
     normaliseTerm,
   )
@@ -16,8 +17,10 @@ import Checking.Context
     TcState (..),
     classifyApp,
     freshVar,
+    inCtx,
     inSignature,
     lookupItemOrCtor,
+    lookupSubst,
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
@@ -69,6 +72,13 @@ caseMatch (Term (App m t1 t2) _) (Term (App m' t1' t2') _) | m == m' = do
 caseMatch a (Term (V v) _) = return $ Sub [(v, a)]
 caseMatch _ _ = Nothing
 
+tryCaseMatch :: Signature -> Term -> Pat -> Maybe Sub
+tryCaseMatch sig t p = case caseMatch t p of
+  Just s -> Just s
+  Nothing -> case normaliseTerm sig t of
+    Just t' -> tryCaseMatch sig t' p
+    Nothing -> Nothing
+
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Signature -> Term -> Maybe Term
@@ -78,23 +88,15 @@ normaliseTerm _ (Term (App m (Term (Lam m' v t1) _) t2) _)
 normaliseTerm sig (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm sig t1
   return (Term (App m t1' t2) d1)
-normaliseTerm sig (Term (Case s cs) d1) = do
-  let s' = normaliseTerm sig s
-  let s'f = normaliseTermFully sig s
-  let res =
-        foldr
-          ( \(p, c) acc ->
-              acc <|> do
-                sb <- caseMatch s'f p
-                return (sub sb c)
-          )
-          Nothing
-          cs
-  case res of
-    Just t -> return t
-    Nothing -> case s' of
-      Just s'' -> return $ Term (Case s'' cs) d1
-      Nothing -> Nothing
+normaliseTerm sig (Term (Case s cs) _) =
+  foldr
+    ( \(p, c) acc ->
+        acc <|> do
+          sb <- tryCaseMatch sig s p
+          return (sub sb c)
+    )
+    Nothing
+    cs
 normaliseTerm sig (Term (Global g) _) = maybeExpand sig g
 normaliseTerm _ _ = Nothing -- @@Todo: normalise declarations
 
@@ -108,7 +110,7 @@ maybeExpand sig n = do
 
 -- | Reduce a term to normal form (fully).
 normaliseTermFully :: Signature -> Term -> Term
-normaliseTermFully sig t = maybe t (normaliseTermFully sig) (normaliseTerm sig t)
+normaliseTermFully sig = mapTermMappable (maybe Continue ReplaceAndContinue . normaliseTerm sig)
 
 -- | Fill all the metavariables in a term.
 fillAllMetas :: Term -> Tc (MapResult Term)
@@ -117,7 +119,7 @@ fillAllMetas t = ReplaceAndContinue <$> resolveFinal t
 fillAllMetasAndNormalise :: (TermMappable t) => t -> Tc t
 fillAllMetasAndNormalise t = do
   t' <- mapTermMappableM fillAllMetas t
-  return $ mapTermMappable (ReplaceAndContinue . normaliseTermFully mempty) t'
+  return $ mapTermMappable (Replace . normaliseTermFully mempty) t'
 
 -- | Resolve a term by filling in metas if present, or turning them back into holes.
 resolveFinal :: Term -> Tc Term
@@ -141,6 +143,18 @@ resolveFinal t = do
               -- If the hole is not registered, then it is a fresh hole.
               locatedAt tLoc . Hole <$> freshVar
     _ -> return t
+
+-- | Resolve variables in the context.
+resolveInCtx :: (TermMappable t) => t -> Tc t
+resolveInCtx = mapTermMappableM
+    ( \t -> case t.value of
+        V v -> do
+          s <- inCtx (lookupSubst v)
+          case s of
+            Just t' -> return $ Replace t'
+            Nothing -> return $ Replace t
+        _ -> return Continue
+    )
 
 -- | Resolve a term by filling in metas if present.
 resolveShallow :: Term -> Tc Term

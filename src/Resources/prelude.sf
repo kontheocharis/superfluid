@@ -13,6 +13,13 @@ def id : [A : Type] -> A -> A {
   \a => a
 }
 
+def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+  \[A] b t f => case b {
+    true => t tt,
+    false => f tt
+  }
+}
+
 -- JS primitives
 
 prim JS : Type
@@ -97,6 +104,18 @@ prim js-console-log : JS -> IO Unit
 
 prim js-prompt : IO JS
 
+-- JS Buffer
+
+prim js-buffer-alloc : JS -> JS
+
+prim js-buffer-byte-length : JS -> JS
+
+-- target, targetStart, targetEnd, source, sourceStart, sourceEnd
+prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS -> JS
+
+-- buffer, value, offset
+prim js-buffer-write-uint16-be : JS -> JS -> JS -> JS
+
 -- General primitives
 
 prim cast : [A : Type] -> [B : Type] -> A -> B
@@ -145,6 +164,16 @@ def rec add : Nat -> Nat -> Nat {
   }
 }
 
+def rec sub : Nat -> Nat -> Nat {
+  \m n => case n {
+    z => m,
+    s n' => case m {
+      z => z,
+      s m' => sub m' n',
+    }
+  }
+}
+
 def rec mul : Nat -> Nat -> Nat {
   \m n => case m {
     z => z,
@@ -183,7 +212,7 @@ def rec not : Bool -> Bool {
 def rec fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
-    fs f' => s (fin-to-nat f'),
+    fs [n] f' => s (fin-to-nat [n] f'),
   }
 }
 

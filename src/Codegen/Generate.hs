@@ -74,6 +74,7 @@ addDecl d = modify (\s -> s {decls = s.decls ++ [d]})
 
 addStdlibImports :: Gen ()
 addStdlibImports = do
+  addDecl $ jsConst "{ Buffer }" (JsExpr "require('node:buffer')")
   addDecl $ jsConst "prompt" (JsExpr "require('prompt-sync')()")
 
 generateProgram :: Program -> Gen JsProg
@@ -226,6 +227,10 @@ generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsApp f (jsInvoke a)
 generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsVar "console") "log" `jsApp` a
 generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
 generatePrim "to-js" [_, a] = return a
+generatePrim "js-buffer-alloc" [a] = return $ jsApp (jsVar "Buffer.allocUnsafe") a
+generatePrim "js-buffer-byte-length" [a] = return $ jsApp (jsVar "Buffer.byteLength") a
+generatePrim "js-buffer-copy" [t, ts, te, s, ss, se] = return $ jsMultiApp (jsAccess s "copy") [t, ts, te, ss, se]
+generatePrim "js-buffer-write-uint16-be" [b, v, o] = return $ jsMultiApp (jsAccess b "writeUInt32BE") [v, o]
 generatePrim n _ = error $ "Unknown primitive: " ++ n
 
 jsNull :: JsExpr
@@ -318,6 +323,9 @@ jsReturn (JsExpr e) = JsStat $ "return " ++ e ++ ";"
 jsApp :: JsExpr -> JsExpr -> JsExpr
 jsApp (JsExpr f) (JsExpr a) = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ a ++ ")"
 
+jsMultiApp :: JsExpr -> [JsExpr] -> JsExpr
+jsMultiApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ", " (map (\(JsExpr a) -> a) as) ++ ")"
+
 jsBlockExpr :: [JsStat] -> JsExpr
 jsBlockExpr ss = JsExpr $ "(() => {\n" ++ indentedFst (intercalate "\n" (map (\(JsStat s) -> s) ss)) ++ "\n})()"
 
@@ -366,9 +374,8 @@ jsLength (JsExpr a) = JsExpr $ "(" ++ a ++ ").length"
 jsSlice :: JsExpr -> JsExpr -> JsExpr -> JsExpr
 jsSlice (JsExpr a) (JsExpr b) (JsExpr c) = JsExpr $ "(" ++ a ++ ").slice(" ++ b ++ ", " ++ c ++ ")"
 
-
 jsFold :: JsExpr -> JsExpr -> JsExpr -> JsExpr
-jsFold (JsExpr f) (JsExpr i) (JsExpr a) = JsExpr $ "(" ++ a ++ ").reduce(" ++ f ++ ", " ++ i ++")"
+jsFold (JsExpr f) (JsExpr i) (JsExpr a) = JsExpr $ "(" ++ a ++ ").reduce(" ++ f ++ ", " ++ i ++ ")"
 
 jsMap :: JsExpr -> JsExpr -> JsExpr
 jsMap (JsExpr f) (JsExpr a) = JsExpr $ "(" ++ a ++ ").map(" ++ f ++ ")"
