@@ -11,16 +11,22 @@ where
 
 import Checking.Context
   ( FlexApp (..),
+    Signature (Signature),
     Tc,
     TcState (..),
     classifyApp,
-    freshVar, lookupItemOrCtor, inSignature, Signature (Signature),
+    freshVar,
+    inSignature,
+    lookupItemOrCtor,
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
+import Control.Applicative ((<|>))
 import Control.Monad.State (gets)
 import Data.Map (lookup, (!?))
 import Lang
-  ( HasLoc (..),
+  ( DeclItem (DeclItem),
+    HasLoc (..),
+    Item (..),
     MapResult (..),
     Pat,
     PiMode (..),
@@ -28,17 +34,24 @@ import Lang
     Term (..),
     TermMappable (..),
     TermValue (..),
+    isRecursive,
     listToApp,
     locatedAt,
-    mapTermM, DeclItem (DeclItem), Item (..), isRecursive,
+    mapTermM,
   )
 import Lang as DI (DeclItem (..))
-import Control.Applicative ((<|>))
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
 normaliseProgram (Program decls) = do
-  mapTermMappable (ReplaceAndContinue . normaliseTermFully mempty) (Program decls)
+  let decls' =
+        filter
+          ( \case
+              Decl d -> d.unfold
+              _ -> False
+          )
+          decls
+  mapTermMappable (ReplaceAndContinue . normaliseTermFully (Signature decls')) (Program decls)
 
 -- | Match a term against a pattern.
 --
@@ -70,9 +83,11 @@ normaliseTerm sig (Term (Case s cs) d1) = do
   let s'f = normaliseTermFully sig s
   let res =
         foldr
-          ( \(p, c) acc -> acc <|> do
-                  sb <- caseMatch s'f p
-                  return (sub sb c))
+          ( \(p, c) acc ->
+              acc <|> do
+                sb <- caseMatch s'f p
+                return (sub sb c)
+          )
           Nothing
           cs
   case res of

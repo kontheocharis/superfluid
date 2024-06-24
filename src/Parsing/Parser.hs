@@ -315,12 +315,13 @@ primItem = whiteWrap $ do
 declItem :: Parser DeclItem
 declItem = whiteWrap $ do
   start <- getPos
+  unf <- optionMaybe $ symbol "#unfold"
   symbol "def"
   r <- optionMaybe $ symbol "rec"
   (name, ty) <- declSignature
   t <- lets
   end <- getPos
-  return $ DeclItem name (fromMaybe (genTerm Wild) ty) t (Loc start end) (isJust r)
+  return $ DeclItem name (fromMaybe (genTerm Wild) ty) t (Loc start end) (isJust r) (isJust unf)
 
 -- | Parse the type signature of a declaration.
 declSignature :: Parser (String, Maybe Type)

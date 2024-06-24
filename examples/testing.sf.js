@@ -5,6 +5,7 @@ const find = (A) => (p) => (xs) => (((xs).length) === (0)) ? (null) : (((p)((xs)
 const Char = null;
 const STRING = null;
 const fib = (n) => ((n) === (0)) ? (0) : ((((n) - (1)) === (0)) ? ((1) + (0)) : (((fib)((n) - (1))) + ((fib)(((n) - (1)) - (1)))));
+const identity = ["lam", ["var", 0]];
 const two = (1) + ((1) + (0));
 const ten = (1) + ((1) + ((1) + ((1) + ((1) + ((1) + ((1) + ((1) + ((1) + ((1) + (0))))))))));
 const twenty = (ten) * (two);

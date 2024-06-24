@@ -230,7 +230,7 @@ data Item
 
 -- | Get the name of an item.
 itemName :: Item -> String
-itemName (Decl (DeclItem name _ _ _ _)) = name
+itemName (Decl d) = d.name
 itemName (Data (DataItem name _ _)) = name
 itemName (Repr (ReprItem name _)) = name
 itemName (Prim (PrimItem name _)) = name
@@ -277,7 +277,8 @@ data DeclItem = DeclItem
     ty :: Type,
     value :: Term,
     loc :: Loc,
-    isRecursive :: Bool
+    isRecursive :: Bool,
+    unfold :: Bool
   }
   deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -365,7 +366,7 @@ mapCtorItemM f (CtorItem name ty idx d) = CtorItem name <$> mapTermM f ty <*> pu
 
 -- | Apply a term function to a declaration item.
 mapItemM :: (Monad m) => (Term -> m (MapResult Term)) -> Item -> m Item
-mapItemM f (Decl (DeclItem name ty term pos recu)) = Decl <$> (DeclItem name <$> mapTermM f ty <*> mapTermM f term <*> pure pos <*> pure recu)
+mapItemM f (Decl (DeclItem name ty term pos recu unf)) = Decl <$> (DeclItem name <$> mapTermM f ty <*> mapTermM f term <*> pure pos <*> pure recu <*> pure unf)
 mapItemM f (Data (DataItem name ty ctors)) = Data <$> (DataItem name <$> mapTermM f ty <*> mapM (mapCtorItemM f) ctors)
 mapItemM f (Repr (ReprItem name c)) = Repr . ReprItem name <$> mapM (mapReprSomeItemM f) c
 mapItemM f (Prim (PrimItem name ty)) = Prim . PrimItem name <$> mapTermM f ty

@@ -78,8 +78,6 @@ import Lang
     termDataAt, PrimItem (..),
   )
 import Lang as DI (DeclItem (..))
-import Debug.Trace (traceM)
-import Interface.Pretty (Print(printVal))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -337,7 +335,7 @@ checkDeclItem decl = do
     checkTerm tm ty'
 
   -- Add the final decl to the context
-  let decl' = DeclItem decl.name ty'' tm' decl.loc decl.isRecursive
+  let decl' = DeclItem decl.name ty'' tm' decl.loc decl.isRecursive decl.unfold
   modifySignature (addItem (Decl decl'))
 
   return decl'

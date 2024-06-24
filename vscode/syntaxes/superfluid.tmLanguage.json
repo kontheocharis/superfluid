@@ -10,12 +10,20 @@
       "match": "\\b(case|data|def|repr|as|let|prim|rec)\\b"
     },
     {
+      "name": "keyword.control.superfluid",
+      "match": "\\b(case|data|def|repr|as|let|prim|rec)\\b"
+    },
+    {
       "name": "keyword.operator.superfluid",
       "match": "=>|->|:|\\*|;|=|\\\\"
     },
     {
       "name": "constant.numeric.superfluid",
       "match": "\\b\\d+\\b"
+    },
+    {
+      "name": "meta.embedded.superfluid",
+      "match": "#\\w+"
     },
     {
       "name": "storage.superfluid",

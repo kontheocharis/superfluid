@@ -1,28 +1,7 @@
-data Ty : Type {
-  alpha : Ty,
-  nat : Ty,
-  fn : Ty -> Ty -> Ty
-}
-
-data Ctx : Type {
-  empty : Ctx,
-  with : Ctx -> Ty -> Ctx
-}
-
--- @@FIXME
-repr CtxAsList {
-  data Ctx as List Ty {
-    empty as nil,
-    with c t as cons t c,
-
-    case c {
-      empty => b,
-      with => r
-    } as case c {
-      nil => b,
-      cons x xs => r xs x
-    }
-  }
+data Lam : Type {
+  var : Nat -> Lam,
+  app : Lam -> Lam -> Lam,
+  lam : Lam -> Lam,
 }
 
 def rec fib : Nat -> Nat {
@@ -35,10 +14,15 @@ def rec fib : Nat -> Nat {
   }
 }
 
+def identity : Lam {
+  lam (var z)
+}
+
 def two : Nat {
   s (s z)
 }
 
+#unfold
 def ten : Nat {
   s (s (s (s (s (s (s (s (s (s z)))))))))
 }
