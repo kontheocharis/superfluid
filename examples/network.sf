@@ -14,20 +14,26 @@ def byte-len : Nat {
   two_to_the_sixteen
 }
 
-data FinVec : [n : Nat] -> Type -> Fin n -> Type {
-  fnil : [A: Type] -> [n : Nat] -> FinVec A (fz [n]),
-  fcons : [A: Type] -> [n : Nat] -> [i : Fin n] -> A -> FinVec A i -> FinVec A (fs i)
+def Word : Type {
+  Fin field-len
+}
+
+data ByteVec : [n : Nat] -> Fin n -> Type {
+  bnil : [n : Nat] -> ByteVec (fz [n]),
+  bcons : [n : Nat] -> [i : Fin n] -> Fin byte-len -> ByteVec i -> ByteVec (fs i)
 }
 
 data UdpPacket : Type {
   mk-udp-packet :
-    (src-port : Fin field-len) ->
-    (dst-port : Fin field-len) ->
-    (len : Fin field-len) ->
-    (checksum : Fin field-len) ->
-    (contents : FinVec (Fin byte-len) len) ->
+    (src-port : Word) ->
+    (dst-port : Word) ->
+    (len : Word) ->
+    (checksum : Word) ->
+    (contents : ByteVec len) ->
     UdpPacket
 }
+
+
 
 data Status : Type {
   ok : Status,
@@ -37,51 +43,71 @@ data Status : Type {
 def process-udp-packet : UdpPacket -> Status {
   \p => case p {
     mk-udp-packet src-port dst-port len checksum contents => {
-      -- Ensure the first byte is 0x00
-      let first-byte : Maybe (Fin byte-len) = case contents {
-        fcons i is => just i,
-        fnil => nothing,
-      };
-
-      case first-byte {
-        just x => case x {
+      -- Ensure the first byte exists and is 0x00
+      case contents {
+        bcons i is => case i {
           fz => ok,
           fs _ => error
         },
-        nothing => error
+        bnil => error
       }
     }
   }
 }
 
-repr FinVecRepr {
-  data FinVec A n as JS {
-    fnil as js-empty-array,
-    fcons x xs as js-array-extend-l (to-js x) xs,
+repr ByteVecRepr {
+  data ByteVec n as JS {
+    bnil as js-buffer-alloc (js-zero),
+    bcons x xs as {
+      let old-len = js-buffer-byte-length xs;
+      let new-len = js-plus old-len js-one;
+      let b = js-buffer-alloc new-len;
+      let b' = js-buffer-write-uint8 b (to-js x) js-zero;
+      js-buffer-copy b' js-one new-len xs js-zero old-len
+    },
     case l {
-      fnil => n,
-      fcons => c
+      bnil => n,
+      bcons => c
     } as {
-      js-if (js-eqq (js-length l) js-zero)
+      js-if (js-eqq (js-buffer-byte-length l) (js-zero))
         (cast n)
-        (cast (c [JS] [_] [_] (js-index l js-zero) (js-slice l js-one (js-length l))))
+        (cast (c (cast (js-index l (js-zero))) (js-buffer-subarray l js-one (js-buffer-byte-length l))))
     }
   }
 }
 
--- repr UdpRepr {
---   data UdpPacket as ByteArray {
---     mk-udp-packet src-port dst-port len checksum contents as {
---       (write-flat-array contents write-u
---       (write-u checksum
---       (write-u len
---       (write-u dst-port
---       (write-u src-port empty-byte-array)))))
---     },
---     case p {
---       mk-udp-packet => mk,
---     } as {
---       ?h2
---     }
---   }
--- }
+
+
+repr UdpRepr {
+  data UdpPacket as JS {
+    mk-udp-packet src-port dst-port len checksum contents as {
+      let js-two = js-plus js-one js-one;
+      let js-four = js-times js-two js-two;
+      let js-six = js-plus js-four js-two;
+      let js-eight = js-times js-four js-four;
+      let contents-len = js-buffer-byte-length contents;
+      let len = js-plus contents-len js-eight;
+      let b = js-buffer-alloc len;
+      let b' = js-buffer-write-uint16-be b (to-js src-port) js-zero;
+      let b'' = js-buffer-write-uint16-be b' (to-js dst-port) js-two;
+      let b''' = js-buffer-write-uint16-be b'' (to-js len) js-four;
+      let b'''' = js-buffer-write-uint16-be b''' (to-js checksum) js-six;
+      let b''''' = js-buffer-copy b'''' js-eight len (to-js contents) js-zero contents-len;
+      b'''''
+    },
+    case p {
+      mk-udp-packet => mk,
+    } as {
+      let js-two = js-plus js-one js-one;
+      let js-four = js-times js-two js-two;
+      let js-six = js-plus js-four js-two;
+      let js-eight = js-times js-four js-four;
+      let src-port = js-buffer-read-uint16-be p js-zero;
+      let dst-port = js-buffer-read-uint16-be p js-two;
+      let len = js-buffer-read-uint16-be p js-four;
+      let checksum = js-buffer-read-uint16-be p js-six;
+      let contents = js-buffer-subarray p js-eight (js-plus js-eight len);
+      cast (mk (cast src-port) (cast dst-port) (cast len) (cast checksum) (cast contents))
+    }
+  }
+}

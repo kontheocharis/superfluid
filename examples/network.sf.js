@@ -11,12 +11,17 @@ const two = (1) + ((1) + (0));
 const two_to_the_sixteen = (two) ** ((two) ** ((two) ** (two)));
 const field_len = two_to_the_sixteen;
 const byte_len = two_to_the_sixteen;
+const Word = null;
 const process_udp_packet = (p) => (() => {
-  switch ((p)[0]) {
-    case "mk_udp_packet": return ((((((src_port) => (dst_port) => (len) => (checksum) => (contents) => (() => {
-      const first_byte = (((contents).length) === (0)) ? (null) : ((contents)[0]);
-      return ((first_byte) === (null)) ? (["error"]) : (((first_byte) === (0)) ? (["ok"]) : (["error"]));
-    })())((p)[1]))((p)[2]))((p)[3]))((p)[4]))((p)[5]);
-  }
+  const js_two = (1) + (1);
+  const js_four = (js_two) * (js_two);
+  const js_six = (js_four) + (js_two);
+  const js_eight = (js_four) * (js_four);
+  const src_port = ((p).readUInt16BE)(0);
+  const dst_port = ((p).readUInt16BE)(js_two);
+  const len = ((p).readUInt16BE)(js_four);
+  const checksum = ((p).readUInt16BE)(js_six);
+  const contents = ((p).subarray)(js_eight, (js_eight) + (len));
+  return (((Buffer.byteLength)(contents)) === (0)) ? (["error"]) : ((((contents)[0]) === (0)) ? (["ok"]) : (["error"]));
 })();
 (main)()

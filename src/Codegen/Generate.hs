@@ -4,11 +4,12 @@ import Checking.Context (Signature, asSig, classifyApp, lookupItemOrCtor, patVar
 import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
-import Interface.Pretty (indentedFst)
+import Interface.Pretty (indentedFst, Print (printVal))
 import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, appToList, letToList, listToApp, name, piTypeToList, value)
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
+import Debug.Trace (traceM)
 
 data GenState = GenState
   { decls :: [JsStat],
@@ -163,7 +164,7 @@ generatePat t = do
               ( \(_, x) ->
                   ( case x of
                       Term (V v) _ -> jsName v.name
-                      _ -> error "Non-variable in pattern"
+                      _ -> error $ "Non-variable in pattern: " ++ printVal x
                   )
               )
               ts
@@ -230,8 +231,12 @@ generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
 generatePrim "to-js" [_, a] = return a
 generatePrim "js-buffer-alloc" [a] = return $ jsApp (jsVar "Buffer.allocUnsafe") a
 generatePrim "js-buffer-byte-length" [a] = return $ jsApp (jsVar "Buffer.byteLength") a
-generatePrim "js-buffer-copy" [t, ts, te, s, ss, se] = return $ jsMultiApp (jsAccess s "copy") [t, ts, te, ss, se]
-generatePrim "js-buffer-write-uint16-be" [b, v, o] = return $ jsMultiApp (jsAccess b "writeUInt32BE") [v, o]
+generatePrim "js-buffer-copy" [t, ts, te, s, ss, se] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess s "copy") [t, ts, te, ss, se], jsReturn t]
+generatePrim "js-buffer-write-uint16-be" [b, v, o] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess b "writeUInt32BE") [v, o], jsReturn b]
+generatePrim "js-buffer-write-uint8" [b, v, o] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess b "writeUInt8") [v, o], jsReturn b]
+generatePrim "js-buffer-read-uint16-be" [b, o] = return $ jsMultiApp (jsAccess b "readUInt16BE") [o]
+generatePrim "js-buffer-read-uint8" [b, o] = return $ jsMultiApp (jsAccess b "readUInt8") [o]
+generatePrim "js-buffer-subarray" [b, s, e] = return $ jsMultiApp (jsAccess b "subarray") [s, e]
 generatePrim n _ = error $ "Unknown primitive: " ++ n
 
 jsNull :: JsExpr

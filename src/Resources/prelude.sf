@@ -118,6 +118,14 @@ prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS -> JS
 -- buffer, value, offset
 prim js-buffer-write-uint16-be : JS -> JS -> JS -> JS
 
+prim js-buffer-write-uint8 : JS -> JS -> JS -> JS
+
+prim js-buffer-read-uint16-be : JS -> JS -> JS
+
+prim js-buffer-read-uint8 : JS -> JS -> JS
+
+prim js-buffer-subarray : JS -> JS -> JS -> JS
+
 -- General primitives
 
 prim cast : [A : Type] -> [B : Type] -> A -> B
