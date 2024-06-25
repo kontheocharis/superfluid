@@ -1,65 +1,3 @@
-def ByteArray : Type {
-  JS
-}
-
-def USize : Type {
-  JS
-}
-
-def byte-array-len : ByteArray -> USize {
-  \b => js-buffer-byte-length b
-}
-
-def FlatArray : USize -> Type -> Type {
-  \u t => JS
-}
-
-def usize-zero : USize {
-  js-zero
-}
-
-def usize-one : USize {
-  js-one
-}
-
-def usize-add : USize -> USize -> USize {
-  \a b => js-plus a b
-}
-
-def usize-sub : USize -> USize -> USize {
-  \a b => js-minus a b
-}
-
-def is-usize-zero : USize -> Bool {
-  \a => cast (js-eqq a js-zero)
-}
-
--- prim U : USize -> Type
-
--- prim uzero : [l : USize] -> U l
-
--- prim uone : [l : USize] -> U l
-
--- prim uadd : [l : USize] -> U l -> U l -> U l
-
--- prim usub : [l : USize] -> U l -> U l -> U l
-
--- prim is-uzero : [l : USize] -> U l -> Bool
-
--- prim upgrade : [l : USize] -> U l -> U (usize-add l usize-one)
-
--- prim upgrade-size : [l : USize] -> U l -> USize
-
--- prim unsafe-cast : [A : Type] -> [B : Type] -> A -> B
-
--- prim write-usize : USize -> ByteArray -> ByteArray
-
--- prim write-u : [l : USize] -> U l -> ByteArray -> ByteArray
-
--- prim write-flat-array : [l : USize] -> [A : Type] -> FlatArray l A -> (A -> ByteArray -> ByteArray) -> ByteArray -> ByteArray
-
--- prim empty-byte-array : ByteArray
-
 def two : Nat {
   s (s z)
 }
@@ -131,19 +69,19 @@ repr FinVecRepr {
   }
 }
 
-repr UdpRepr {
-  data UdpPacket as ByteArray {
-    mk-udp-packet src-port dst-port len checksum contents as {
-      (write-flat-array contents write-u
-      (write-u checksum
-      (write-u len
-      (write-u dst-port
-      (write-u src-port empty-byte-array)))))
-    },
-    case p {
-      mk-udp-packet => mk,
-    } as {
-      ?h2
-    }
-  }
-}
+-- repr UdpRepr {
+--   data UdpPacket as ByteArray {
+--     mk-udp-packet src-port dst-port len checksum contents as {
+--       (write-flat-array contents write-u
+--       (write-u checksum
+--       (write-u len
+--       (write-u dst-port
+--       (write-u src-port empty-byte-array)))))
+--     },
+--     case p {
+--       mk-udp-packet => mk,
+--     } as {
+--       ?h2
+--     }
+--   }
+-- }
