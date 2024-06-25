@@ -222,6 +222,7 @@ generatePrim "js-if" [_, c, l, r] = return $ jsCond c l r
 generatePrim "cast" [_, _, x] = return x
 generatePrim "IO" _ = return jsNull
 generatePrim "JS" _ = return jsNull
+generatePrim "impossible" [_] = return $ JsExpr "({ throw new Error('impossible'); })()"
 generatePrim "io-return" [_, a] = return $ jsLazy a
 generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsApp f (jsInvoke a)
 generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsVar "console") "log" `jsApp` a

@@ -4,7 +4,6 @@ module Checking.Normalisation
     fillAllMetas,
     resolveDeep,
     resolveShallow,
-    resolveInCtx,
     normaliseProgram,
     normaliseTerm,
   )
@@ -143,18 +142,6 @@ resolveFinal t = do
               -- If the hole is not registered, then it is a fresh hole.
               locatedAt tLoc . Hole <$> freshVar
     _ -> return t
-
--- | Resolve variables in the context.
-resolveInCtx :: (TermMappable t) => t -> Tc t
-resolveInCtx = mapTermMappableM
-    ( \t -> case t.value of
-        V v -> do
-          s <- inCtx (lookupSubst v)
-          case s of
-            Just t' -> return $ Replace t'
-            Nothing -> return $ Replace t
-        _ -> return Continue
-    )
 
 -- | Resolve a term by filling in metas if present.
 resolveShallow :: Term -> Tc Term

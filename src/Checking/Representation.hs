@@ -29,6 +29,8 @@ import Lang
     Pat,
     PiMode (..),
     Program (..),
+    ReprDataCaseItem (ReprDataCaseItem),
+    ReprDataCtorItem (ReprDataCtorItem),
     ReprDataItem (ReprDataItem),
     ReprItem (..),
     ReprSomeItem (ReprData),
@@ -42,7 +44,7 @@ import Lang
     lams,
     listToApp,
     mapTermM,
-    piTypeToList, ReprDataCtorItem (ReprDataCtorItem), ReprDataCaseItem (ReprDataCaseItem),
+    piTypeToList,
   )
 
 mcons :: Maybe a -> [a] -> [a]

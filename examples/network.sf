@@ -99,74 +99,51 @@ data Status : Type {
 def process-udp-packet : UdpPacket -> Status {
   \p => case p {
     mk-udp-packet src-port dst-port len checksum contents => {
-      case len {
-        fz => error, -- empty packet
-        fs n => {
-          -- Ensure the first byte is 0x00
-          let first-byte = case contents {
-            fcons i is => i
-          };
+      -- Ensure the first byte is 0x00
+      let first-byte : Maybe (Fin byte-len) = case contents {
+        fcons i is => just i,
+        fnil => nothing,
+      };
 
-          case first-byte {
-            fz => ok,
-            fs _ => error
-          }
-        }
+      case first-byte {
+        just x => case x {
+          fz => ok,
+          fs _ => error
+        },
+        nothing => error
       }
     }
   }
 }
 
--- repr NumRepr {
---   data Nat as USize {
---     z as usize-zero,
---     s i as usize-add i usize-one,
---     case n {
---       z => b,
---       s => r
---     } as {
---       if-then-else (is-usize-zero n) (\_ => unsafe-cast b) (\_ => unsafe-cast (r (usize-sub n usize-one)))
---     }
---   }
+repr FinVecRepr {
+  data FinVec A n as JS {
+    fnil as js-empty-array,
+    fcons x xs as js-array-extend-l (to-js x) xs,
+    case l {
+      fnil => n,
+      fcons => c
+    } as {
+      js-if (js-eqq (js-length l) js-zero)
+        (cast n)
+        (cast (c [JS] [_] [_] (js-index l js-zero) (js-slice l js-one (js-length l))))
+    }
+  }
+}
 
---   data Fin n as U n {
---     fz [n] as uzero [(usize-add n usize-one)],
---     fs [n] i as uadd (upgrade i) (uone [(usize-add n usize-one)]),
---     case n {
---       fz => b,
---       fs => r
---     } as {
---       if-then-else (is-uzero n) (\_ => unsafe-cast b) (\_ => unsafe-cast (r (usub n uone)))
---     }
---   }
--- }
-
--- repr VecRepr {
---   data FinVec A n as FlatArray (upgrade-size n) A {
---     fnil as ?v1,
---     fcons x xs as ?v2,
---     case v {
---       fnil => v1,
---       fcons => v2
---     } as {
---       ?v3
---     }
---   }
--- }
-
--- repr UdpRepr {
---   data UdpPacket as ByteArray {
---     mk-udp-packet src-port dst-port len checksum contents as {
---       (write-flat-array contents write-u
---       (write-u checksum
---       (write-u len
---       (write-u dst-port
---       (write-u src-port empty-byte-array)))))
---     },
---     case p {
---       mk-udp-packet => mk,
---     } as {
---       ?h2
---     }
---   }
--- }
+repr UdpRepr {
+  data UdpPacket as ByteArray {
+    mk-udp-packet src-port dst-port len checksum contents as {
+      (write-flat-array contents write-u
+      (write-u checksum
+      (write-u len
+      (write-u dst-port
+      (write-u src-port empty-byte-array)))))
+    },
+    case p {
+      mk-udp-packet => mk,
+    } as {
+      ?h2
+    }
+  }
+}

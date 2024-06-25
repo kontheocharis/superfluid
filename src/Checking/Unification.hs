@@ -10,19 +10,22 @@ import Checking.Context
     inCtx,
     lookupSubst,
     modifyCtx,
+    resolveInCtx,
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow, resolveInCtx)
+import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
 import Lang
-  ( PiMode (..),
+  ( MapResult (..),
+    PiMode (..),
     Term (..),
+    TermMappable (mapTermMappableM),
     TermValue (..),
     Var (..),
-    lams, TermMappable (mapTermMappableM), MapResult (ReplaceAndContinue),
+    lams,
   )
 
 -- | Unify the list of terms together into a meta.
@@ -119,26 +122,58 @@ validateProb hole spine rhs = do
   rhs' <- resolveShallow rhs
 
   -- Get the spine variables.
-  vars <- mapM (\x -> do
-      x' <- resolveShallow x
-      x'' <- resolveInCtx x'
-      case (x'.value, x''.value) of
-        (_, V v) -> return v
-        (V v, _) -> return v
-        _ -> throwError $ CannotSolveProblem hole spine rhs
-    ) spine
+  vars <-
+    mapM
+      ( \x -> do
+          x' <- resolveShallow x
+          x'' <- resolveInCtx x'
+          case (x'.value, x''.value) of
+            (_, V v) -> return v
+            (V v, _) -> return v
+            _ -> throwError $ CannotSolveProblem hole spine rhs
+      )
+      spine
 
   -- Validate the RHS
-  rhs'' <- mapTermMappableM (\r -> do
-    r' <- resolveInCtx r
-    case r'.value of
-      Meta m | m == hole -> throwError $ CannotSolveProblem hole spine rhs
-      V v | v `notElem` vars -> throwError $ VariableEscapesMeta hole spine rhs v
-      _ -> return $ ReplaceAndContinue r'
-    ) rhs'
+  rhs'' <- validateRhs vars rhs'
 
   return (vars, rhs'')
-
+  where
+    validateRhs :: [Var] -> Term -> Tc Term
+    validateRhs vs r = do
+      r' <- resolveInCtx r
+      case r'.value of
+        Meta m | m == hole -> throwError $ CannotSolveProblem hole spine rhs
+        V v | v `notElem` vs -> throwError $ VariableEscapesMeta hole spine rhs v
+        SigmaT v t1 t2 -> do
+          t1' <- validateRhs vs t1
+          t2' <- validateRhs (v : vs) t2
+          return $ Term (SigmaT v t1' t2') r'.dat
+        PiT m v t1 t2 -> do
+          t1' <- validateRhs vs t1
+          t2' <- validateRhs (v : vs) t2
+          return $ Term (PiT m v t1' t2') r'.dat
+        Lam m v t -> do
+          t' <- validateRhs (v : vs) t
+          return $ Term (Lam m v t') r'.dat
+        Let x ty t v -> do
+          ty' <- validateRhs vs ty
+          t' <- validateRhs vs t
+          v' <- validateRhs (x : vs) v
+          return $ Term (Let x ty' t' v') r'.dat
+        Case t cs -> do
+          t' <- validateRhs vs t
+          cs' <- mapM (\(p, c) -> (,) <$> validateRhs vs p <*> validateRhs vs c) cs
+          return $ Term (Case t' cs') r'.dat
+        App m t1 t2 -> do
+          t1' <- validateRhs vs t1
+          t2' <- validateRhs vs t2
+          return $ Term (App m t1' t2') r'.dat
+        Pair t1 t2 -> do
+          t1' <- validateRhs vs t1
+          t2' <- validateRhs vs t2
+          return $ Term (Pair t1' t2') r'.dat
+        _ -> return r'
 
 -- | Solve a pattern unification problem.
 solve :: Var -> [Term] -> Term -> Tc ()

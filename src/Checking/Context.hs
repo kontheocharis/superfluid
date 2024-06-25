@@ -46,6 +46,7 @@ module Checking.Context
     solveMeta,
     withinCtx,
     globalAppSubjectNameM,
+    resolveInCtx,
     globalAppSubjectName,
     appVarArgs,
     appVarUncheckedArgs,
@@ -89,7 +90,7 @@ import Lang
     lams,
     listToApp,
     locatedAt,
-    mapTermM, Program (..),
+    mapTermM, Program (..), MapResult (..),
   )
 
 -- | A typing judgement.
@@ -188,7 +189,9 @@ getType t = return t.dat.annotTy
 
 -- | Set the type of a term.
 setType :: Term -> Type -> Tc Term
-setType t ty = return $ t {dat = t.dat {annotTy = Just ty}}
+setType t ty = do
+  ty' <- resolveInCtx ty
+  return $ t {dat = t.dat {annotTy = Just ty'}}
 
 -- | Enter a pattern by setting the inPat flag to True.
 enterPat :: Tc a -> Tc a
@@ -395,6 +398,18 @@ ensurePatIsVar p = case p.value of
   V _ -> return p
   Wild -> return p
   _ -> throwError $ PatternNotSupported p
+
+-- | Resolve variables in the context.
+resolveInCtx :: (TermMappable t) => t -> Tc t
+resolveInCtx = mapTermMappableM
+    ( \t -> case t.value of
+        V v -> do
+          s <- inCtx (lookupSubst v)
+          case s of
+            Just t' -> return $ Replace t'
+            Nothing -> return $ Replace t
+        _ -> return Continue
+    )
 
 -- | Convert a pattern to a variable, converting wildcards to fresh variables.
 patVarToVar :: Pat -> Tc Var

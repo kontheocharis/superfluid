@@ -78,6 +78,8 @@ import Lang
     termDataAt, PrimItem (..),
   )
 import Lang as DI (DeclItem (..))
+import Debug.Trace (traceM)
+import Interface.Pretty (printVal)
 
 -- | Check the program
 checkProgram :: Program -> Tc Program

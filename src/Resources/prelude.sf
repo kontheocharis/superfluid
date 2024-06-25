@@ -20,6 +20,8 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   }
 }
 
+prim impossible : [A : Type] -> A
+
 -- JS primitives
 
 prim JS : Type
