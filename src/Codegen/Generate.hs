@@ -4,12 +4,13 @@ import Checking.Context (Signature, asSig, classifyApp, lookupItemOrCtor, patVar
 import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
-import Interface.Pretty (indentedFst, Print (printVal))
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, appToList, letToList, listToApp, name, piTypeToList, value)
+import Debug.Trace (traceM)
+import Interface.Pretty (Print (printVal), indentedFst)
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var, appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value)
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
-import Debug.Trace (traceM)
+import Checking.Normalisation (normaliseTermFully)
 
 data GenState = GenState
   { decls :: [JsStat],
@@ -143,10 +144,18 @@ generateExpr (Term (Case t cs) _) = do
     mapM
       ( \(p, c) -> do
           (p', args) <- generatePat p
-          c' <- generateExpr c
-          let caseBody = foldr jsLam c' args
-          let c'' = foldl (\acc x -> jsApp acc (jsIntIndex t' x)) caseBody [1 .. length args]
-          return (p', c'')
+          let body =
+                listToApp
+                  ( lams args c,
+                    zipWith
+                      (\(m, _) i -> (m, listToApp (genTerm (Global "js-index"), [(Explicit, t), (Explicit, intToNat i)])))
+                      args
+                      [1 .. length args]
+                  )
+          let body' = normaliseTermFully mempty body
+          traceM $ printVal body'
+          body'' <- generateExpr body'
+          return (p', body'')
       )
       cs
   return $ jsSwitch (jsIntIndex t' 0) cs'
@@ -154,16 +163,20 @@ generateExpr (Term Wild _) = return jsNull
 generateExpr (Term (Hole _) _) = return jsNull
 generateExpr (Term (Meta _) _) = return jsNull
 
-generatePat :: Term -> Gen (JsExpr, [String])
+intToNat :: Int -> Term
+intToNat 0 = genTerm (Global "js-zero")
+intToNat n = listToApp (genTerm (Global "js-plus"), [(Explicit, genTerm (Global "js-one")), (Explicit, intToNat (n - 1))])
+
+generatePat :: Term -> Gen (JsExpr, [(PiMode, Var)])
 generatePat t = do
   let (t', ts) = appToList t
   case t' of
     Term (Global s) _ -> do
       let ts' =
             map
-              ( \(_, x) ->
+              ( \(m, x) ->
                   ( case x of
-                      Term (V v) _ -> jsName v.name
+                      Term (V v) _ -> (m, v)
                       _ -> error $ "Non-variable in pattern: " ++ printVal x
                   )
               )

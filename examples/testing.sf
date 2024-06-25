@@ -14,6 +14,42 @@ def rec fib : Nat -> Nat {
   }
 }
 
+def rec nat-eq : Nat -> Nat -> Bool {
+  \n m => case n {
+    z => case m {
+      z => true,
+      s m' => false
+    },
+    s n' => case m {
+      z => false,
+      s m' => nat-eq n' m'
+    }
+  }
+}
+
+def rec sub : Lam -> Nat -> Lam -> Lam {
+  \e n t => case e {
+    var x => case nat-eq n x {
+      true => t,
+      false => var x
+    },
+    app e1 e2 => app (sub e1 n t) (sub e2 n t),
+    lam e' => lam (sub e' (s n) t)
+  }
+}
+
+def rec eval : Lam -> Lam {
+  \e => case e {
+    var x => var x,
+    app e1 e2 => case eval e1 {
+      lam e' => eval (sub e' z e2),
+      app e1' e2' => app (app e1' e2') e2,
+      var x => app (var x) (eval e2)
+    },
+    lam e' => lam (eval e')
+  }
+}
+
 def identity : Lam {
   lam (var z)
 }

@@ -22,6 +22,6 @@ const process_udp_packet = (p) => (() => {
   const len = ((p).readUInt16BE)(js_four);
   const checksum = ((p).readUInt16BE)(js_six);
   const contents = ((p).subarray)(js_eight, (js_eight) + (len));
-  return (((Buffer.byteLength)(contents)) === (0)) ? (["error"]) : ((((contents)[0]) === (0)) ? (["ok"]) : (["error"]));
+  return (((Buffer.byteLength)(contents)) === (0)) ? (["error", Word, null, false]) : ((((contents)[0]) === (0)) ? ((((Buffer.byteLength)(((contents).subarray)(1, (Buffer.byteLength)(contents)))) === (0)) ? (["ok", Word, null, src_port]) : (["ok", Word, null, checksum])) : (["error", Word, null, false]));
 })();
 (main)()

@@ -109,7 +109,11 @@ maybeExpand sig n = do
 
 -- | Reduce a term to normal form (fully).
 normaliseTermFully :: Signature -> Term -> Term
-normaliseTermFully sig = mapTermMappable (maybe Continue ReplaceAndContinue . normaliseTerm sig)
+normaliseTermFully sig = mapTermMappable
+    ( \t -> case normaliseTerm sig t of
+        Just t' -> ReplaceAndContinue (normaliseTermFully sig t')
+        Nothing -> Continue
+    )
 
 -- | Fill all the metavariables in a term.
 fillAllMetas :: Term -> Tc (MapResult Term)

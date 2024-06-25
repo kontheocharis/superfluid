@@ -35,21 +35,24 @@ data UdpPacket : Type {
 
 
 
-data Status : Type {
-  ok : Status,
-  error : Status
+data Status : Type -> Type -> Type {
+  ok : [O : Type] -> [E : Type] -> O -> Status O E,
+  error : [O : Type] -> [E : Type] -> E -> Status O E,
 }
 
-def process-udp-packet : UdpPacket -> Status {
+def process-udp-packet : UdpPacket -> Status Word Bool {
   \p => case p {
     mk-udp-packet src-port dst-port len checksum contents => {
       -- Ensure the first byte exists and is 0x00
       case contents {
         bcons i is => case i {
-          fz => ok,
-          fs _ => error
+          fz => case is {
+            bcons j js => ok checksum,
+            bnil => ok src-port,
+          },
+          fs _ => error false
         },
-        bnil => error
+        bnil => error false
       }
     }
   }
