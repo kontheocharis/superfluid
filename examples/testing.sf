@@ -27,26 +27,68 @@ def rec nat-eq : Nat -> Nat -> Bool {
   }
 }
 
-def rec sub : Lam -> Nat -> Lam -> Lam {
+repr NatEqAsEq {
+  def nat-eq as \n m => js-eqq n m
+}
+
+def rec subst : Lam -> Nat -> Lam -> Lam {
   \e n t => case e {
     var x => case nat-eq n x {
       true => t,
       false => var x
     },
-    app e1 e2 => app (sub e1 n t) (sub e2 n t),
-    lam e' => lam (sub e' (s n) t)
+    app e1 e2 => app (subst e1 n t) (subst e2 n t),
+    lam e' => lam (subst e' (s n) t)
   }
 }
 
-def rec eval : Lam -> Lam {
+def rec evaluate : Lam -> Lam {
   \e => case e {
     var x => var x,
-    app e1 e2 => case eval e1 {
-      lam e' => eval (sub e' z e2),
-      app e1' e2' => app (app e1' e2') e2,
-      var x => app (var x) (eval e2)
+    app e1 e2 => {
+      let e1' = evaluate e1;
+      case e1' {
+        lam e' => evaluate (subst e' z e2),
+        app e11' e12' => app (app e11' e12') (evaluate e2),
+        var x => app (var x) (evaluate e2)
+      }
     },
-    lam e' => lam (eval e')
+    lam e' => lam (evaluate e')
+  }
+}
+
+data Val : Type {
+  vlam : List Val -> Lam -> Val,
+  vapp : Val -> Val -> Val,
+  vvar : Nat -> Val,
+}
+
+def rec evaluate-nbe : List Val -> Lam -> Val {
+  \ctx e => case e {
+    var x => {
+      let idx = index x ctx;
+      case idx {
+        just t => t,
+        nothing => vvar x
+      }
+    },
+    app e1 e2 => {
+      let e1' = evaluate-nbe ctx e1;
+      case e1' {
+        vlam ctx e' => evaluate-nbe (cons (evaluate-nbe ctx e2) ctx) e',
+        vapp e11' e12' => vapp (vapp e11' e12') (evaluate-nbe ctx e2),
+        vvar x => vapp (vvar x) (evaluate-nbe ctx e2)
+      }
+    },
+    lam e' => vlam ctx e'
+  }
+}
+
+def rec reify : Val -> Lam {
+  \v => case v {
+    vlam ctx e => lam e,
+    vapp e1 e2 => app (reify e1) (reify e2),
+    vvar x => var x
   }
 }
 
@@ -72,5 +114,9 @@ def test-list : List Nat {
 }
 
 def main : IO Unit {
-  debug-print (map (\x => pow x two) test-list)
+  let lam-term = app (app (app (lam (app (var z) (lam (lam (var (s z)))))) (lam (var (s z)))) (var z)) (var (s (s z)));
+  let evaluate-alt = \t => reify (evaluate-nbe nil t);
+  io-bind
+    (debug-print (evaluate lam-term))
+    (\_ => debug-print (evaluate-alt lam-term))
 }

@@ -153,7 +153,6 @@ generateExpr (Term (Case t cs) _) = do
                       [1 .. length args]
                   )
           let body' = normaliseTermFully mempty body
-          traceM $ printVal body'
           body'' <- generateExpr body'
           return (p', body'')
       )
@@ -238,7 +237,7 @@ generatePrim "IO" _ = return jsNull
 generatePrim "JS" _ = return jsNull
 generatePrim "impossible" [_] = return $ JsExpr "({ throw new Error('impossible'); })()"
 generatePrim "io-return" [_, a] = return $ jsLazy a
-generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsApp f (jsInvoke a)
+generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsInvoke (jsApp f (jsInvoke a))
 generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsVar "console") "log" `jsApp` a
 generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
 generatePrim "to-js" [_, a] = return a

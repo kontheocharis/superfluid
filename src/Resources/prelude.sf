@@ -347,7 +347,14 @@ repr ListAsArray {
     }
   }
 
-  def index as \i => cast (js-index i)
+  def index as {
+    \i l => {
+      js-if (js-lt i (js-length l))
+        (cast (js-index l i))
+        (cast js-null)
+    }
+  }
+
   def map as \f xs => js-map (cast f) (to-js xs)
   def fold as \f i xs => cast (js-fold (cast f) (to-js i) (to-js xs))
 }
