@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingVia #-}
+
 module Checking.Normalisation
   ( normaliseTermFully,
     fillAllMetasAndNormalise,
@@ -24,6 +26,7 @@ import Checking.Context
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
 import Control.Monad.State (gets)
+import Data.Bifunctor (second)
 import Data.Map (lookup, (!?))
 import Lang
   ( DeclItem (DeclItem),
@@ -36,12 +39,74 @@ import Lang
     Term (..),
     TermMappable (..),
     TermValue (..),
+    Var,
     isRecursive,
     listToApp,
     locatedAt,
     mapTermM,
   )
 import Lang as DI (DeclItem (..))
+
+newtype Index = Ix
+  {inner :: Int}
+  deriving (Eq, Show, Num) via Int
+
+newtype Level = Lvl
+  {inner :: Int}
+  deriving (Eq, Ord, Show, Num) via Int
+
+type Env = [Value]
+
+type Spine = [(Value, PiMode)]
+
+data Value
+  = VFlex Var Spine
+  | VRigid Var Level Spine
+  | VLam PiMode Var Closure
+  | VPiT PiMode Var Term Closure
+  | VSigmaT Var Term Closure
+  | VPair Value Value
+  | VGlobal String
+  | VTyT
+  | CaseT Value [(Pat, Closure)]
+
+appClosure :: Closure -> Value -> Tc Value
+appClosure (Close env t) v = eval (v : env) t
+
+vApp :: PiMode -> Value -> Value -> Tc Value
+vApp m (VLam m' _ (Close env' t)) v' | m == m' = eval (v' : env') t
+vApp m (VFlex v spine) v' = return $ VFlex v (spine ++ [(v', m)])
+vApp m (VRigid v l spine) v' = return $ VRigid v l (spine ++ [(v', m)])
+vApp _ _ _ = error "Cannot apply non-function"
+
+data Closure = Close Env Term
+
+varToLevel :: Var -> Level
+varToLevel = _
+
+eval :: Env -> Term -> Tc Value
+eval env (Term (Global g) _) = do
+  sig <- gets (\s -> s.signature)
+  case maybeExpand sig g of
+    Just t -> eval env t
+    Nothing -> return $ VGlobal g
+eval env (Term (Lam m v t) _) = return $ VLam m v (Close env t)
+eval env (Term (PiT m v t1 t2) _) = return $ VPiT m v t1 (Close env t2)
+eval env (Term (SigmaT v t1 t2) _) = return $ VSigmaT v t1 (Close env t2)
+eval env (Term (Let _ t1 _ t2) _) = do
+  v <- eval env t1
+  eval (v : env) t2
+eval env (Term (App m t1 t2) _) = do
+  v1 <- eval env t1
+  v2 <- eval env t2
+  vApp m v1 v2
+eval env (Term (Pair t1 t2) _) = VPair <$> eval env t1 <*> eval env t2
+eval env (Term (Case s cs) _) = CaseT <$> eval env s <*> return (map (second (Close env)) cs)
+eval _ (Term (Meta m) _) = return $ VFlex m []
+eval _ (Term TyT _) = return VTyT
+eval _ (Term (V v) _) = return $ VRigid v (varToLevel v) []
+eval _ (Term (Hole v) _) = error $ "Hole " ++ show v ++ " in normalisation"
+eval _ (Term Wild _) = error "Wild in normalisation"
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
@@ -109,7 +174,8 @@ maybeExpand sig n = do
 
 -- | Reduce a term to normal form (fully).
 normaliseTermFully :: Signature -> Term -> Term
-normaliseTermFully sig = mapTermMappable
+normaliseTermFully sig =
+  mapTermMappable
     ( \t -> case normaliseTerm sig t of
         Just t' -> ReplaceAndContinue (normaliseTermFully sig t')
         Nothing -> Continue
