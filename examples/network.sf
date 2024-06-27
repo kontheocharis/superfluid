@@ -1,17 +1,9 @@
-def two : Nat {
-  s (s z)
-}
-
-def two_to_the_sixteen : Nat {
-  pow two (pow two (pow two two))
-}
-
 def field-len : Nat {
-  two_to_the_sixteen
+  pow 2 16
 }
 
 def byte-len : Nat {
-  two_to_the_sixteen
+  pow 2 16
 }
 
 def Word : Type {
@@ -41,7 +33,7 @@ repr ByteVecRepr {
       let new-len = js-plus old-len js-one;
       let b = js-buffer-alloc new-len;
       let b' = js-buffer-write-uint8 b (to-js x) js-zero;
-      js-buffer-copy b' js-one new-len xs js-zero old-len
+      js-buffer-copy xs js-zero old-len js-one b'
     },
     case l {
       bnil => n,
@@ -72,12 +64,11 @@ repr UdpRepr {
       mk-udp-packet => mk,
     } as {
       let len = js-buffer-read-uint16-be js-four p;
-      cast (mk
-        (cast (js-buffer-read-uint16-be js-zero p)) -- src-port
-        (cast (js-buffer-read-uint16-be js-two p)) -- dst-port
-        (cast len) -- len
-        (cast (js-buffer-read-uint16-be js-six p)) -- checksum
-        (cast (js-buffer-subarray js-eight (js-plus js-eight len) p))) -- contents
+      let src-port = js-buffer-read-uint16-be js-zero p;
+      let dst-port = js-buffer-read-uint16-be js-two p;
+      let checksum = js-buffer-read-uint16-be js-six p;
+      let contents = js-buffer-subarray js-eight (js-plus js-eight len) p;
+      cast (mk (cast src-port) (cast dst-port) (cast len) (cast checksum) (cast contents))
     }
   }
 }
@@ -111,13 +102,8 @@ repr FinFns {
 }
 
 
-
-
-
-
-
 def OWN_PORT : Word {
-  fs (fs (fs (fs (fs (fs (fs (fs (fs (fs fz)))))))))
+  4n
 }
 
 def handle-packet : UdpPacket -> Maybe UdpPacket {
@@ -140,10 +126,10 @@ def handle-packet : UdpPacket -> Maybe UdpPacket {
 
 def main : IO Unit {
   let test-packet = mk-udp-packet
-    (fs (fs fz))
-    (fs (fs (fs fz)))
-    fz
-    (fs (fs (fs (fs (fs fz)))))
+    2n
+    3n
+    0n
+    5n
     bnil;
 
   let result = handle-packet test-packet;

@@ -382,22 +382,6 @@ repr ListAsArray {
 
 -- More definitions
 
--- def two-to-the : Nat -> Nat {
---   \n => pow (s (s z)) n
--- }
-
--- def four : Nat {
---   s (s (s (s z)))
--- }
-
--- def eight : Nat {
---   s (s (s (s (s (s (s (s z)))))))
--- }
-
--- data Byte : Type {
---   byte-from-num : Fin (two-to-the eight) -> Byte,
--- }
-
 data Char : Type {
   char-from-num : Fin (pow 2 5) -> Char,
 }

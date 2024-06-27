@@ -52,24 +52,7 @@
     },
     {
       "name": "string.quoted.single.char.superfluid",
-      "begin": "'",
-      "end": "'",
-      "beginCaptures": {
-        "0": {
-          "name": "punctuation.definition.string.begin.superfluid"
-        }
-      },
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.definition.string.end.superfluid"
-        }
-      },
-      "patterns": [
-        {
-          "name": "constant.character.escape.superfluid",
-          "match": "\\\\."
-        }
-      ]
+      "match": "'([^'\\\\]|\\\\.)'"
     },
     {
       "name": "constant.numeric.integer.superfluid",
