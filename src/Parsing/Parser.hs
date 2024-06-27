@@ -122,7 +122,7 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "unrepr"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -316,7 +316,7 @@ declSignature = do
 -- Some are grouped to prevent lots of backtracking.
 term :: Parser Term
 term = do
-  t <- choice [caseExpr, lets, piTOrSigmaT, lam, app]
+  t <- choice [caseExpr, lets, repTerm, unrepTerm, piTOrSigmaT, lam, app]
   resolveTerm t
 
 -- | Parse a single term.
@@ -435,6 +435,19 @@ app = do
   t <- singleTerm
   ts <- many (((Implicit,) <$> try (square term)) <|> ((Explicit,) <$> singleTerm))
   return $ listToApp (t, ts)
+
+-- | Parse a representation term
+repTerm :: Parser Term
+repTerm = locatedTerm $ do
+  try $ reserved "repr"
+  Rep <$> singleTerm
+
+-- | Parse an unrepresentation term
+unrepTerm :: Parser Term
+unrepTerm = locatedTerm $ do
+  try $ reserved "unrepr"
+  name <- identifier
+  Unrep name <$> singleTerm
 
 -- | Parse a series of let terms.
 lets :: Parser Term

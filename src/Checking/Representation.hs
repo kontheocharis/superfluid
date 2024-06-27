@@ -145,9 +145,11 @@ representTermRec = \case
     r <- findReprForGlobal g
     case r of
       Nothing -> return Continue
-      Just (_, term) -> do
+      Just (_, _, term) -> do
         term' <- resolveDeep term
         return $ ReplaceAndContinue term'
+  Term (Rep r) _ -> Replace <$> representTerm r
+  Term (Unrep _ r) _ -> Replace <$> representTerm r
   Term (Case s cs) _ -> do
     case s.dat.annotTy of
       Just t -> do

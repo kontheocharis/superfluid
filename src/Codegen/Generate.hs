@@ -165,6 +165,8 @@ generateExpr (Term (Lit (StringLit s)) _) = return $ jsStringLit s
 generateExpr (Term (Lit (NatLit i)) _) = return $ jsIntLit (fromIntegral i)
 generateExpr (Term (Lit (FinLit i _)) _) = return $ jsIntLit (fromIntegral i)
 generateExpr (Term (Lit (CharLit c)) _) = return $ jsCharLit c
+generateExpr (Term (Rep _) _) = error "Found rep in generateExpr"
+generateExpr (Term (Unrep _ _) _) = error "Found unrep in generateExpr"
 
 intToNat :: Int -> Term
 intToNat 0 = genTerm (Global "js-zero")

@@ -103,6 +103,10 @@ data TermValue
     Lit Lit
   | -- | Metavar identified by an integer
     Meta Var
+  | -- | Represent a term
+    Rep Term
+  | -- | Unrepresent a term of the given named type
+    Unrep String Term
   deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | A term with associated data.
@@ -360,6 +364,8 @@ mapTermM f term = do
       (Meta i) -> return $ Meta i
       (Lit (FinLit n i)) -> Lit . FinLit n <$> mapTermM f i
       (Lit l) -> return $ Lit l
+      (Rep t) -> Rep <$> mapTermM f t
+      (Unrep s t) -> Unrep s <$> mapTermM f t
 
 class TermMappable t where
   -- | Apply a term function to an item.
@@ -438,6 +444,8 @@ isCompound x =
         (Case {}) -> True
         (App {}) -> True
         (SigmaT {}) -> True
+        (Rep {}) -> True
+        (Unrep {}) -> True
         _ -> False
 
 -- | Check if a given term is a valid pattern (no typechecking).

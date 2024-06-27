@@ -16,6 +16,7 @@ import Checking.Context
     Tc,
     TcState (..),
     classifyApp,
+    findReprForGlobal',
     freshVar,
     inCtx,
     inSignature,
@@ -24,9 +25,14 @@ import Checking.Context
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
-import Control.Monad.State (gets, get)
+import Control.Monad.State (evalState, get, gets, put, runState)
 import Criterion.Types (fromInt)
+import Data.Foldable (toList)
+import Data.List (intercalate)
 import Data.Map (lookup, (!?))
+import Debug.Trace (traceM)
+import GHC.Natural (Natural)
+import Interface.Pretty (printVal)
 import Lang
   ( DeclItem (DeclItem),
     HasLoc (..),
@@ -45,12 +51,7 @@ import Lang
     locatedAt,
     mapTermM,
   )
-import Lang as DI (DeclItem (..))
-import GHC.Natural (Natural)
-import Debug.Trace (traceM)
-import Data.List (intercalate)
-import Interface.Pretty (printVal)
-import Data.Foldable (toList)
+import Lang as DI (DeclItem (..), appToList)
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
@@ -88,6 +89,23 @@ tryCaseMatch sig t p = case caseMatch t p of
     Just t' -> tryCaseMatch sig t' p
     Nothing -> Nothing
 
+expandRep :: Signature -> Term -> Maybe Term
+expandRep sig t = do
+  let t' = appToList t
+  case t' of
+    (Term (Global g) _, xs) -> do
+      case findReprForGlobal' sig g of
+        Just (_, _, x') -> Just $ listToApp (x', xs)
+        _ -> Nothing
+    _ -> Nothing
+
+tryExpandRep :: Signature -> Term -> Maybe Term
+tryExpandRep sig t = case expandRep sig t of
+  Just t' -> Just t'
+  Nothing -> case normaliseTerm sig t of
+    Just t' -> tryExpandRep sig t'
+    Nothing -> Nothing
+
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Signature -> Term -> Maybe Term
@@ -107,6 +125,7 @@ normaliseTerm sig (Term (Case s cs) _) =
     Nothing
     cs
 normaliseTerm sig (Term (Global g) _) = maybeExpand sig g
+normaliseTerm sig (Term (Rep r) _) = tryExpandRep sig r
 normaliseTerm _ _ = Nothing -- @@Todo: normalise declarations
 
 expandLit :: Lit -> Term

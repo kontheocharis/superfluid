@@ -32,7 +32,7 @@ import Checking.Context
     lookupType,
     modifyCtx,
     modifySignature,
-    setType,
+    setType, findReprForGlobal,
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
@@ -456,20 +456,33 @@ inferTerm' hole@(Term (Hole h) d1) = do
   showHole hole Nothing
   return (m, typ)
 inferTerm' t@(Term (Meta _) _) = error $ "Found metavar during inference: " ++ show t
-inferTerm' (Term (Lit (StringLit l)) d) = do
-  return (Term (Lit (StringLit l)) d, locatedAt d (Global "String"))
-inferTerm' (Term (Lit (CharLit l)) d) = do
-  return (Term (Lit (CharLit l)) d, locatedAt d (Global "Char"))
-inferTerm' (Term (Lit (NatLit l)) d) = do
-  return (Term (Lit (NatLit l)) d, locatedAt d (Global "Nat"))
-inferTerm' (Term (Lit (FinLit i n)) d) = do
+inferTerm' (Term (Rep r) d1) = do
+  (r', ty) <- inferTerm r
+  return (locatedAt d1 (Rep r'), locatedAt d1 (Rep ty))
+inferTerm' (Term (Unrep n r) d1) = do
+  (r', ty) <- inferTerm r
+  rep <- findReprForGlobal n
+  case rep of
+    Nothing -> throwError $ ItemNotFound n
+    Just (_, params, term) -> do
+      paramMetas <- mapM (\(m, _) -> (m,) <$> freshMeta) params
+      -- Ensure that the term to be unrepresented has the correct represented type
+      unifyTerms (listToApp (term, paramMetas)) ty
+      return (locatedAt d1 (Unrep n r'), listToApp (locatedAt d1 (Global n), paramMetas))
+inferTerm' (Term (Lit (StringLit l)) d1) = do
+  return (locatedAt d1 (Lit (StringLit l)), locatedAt d1 (Global "String"))
+inferTerm' (Term (Lit (CharLit l)) d1) = do
+  return (locatedAt d1 (Lit (CharLit l)), locatedAt d1 (Global "Char"))
+inferTerm' (Term (Lit (NatLit l)) d1) = do
+  return (locatedAt d1 (Lit (NatLit l)), locatedAt d1 (Global "Nat"))
+inferTerm' (Term (Lit (FinLit i n)) d1) = do
   (n', _) <- checkTerm n (locatedAt n (Global "Nat"))
   m <- freshMeta
   let minIndex = listToApp (genTerm (Global "add"), [(Explicit, genTerm (Lit (NatLit i))), (Explicit, m)])
   unifyTerms minIndex n'
   return
-    ( Term (Lit (FinLit i n')) d,
-      listToApp (genTerm (Global "Fin"), [(Explicit, listToApp (genTerm (Global "s"), [(Explicit, n')]))])
+    ( locatedAt d1 (Lit (FinLit i n')),
+      listToApp (locatedAt d1 (Global "Fin"), [(Explicit, listToApp (genTerm (Global "s"), [(Explicit, n')]))])
     )
 
 inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> Tc ((Type, Term, Term), Type)

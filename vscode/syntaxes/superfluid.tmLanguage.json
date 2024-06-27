@@ -7,7 +7,7 @@
     },
     {
       "name": "keyword.control.superfluid",
-      "match": "\\b(case|data|def|repr|as|let|prim|rec)\\b"
+      "match": "\\b(case|data|def|repr|as|let|prim|rec|unrepr)\\b"
     },
     {
       "name": "keyword.control.superfluid",

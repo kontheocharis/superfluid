@@ -1,19 +1,4 @@
-data Ctx : Type {
-  empty : Ctx,
-  with : (c : Ctx) -> Ty c -> Ctx
+def main : IO Unit {
+  let x : JS = repr (unrepr Nat js-one);
+  io-return tt
 }
-
-data Ty : Ctx -> Type {
-  u : [c : Ctx] -> Ty c,
-  el : [c : Ctx] -> Tm c u -> Ty c,
-}
-
-data Tm : (c : Ctx) -> Ty c -> Type {
-}
-
-data AtomKind {
-  TY : AtomKind,
-  TM : AtomKind
-}
-
-data Atom :

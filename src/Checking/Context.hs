@@ -16,6 +16,7 @@ module Checking.Context
     asSig,
     findReprForCase,
     findReprForGlobal,
+    findReprForGlobal',
     classifyApp,
     ctx,
     patVarToVar,
@@ -58,7 +59,7 @@ import Checking.Errors (TcError (..))
 import Control.Applicative ((<|>))
 import Control.Monad (join)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (MonadState (..), gets, modify)
+import Control.Monad.State (MonadState (..), gets, modify, runState, StateT (runStateT))
 import Control.Monad.State.Lazy (StateT)
 import Data.List (find, intercalate)
 import Data.Map (Map, empty, insert)
@@ -446,9 +447,15 @@ globalAppSubjectNameM p =
         Global s' -> return s'
         _ -> throwError $ PatternNotSupported p
 
+-- | A version of `findReprForGlobal` that returns the result directly.
+findReprForGlobal' :: Signature -> String -> Maybe (String, [(PiMode, Var)], Term)
+findReprForGlobal' sig s = case runStateT (findReprForGlobal s) (emptyTcState {signature = sig}) of
+  Right (r, _) -> r
+  Left e -> error $ "findReprForGlobal' failed: " ++ show e
+
 -- | Find a representation for the given global name.
--- Returns the name of the representation and the term.
-findReprForGlobal :: String -> Tc (Maybe (String, Term))
+-- Returns the name of the representation, the parameters, and the term.
+findReprForGlobal :: String -> Tc (Maybe (String, [(PiMode, Var)], Term))
 findReprForGlobal name = do
   (Signature items) <- gets sig
   join . find isJust <$> mapM findRepr items
@@ -457,19 +464,19 @@ findReprForGlobal name = do
     findRepr _ = return Nothing
 
     findReprData rName (ReprDecl d)
-      | d.src == name = return $ Just (rName, d.target)
+      | d.src == name = return $ Just (rName, [], d.target)
       | otherwise = return Nothing
     findReprData rName (ReprData d)
       | globalAppSubjectName d.src == name = do
           params <- appVarArgs d.src
-          return $ Just (rName, lams params d.target)
+          return $ Just (rName, params, lams params d.target)
       | otherwise = join . find isJust <$> mapM (findReprDataCtor rName) d.ctors
 
-    findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, Term))
+    findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, [(PiMode, Var)], Term))
     findReprDataCtor rName c
       | globalAppSubjectName c.src == name = do
           params <- appVarArgs c.src
-          return $ Just (rName, lams params c.target)
+          return $ Just (rName, params, lams params c.target)
       | otherwise = return Nothing
 
 -- | Find a representation for the case expression of the given global type name.

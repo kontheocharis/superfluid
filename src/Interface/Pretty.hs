@@ -87,6 +87,8 @@ instance Print TermValue where
   printVal (Hole i) = "?" ++ printVal i
   printVal (Meta i) = "!" ++ printVal i
   printVal (Lit s) = printVal s
+  printVal (Rep s) = "repr " ++ printSingleVal s
+  printVal (Unrep n s) = "unrepr " ++ n ++ " " ++ printSingleVal s
 
 
 instance Print Lit where

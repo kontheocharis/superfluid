@@ -76,6 +76,8 @@ unifyTerms a' b' = do
       unifyTerms l1 r1
       unifyTerms l2 r2
     unifyTerms' (Term TyT _) (Term TyT _) = return ()
+    unifyTerms' (Term (Rep t) _) (Term (Rep t') _) = unifyTerms t t'
+    unifyTerms' (Term (Unrep n t) _) (Term (Unrep n' t') _) | n == n' = unifyTerms t t'
     unifyTerms' a@(Term (Lit l1) _) b@(Term (Lit l2) _) = if l1 == l2 then return () else throwError $ Mismatch a b
     unifyTerms' (Term (Lit l1) _) b  = unifyTerms (expandLit l1) b
     unifyTerms' a (Term (Lit l2) _) = unifyTerms a (expandLit l2)
