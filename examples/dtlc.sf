@@ -22,5 +22,5 @@ repr MyListAsList {
 
 def main : IO Unit {
   let y = mcons 3 mnil;
-  io-return tt
+  debug-print y
 }

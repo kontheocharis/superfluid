@@ -32,12 +32,12 @@ import Checking.Context
     lookupType,
     modifyCtx,
     modifySignature,
-    setType, findReprForGlobal,
+    setType, findReprForGlobal, lookupSubst, enterCtxEffect,
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Representation (representCtx, representTerm)
-import Checking.Unification (unifyAllTerms, unifyTerms)
+import Checking.Unification (unifyAllTerms, unifyTerms, introSubst)
 import Checking.Utils (showHole)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
@@ -490,7 +490,7 @@ inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> T
 inferOrCheckLet f var ty tm ret = do
   (ty', _) <- checkTermExpected ty TyT
   (tm', ty'') <- checkTerm tm ty'
-  (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxMod (addSubst var tm') $ f ret
+  (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxEffect (introSubst var tm') $ f ret
   return ((ty'', tm', ret'), subVar var tm' typ')
 
 inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Term)] -> Tc ((Term, [(Pat, Term)]), [Type])

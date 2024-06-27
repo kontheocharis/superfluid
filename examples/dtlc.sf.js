@@ -14,6 +14,6 @@ const find = (A) => (p) => (xs) => (() => {
 })();
 const main = (() => {
   const y = [3, ...([])];
-  return (() => ["tt"]);
+  return ((debug_print)(null))(y);
 })();
 (main)()

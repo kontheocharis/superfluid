@@ -1,4 +1,9 @@
-module Checking.Unification (unifyTerms, unifyAllTerms) where
+module Checking.Unification
+  ( unifyTerms,
+    unifyAllTerms,
+    introSubst,
+  )
+where
 
 import Checking.Context
   ( FlexApp (..),
@@ -6,6 +11,7 @@ import Checking.Context
     TcState (..),
     addSubst,
     classifyApp,
+    enterCtxMod,
     freshMeta,
     inCtx,
     lookupSubst,
@@ -14,7 +20,8 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow, expandLit)
+import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveShallow)
+import Checking.Utils (showSolvedMetas)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
@@ -25,7 +32,6 @@ import Lang
     Var (..),
     lams,
   )
-import Checking.Utils (showSolvedMetas)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -53,7 +59,7 @@ unifyTerms a' b' = do
       -- If in a pattern, then we can add a substitution straight away.
       pt <- gets (\s -> s.inPat)
       if pt
-        then modifyCtx (addSubst v t)
+        then introSubst v t
         else do
           -- Check if the variable exists in a substitution in
           -- the context.
@@ -79,7 +85,7 @@ unifyTerms a' b' = do
     unifyTerms' (Term (Rep t) _) (Term (Rep t') _) = unifyTerms t t'
     unifyTerms' (Term (Unrep n t) _) (Term (Unrep n' t') _) | n == n' = unifyTerms t t'
     unifyTerms' a@(Term (Lit l1) _) b@(Term (Lit l2) _) = if l1 == l2 then return () else throwError $ Mismatch a b
-    unifyTerms' (Term (Lit l1) _) b  = unifyTerms (expandLit l1) b
+    unifyTerms' (Term (Lit l1) _) b = unifyTerms (expandLit l1) b
     unifyTerms' a (Term (Lit l2) _) = unifyTerms a (expandLit l2)
     unifyTerms' (Term (V l) _) (Term (V r) _) | l == r = return ()
     unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = do
@@ -105,6 +111,14 @@ unifyTerms a' b' = do
             unifyTerms l2 r2
             `catchError` (\_ -> normaliseAndUnifyTerms a b)
     unifyTerms' l r = normaliseAndUnifyTerms l r
+
+-- | Introduce a substitution for a variable.
+introSubst :: Var -> Term -> Tc ()
+introSubst v t = do
+  s <- inCtx (lookupSubst v)
+  case s of
+    Nothing -> modifyCtx (addSubst v t)
+    Just t' -> unifyTerms t t'
 
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()

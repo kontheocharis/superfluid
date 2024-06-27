@@ -25,54 +25,6 @@ data UdpPacket : Type {
     UdpPacket
 }
 
-repr ByteVecRepr {
-  data ByteVec n as JS {
-    bnil as js-buffer-alloc (js-zero),
-    bcons x xs as {
-      let old-len = js-buffer-byte-length xs;
-      let new-len = js-plus old-len js-one;
-      let b = js-buffer-alloc new-len;
-      let b' = js-buffer-write-uint8 b (to-js x) js-zero;
-      js-buffer-copy xs js-zero old-len js-one b'
-    },
-    case l {
-      bnil => n,
-      bcons => c
-    } as {
-      js-if (js-eqq (js-buffer-byte-length l) (js-zero))
-        (cast n)
-        (cast (c (cast (js-index l (js-zero))) (js-buffer-subarray l js-one (js-buffer-byte-length l))))
-    }
-  }
-}
-
-
-
-repr UdpRepr {
-  data UdpPacket as JS {
-    mk-udp-packet src-port dst-port len checksum contents as {
-      let total-len = js-plus (cast len) js-eight;
-      let b = js-buffer-alloc total-len;
-      let b' = js-buffer-write-uint16-be (to-js src-port) js-zero b;
-      let b'' = js-buffer-write-uint16-be (to-js dst-port) js-two b';
-      let b''' = js-buffer-write-uint16-be (to-js len) js-four b'';
-      let b'''' = js-buffer-write-uint16-be (to-js checksum) js-six b''';
-      let b''''' = js-buffer-copy (to-js contents) js-zero (to-js len) js-eight b'''';
-      b'''''
-    },
-    case p {
-      mk-udp-packet => mk,
-    } as {
-      let len = js-buffer-read-uint16-be js-four p;
-      let src-port = js-buffer-read-uint16-be js-zero p;
-      let dst-port = js-buffer-read-uint16-be js-two p;
-      let checksum = js-buffer-read-uint16-be js-six p;
-      let contents = js-buffer-subarray js-eight (js-plus js-eight len) p;
-      cast (mk (cast src-port) (cast dst-port) (cast len) (cast checksum) (cast contents))
-    }
-  }
-}
-
 def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
   \x => case x {
     fz => true,
@@ -97,13 +49,23 @@ def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
 }
 
 repr FinFns {
-  def fin-is-even as \n => js-eqq (js-mod n js-two) js-zero
-  def fin-eq as \x y => js-eqq x y
+  def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
+  def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
 }
 
 
 def OWN_PORT : Word {
   4n
+}
+
+def rec max-fin : [n : Nat] -> Fin n -> Fin n -> Fin n {
+  \x y => case x {
+    fz => y,
+    fs x' => case y {
+      fz => x,
+      fs y' => fs (max-fin x' y')
+    }
+  }
 }
 
 def handle-packet : UdpPacket -> Maybe UdpPacket {
@@ -114,6 +76,8 @@ def handle-packet : UdpPacket -> Maybe UdpPacket {
       -- Otherwise, drop it.
       case fin-is-even src-port {
         true => {
+
+
           let new-p = mk-udp-packet OWN_PORT dst-port len checksum contents;
           just new-p
         },
@@ -128,13 +92,64 @@ def main : IO Unit {
   let test-packet = mk-udp-packet
     2n
     3n
-    0n
+    3n
     5n
-    bnil;
+    (bcons 1n (bcons 2n (bcons 3n bnil)));
 
   let result = handle-packet test-packet;
 
   io-bind
     (debug-print test-packet)
     (\_ => debug-print result)
+}
+
+
+repr ByteVecRepr {
+  data ByteVec n as JS {
+    bnil as js-buffer-alloc (repr 0),
+    bcons x xs as {
+      let xs' = repr xs;
+      let old-len = js-buffer-byte-length xs';
+      let new-len = js-plus old-len (repr 1);
+      let b = js-buffer-alloc new-len;
+      let b' = js-buffer-write-uint8 (repr x) (repr 0) b;
+      js-buffer-copy xs' (repr 0) old-len (repr 1) b'
+    },
+    case l {
+      bnil => n,
+      bcons => c
+    } as {
+      let l' = repr l;
+      js-if (js-eqq (js-buffer-byte-length l') (repr 0))
+        (cast n)
+        (cast (c (unrepr Fin (js-index l' (repr 0))) (unrepr ByteVec (js-buffer-subarray l' (repr 1) (js-buffer-byte-length l')))))
+    }
+  }
+}
+
+repr UdpRepr {
+  data UdpPacket as JS {
+    mk-udp-packet src-port dst-port len checksum contents as {
+      let len' = repr len;
+      let total-len = js-plus len' (repr 8);
+      let b = js-buffer-alloc total-len;
+      let b' = js-buffer-write-uint16-be (repr src-port) (repr 0) b;
+      let b'' = js-buffer-write-uint16-be (repr dst-port) (repr 2) b';
+      let b''' = js-buffer-write-uint16-be len' (repr 4) b'';
+      let b'''' = js-buffer-write-uint16-be (repr checksum) (repr 6) b''';
+      let b''''' = js-buffer-copy (repr contents) (repr 0) len' (repr 8) b'''';
+      b'''''
+    },
+    case p {
+      mk-udp-packet => mk,
+    } as {
+      let p' = repr p;
+      let len = js-buffer-read-uint16-be (repr 4) p';
+      let src-port = js-buffer-read-uint16-be (repr 0) p';
+      let dst-port = js-buffer-read-uint16-be (repr 2) p';
+      let checksum = js-buffer-read-uint16-be (repr 6) p';
+      let contents = js-buffer-subarray (repr 8) (js-plus (repr 8) len) p';
+      cast (mk (unrepr Fin src-port) (unrepr Fin dst-port) (unrepr Fin len) (unrepr Fin checksum) (unrepr ByteVec contents))
+    }
+  }
 }

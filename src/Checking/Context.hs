@@ -11,6 +11,7 @@ module Checking.Context
     addItems,
     addCaseItemToRepr,
     addSubst,
+    enterCtxEffect,
     addTyping,
     addTypings,
     asSig,
@@ -213,6 +214,17 @@ enterCtxMod f op = do
   s <- get
   let prevCtx = ctx s
   put $ s {ctx = f prevCtx}
+  res <- op
+  s' <- get
+  put $ s' {ctx = prevCtx}
+  return res
+
+-- | Update the current context by performing an effect.
+enterCtxEffect :: Tc () -> Tc a -> Tc a
+enterCtxEffect eff op = do
+  s <- get
+  let prevCtx = ctx s
+  eff
   res <- op
   s' <- get
   put $ s' {ctx = prevCtx}
