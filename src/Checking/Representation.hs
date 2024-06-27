@@ -47,10 +47,6 @@ import Lang
     piTypeToList,
   )
 
-mcons :: Maybe a -> [a] -> [a]
-mcons Nothing xs = xs
-mcons (Just x) xs = x : xs
-
 -- | Represent a checked program
 representProgram :: Program -> Tc Program
 representProgram (Program decls) = do

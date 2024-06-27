@@ -1,4 +1,26 @@
+data MyList : Type {
+  mnil : MyList,
+  mcons : Nat -> MyList -> MyList
+}
+
+repr MyListAsList {
+  data MyList as List Nat {
+    mnil as nil,
+    mcons n ns as cons n (repr ns),
+    case l {
+      mnil => b,
+      mcons => r
+    } as {
+      -- @@FIXME: how can we make this case expression not require a cast??
+      case (repr l) {
+        nil => cast b,
+        cons n ns => cast (r n (unrepr MyList ns)),
+      }
+    }
+  }
+}
+
 def main : IO Unit {
-  let x : JS = repr (unrepr Nat js-one);
+  let y = mcons 3 mnil;
   io-return tt
 }

@@ -59,7 +59,7 @@ import Checking.Errors (TcError (..))
 import Control.Applicative ((<|>))
 import Control.Monad (join)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (MonadState (..), gets, modify, runState, StateT (runStateT))
+import Control.Monad.State (MonadState (..), StateT (runStateT), gets, modify, runState)
 import Control.Monad.State.Lazy (StateT)
 import Data.List (find, intercalate)
 import Data.Map (Map, empty, insert)
@@ -71,8 +71,10 @@ import Lang
     HasLoc (..),
     Item (..),
     Loc (..),
+    MapResult (..),
     Pat,
     PiMode (Explicit),
+    Program (..),
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
     ReprDataItem (..),
@@ -91,8 +93,9 @@ import Lang
     lams,
     listToApp,
     locatedAt,
-    mapTermM, Program (..), MapResult (..),
+    mapTermM,
   )
+import Debug.Trace (traceM)
 
 -- | A typing judgement.
 data Judgement = Typing Var Type | Subst Var Term
@@ -315,9 +318,10 @@ freshVar = freshVarPrefixed "v"
 
 -- | Get all variables in a context.
 ctxVars :: Ctx -> [Var]
-ctxVars (Ctx []) = []
-ctxVars (Ctx ((Typing v _) : c)) = v : ctxVars (Ctx c)
-ctxVars (Ctx (_ : c)) = ctxVars (Ctx c)
+ctxVars (Ctx c) =
+  let typings = [v | Typing v _ <- c]
+   in let substs = [v | Subst v _ <- c]
+       in filter (`notElem` substs) typings
 
 -- | Get a fresh applied metavariable in the current context.
 freshMetaAt :: (HasLoc a) => a -> Tc Term
@@ -402,12 +406,13 @@ ensurePatIsVar p = case p.value of
 
 -- | Resolve variables in the context.
 resolveInCtx :: (TermMappable t) => t -> Tc t
-resolveInCtx = mapTermMappableM
+resolveInCtx =
+  mapTermMappableM
     ( \t -> case t.value of
         V v -> do
           s <- inCtx (lookupSubst v)
           case s of
-            Just t' -> return $ Replace t'
+            Just t' -> Replace <$> resolveInCtx t'
             Nothing -> return $ Replace t
         _ -> return Continue
     )

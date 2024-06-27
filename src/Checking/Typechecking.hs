@@ -135,8 +135,7 @@ checkBindAppMatchesPi src ty f = do
 
   enterCtx $ do
     (src', retApplied') <- enterPat $ checkTerm src retApplied
-    representCtx
-    ret' <- representTerm retApplied'
+    let ret' = locatedAt retApplied' (Rep retApplied)
     res <- f ret'
     return (src', res)
 
@@ -207,19 +206,19 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) tar
   -- Type of the subject is the represented data type
   let (params, _) = piTypeToList dat.ty
   let subjectTy = listToApp (genTerm (Global dat.name), map (\(m, p, _) -> (m, genTerm (V p))) params)
-  subjectReprIndices <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) params
-  subjectReprTy <- representTerm subjectTy
+  -- subjectReprIndices <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) params
+  -- subjectReprTy <- representTerm subjectTy
   enterCtxMod id $ do
-    (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectReprTy
-    enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) subjectReprIndices)) $ do
+    (subjectAsTerm, _) <- enterPat $ checkTerm subject subjectTy
+    enterCtxMod (addTypings (map (\(_, v, t) -> (v, t)) params)) $ do
       -- Form the elimination type family
       elimTySubjectVar <- freshVar
       let elimFam = listToPiType (params ++ [(Explicit, elimTySubjectVar, subjectTy)], genTerm TyT)
-      elimReprFam <- representTerm elimFam
+      -- elimReprFam <- representTerm elimFam
 
-      enterCtxMod (addTypings [(elimName, elimReprFam)]) $ do
+      enterCtxMod (addTypings [(elimName, elimFam)]) $ do
         -- Form the elimination type
-        let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) subjectReprIndices ++ [(Explicit, subjectAsTerm)])
+        let elimTy = listToApp (genTerm (V elimName), map (\(m, v, _) -> (m, genTerm (V v))) params ++ [(Explicit, subjectAsTerm)])
 
         -- Gather all the eliminators
         ctors' <-
@@ -228,25 +227,25 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) tar
                 -- Represented constructor parameters
                 let c = fromJust (find (\n -> n.name == cName) dat.ctors)
                 let (ctorParams, ctorRet) = piTypeToList c.ty
-                ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
+                -- ctorReprParams <- mapM (\(m, a, b) -> (m,a,) <$> representTerm b) ctorParams
 
                 -- Represented constructor return indices
                 let (_, ctorRetIndices) = appToList ctorRet
-                ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
+                -- ctorReprRetIndices <- mapM (\(m, t) -> (m,) <$> representTerm t) ctorRetIndices
 
                 -- Represented constructor return type
                 let ctorParamVarTerms = map (\(m, t, _) -> (m, genTerm (V t))) ctorParams
                 let ctorRetTy = listToApp (genTerm (Global c.name), ctorParamVarTerms)
-                ctorReprRetTy <- representTerm ctorRetTy
+                -- ctorReprRetTy <- representTerm ctorRetTy
 
                 -- Form the eliminator type
                 let elimCtorTy =
                       listToPiType
-                        ( ctorReprParams,
+                        ( ctorParams,
                           listToApp
                             ( genTerm (V elimName),
-                              ctorReprRetIndices
-                                ++ [(Explicit, ctorReprRetTy)]
+                              ctorRetIndices
+                                ++ [(Explicit, ctorRetTy)]
                             )
                         )
 
@@ -280,9 +279,9 @@ checkReprDeclItem (ReprDeclItem name target) = do
   decl <- inSignature (lookupItemOrCtor name)
   case decl of
     Just (Left (Decl d)) -> do
-      rDeclTy <- representTerm d.ty
+      -- rDeclTy <- representTerm d.ty
       -- Check the target against the represented declaration type
-      (target', _) <- checkTerm target rDeclTy
+      (target', _) <- checkTerm target d.ty
       let result = ReprDeclItem name target'
       modifySignature $ addItemToRepr name (ReprDecl result)
       return result
@@ -348,20 +347,22 @@ checkDeclItem decl = do
 applyImplicitUnchecked :: Term -> Term
 applyImplicitUnchecked t = genTerm (App Implicit t (genTerm Wild))
 
-freshMetaOrPat :: Tc Term
-freshMetaOrPat = do
+freshMetaOrPat :: Type -> Tc Term
+freshMetaOrPat ty = do
   p <- gets (\s -> s.inPat)
   if p
     then do
-      genTerm . V <$> freshVar
+      v <- freshVar
+      modifyCtx (addTyping v ty)
+      return . genTerm $ V v
     else freshMeta
 
 -- | Apply implicits to an already checked term.
 fullyApplyImplicits :: Term -> Type -> Tc (Term, Type)
 fullyApplyImplicits t ty = do
   case ty of
-    (Term (PiT Implicit v _ b) _) -> do
-      m <- freshMetaOrPat
+    (Term (PiT Implicit v typ b) _) -> do
+      m <- freshMetaOrPat typ
       fullyApplyImplicits (genTerm (App Implicit t m)) (subVar v m b)
     _ -> return (t, ty)
 
@@ -448,7 +449,7 @@ inferTerm' (Term (Case s cs) _) = do
   return (locatedAt s (Case s' cs'), ret)
 inferTerm' (Term Wild d1) = do
   typ <- freshMetaAt d1
-  m <- registerWild (getLoc d1)
+  m <- registerWild (getLoc d1) typ
   return (m, typ)
 inferTerm' hole@(Term (Hole h) d1) = do
   typ <- freshMetaAt d1
@@ -524,12 +525,13 @@ registerHole l v = do
   return m
 
 -- | Register an underscore/wild.
-registerWild :: Loc -> Tc Term
-registerWild l = do
+registerWild :: Loc -> Type -> Tc Term
+registerWild l typ = do
   p <- gets (\s -> s.inPat)
   if p
     then do
       v <- freshVar
+      modifyCtx (addTyping v typ)
       return $ Term (V v) (termDataAt l)
     else do
       m <- freshMetaAt l
@@ -585,7 +587,7 @@ checkTerm'' (Term (Case s cs) _) typ = do
   ((s', cs'), _) <- inferOrCheckCase (`checkTerm` typ) s cs
   return (locatedAt s (Case s' cs'), typ)
 checkTerm'' (Term Wild d1) typ = do
-  m <- registerWild (getLoc d1)
+  m <- registerWild (getLoc d1) typ
   return (m, typ)
 checkTerm'' hole@(Term (Hole h) d1) typ = do
   m <- registerHole (getLoc d1) h

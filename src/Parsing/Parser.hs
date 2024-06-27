@@ -50,19 +50,23 @@ import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 import Text.Parsec.Token (GenTokenParser)
 import Text.ParserCombinators.Parsec.Token (makeTokenParser)
+import Control.Monad.RWS (modify)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
   { varCount :: Int,
     -- Keep track of the names of variables so we can resolve them when encountering them.
-    names :: [(String, Var)]
+    names :: [(String, Var)],
+    -- Whether we are inside a pattern.
+    inPat :: Bool
   }
 
 initialParserState :: ParserState
 initialParserState =
   ParserState
     { varCount = 0,
-      names = []
+      names = [],
+      inPat = False
     }
 
 -- | Get a new variable index and increment it.
@@ -362,7 +366,9 @@ literal = locatedTerm $ do
 -- | Parse a pattern given a parser for terms.
 enterPat :: Parser Term -> Parser Term
 enterPat p = do
+  modifyState (\s' -> s' {inPat = True})
   t <- p
+  modifyState (\s' -> s' {inPat = False})
   t' <- resolveTerm t
   if isValidPat t'
     then return t'
@@ -380,7 +386,10 @@ singlePat = enterPat singleTerm
 var :: Parser Var
 var = do
   name <- identifier
-  registerVar name
+  inP <- getState >>= \s -> return s.inPat
+  if inP
+    then registerNewVar name
+    else registerVar name
 
 -- | Parse a variable binding.
 newVar :: Parser Var

@@ -90,6 +90,7 @@ tryCaseMatch sig t p = case caseMatch t p of
     Nothing -> Nothing
 
 expandRep :: Signature -> Term -> Maybe Term
+expandRep _ t@(Term TyT _) = Just t
 expandRep sig t = do
   let t' = appToList t
   case t' of
