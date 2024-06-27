@@ -1,0 +1,20 @@
+
+
+def cool-num : Nat {
+  32342
+}
+
+-- def is-good : Equal (s 41) 42 {
+--   refl
+-- }
+
+def foo : Equal (scons 'a' "bc") "abc" {
+  refl
+}
+
+def main : IO Unit {
+  let x = 342932n;
+  let y = "Foo";
+  let bar = '3';
+  io-return tt
+}

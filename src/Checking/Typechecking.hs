@@ -35,10 +35,10 @@ import Checking.Context
     setType,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (fillAllMetas, normaliseTerm, resolveShallow, normaliseTermFully)
+import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Representation (representCtx, representTerm)
 import Checking.Unification (unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole, showContext)
+import Checking.Utils (showHole)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
 import Control.Monad.Except (throwError)
@@ -47,15 +47,19 @@ import Data.Foldable (find)
 import Data.List (sort)
 import Data.Map (insert)
 import Data.Maybe (fromJust)
+import Debug.Trace (traceM)
+import Interface.Pretty (printVal)
 import Lang
   ( CtorItem (..),
     DataItem (..),
     DeclItem (..),
     HasLoc (..),
     Item (..),
+    Lit (..),
     Loc,
     Pat,
     PiMode (..),
+    PrimItem (..),
     Program (..),
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
@@ -75,11 +79,9 @@ import Lang
     listToPiType,
     locatedAt,
     piTypeToList,
-    termDataAt, PrimItem (..),
+    termDataAt,
   )
-import Lang as DI (DeclItem (..))
-import Debug.Trace (traceM)
-import Interface.Pretty (printVal)
+import Lang as DI (DeclItem (..), Lit (StringLit))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -454,6 +456,21 @@ inferTerm' hole@(Term (Hole h) d1) = do
   showHole hole Nothing
   return (m, typ)
 inferTerm' t@(Term (Meta _) _) = error $ "Found metavar during inference: " ++ show t
+inferTerm' (Term (Lit (StringLit l)) d) = do
+  return (Term (Lit (StringLit l)) d, locatedAt d (Global "String"))
+inferTerm' (Term (Lit (CharLit l)) d) = do
+  return (Term (Lit (CharLit l)) d, locatedAt d (Global "Char"))
+inferTerm' (Term (Lit (NatLit l)) d) = do
+  return (Term (Lit (NatLit l)) d, locatedAt d (Global "Nat"))
+inferTerm' (Term (Lit (FinLit i n)) d) = do
+  (n', _) <- checkTerm n (locatedAt n (Global "Nat"))
+  m <- freshMeta
+  let minIndex = listToApp (genTerm (Global "add"), [(Explicit, genTerm (Lit (NatLit i))), (Explicit, m)])
+  unifyTerms minIndex n'
+  return
+    ( Term (Lit (FinLit i n')) d,
+      listToApp (genTerm (Global "Fin"), [(Explicit, listToApp (genTerm (Global "s"), [(Explicit, n')]))])
+    )
 
 inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> Tc ((Type, Term, Term), Type)
 inferOrCheckLet f var ty tm ret = do

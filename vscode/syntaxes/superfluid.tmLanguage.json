@@ -28,6 +28,52 @@
     {
       "name": "storage.superfluid",
       "match": "\\b[A-Z]\\w*\\b"
+    },
+    {
+      "name": "string.quoted.double.superfluid",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.superfluid"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.superfluid"
+        }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.superfluid",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.char.superfluid",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.superfluid"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.superfluid"
+        }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.superfluid",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "constant.numeric.integer.superfluid",
+      "match": "\\b[0-9]+(n?)\\b"
     }
   ],
   "repository": {

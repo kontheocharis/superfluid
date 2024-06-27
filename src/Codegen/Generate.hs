@@ -6,7 +6,7 @@ import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Debug.Trace (traceM)
 import Interface.Pretty (Print (printVal), indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var, appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value)
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var, appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value, Lit (..))
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
@@ -161,6 +161,10 @@ generateExpr (Term (Case t cs) _) = do
 generateExpr (Term Wild _) = return jsNull
 generateExpr (Term (Hole _) _) = return jsNull
 generateExpr (Term (Meta _) _) = return jsNull
+generateExpr (Term (Lit (StringLit s)) _) = return $ jsStringLit s
+generateExpr (Term (Lit (NatLit i)) _) = return $ jsIntLit (fromIntegral i)
+generateExpr (Term (Lit (FinLit i _)) _) = return $ jsIntLit (fromIntegral i)
+generateExpr (Term (Lit (CharLit c)) _) = return $ jsCharLit c
 
 intToNat :: Int -> Term
 intToNat 0 = genTerm (Global "js-zero")
@@ -355,6 +359,12 @@ jsVar s = JsExpr s
 
 jsStringLit :: String -> JsExpr
 jsStringLit s = JsExpr $ "\"" ++ s ++ "\""
+
+jsIntLit :: Integer -> JsExpr
+jsIntLit i = JsExpr $ show i
+
+jsCharLit  :: Char -> JsExpr
+jsCharLit c = JsExpr $ show c
 
 jsArray :: [JsExpr] -> JsExpr
 jsArray es = JsExpr $ "[" ++ intercalate ", " (map (\(JsExpr e) -> e) es) ++ "]"

@@ -19,6 +19,8 @@ instance TermMappable TcError where
   mapTermMappableM f (NotAFunction t) = NotAFunction <$> mapTermM f t
   mapTermMappableM f (PatternNotSupported p) = PatternNotSupported <$> mapTermM f p
   mapTermMappableM f (Mismatch t1 t2) = Mismatch <$> mapTermM f t1 <*> mapTermM f t2
+  mapTermMappableM f (CannotSolveProblem m spine rhs) = CannotSolveProblem m <$> mapM (mapTermM f) spine <*> mapTermM f rhs
+  mapTermMappableM f (VariableEscapesMeta m spine rhs rhsVar) = VariableEscapesMeta m <$> mapM (mapTermM f) spine <*> mapTermM f rhs <*> pure rhsVar
   mapTermMappableM _ e = return e
 
 instance Show TcError where

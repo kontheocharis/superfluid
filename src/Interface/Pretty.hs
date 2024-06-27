@@ -86,6 +86,15 @@ instance Print TermValue where
   printVal (Global s) = s
   printVal (Hole i) = "?" ++ printVal i
   printVal (Meta i) = "!" ++ printVal i
+  printVal (Lit s) = printVal s
+
+
+instance Print Lit where
+  printVal (NatLit i) = show i
+  printVal (FinLit i n) = show i ++ "n" ++ printSingleVal n
+  printVal (StringLit s) = show s
+  printVal (CharLit c) = show c
+
 
 instance Print Loc where
   printVal NoLoc = ""

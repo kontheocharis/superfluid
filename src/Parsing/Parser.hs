@@ -1,7 +1,8 @@
 module Parsing.Parser (parseProgram, parseTerm) where
 
 import Checking.Context (Signature (Signature))
-import Data.Char (isSpace)
+import Control.Monad.Identity (Identity)
+import Data.Char (isDigit, isSpace, readLitChar)
 import Data.Maybe (fromMaybe, isJust)
 import Data.String
 import Data.Text (Text)
@@ -13,6 +14,7 @@ import Lang
     DeclItem (..),
     GlobalName,
     Item (..),
+    Lit (..),
     Loc (..),
     MapResult (..),
     Pat,
@@ -40,34 +42,14 @@ import Lang
     termLoc,
   )
 import Parsing.Resolution (resolveGlobalsRec)
-import Text.Parsec
-  ( Parsec,
-    between,
-    char,
-    choice,
-    eof,
-    getPosition,
-    getState,
-    many,
-    many1,
-    modifyState,
-    notFollowedBy,
-    optionMaybe,
-    optional,
-    putState,
-    runParser,
-    satisfy,
-    skipMany,
-    skipMany1,
-    sourceColumn,
-    sourceLine,
-    string,
-    (<|>),
-  )
+import Text.Parsec (Parsec, between, char, choice, eof, getPosition, getState, many, many1, modifyState, noneOf, notFollowedBy, optionMaybe, optional, putState, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>))
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy)
+import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import Text.Parsec.Token (GenTokenParser)
+import Text.ParserCombinators.Parsec.Token (makeTokenParser)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
@@ -341,7 +323,41 @@ term = do
 --
 -- This is a term which never requires parentheses to disambiguate.
 singleTerm :: Parser Term
-singleTerm = choice [varOrHole, pairOrParens]
+singleTerm = choice [literal, varOrHole, pairOrParens]
+
+literal :: Parser Term
+literal = locatedTerm $ do
+  ( try (symbol "\'") >> do
+      c <- parseChar
+      _ <- symbol "\'"
+      anyWhite
+      return $ Lit (CharLit c)
+    )
+    <|> ( try (symbol "\"") >> do
+            s <- many parseStringChar
+            _ <- symbol "\""
+            anyWhite
+            return $ Lit (StringLit s)
+        )
+    <|> try
+      ( do
+          n <- many1 (satisfy isDigit)
+          endingN <- optionMaybe (try (char 'n') >> optionMaybe singleTerm)
+          anyWhite
+          case endingN of
+            Just i -> return $ Lit (FinLit (read n) (fromMaybe (genTerm Wild) i))
+            Nothing -> return $ Lit (NatLit (read n))
+      )
+  where
+    parseStringChar =
+      (try (string "\\\\") >> return '\\')
+        <|> (try (string "\\\"") >> return '\"')
+        <|> (noneOf "\"" >>= \x -> return x)
+
+    parseChar =
+      try (string "\\\\" >> return '\\')
+        <|> try (string "\\'" >> return '\'')
+        <|> (noneOf "'" >>= \x -> return x)
 
 -- | Parse a pattern given a parser for terms.
 enterPat :: Parser Term -> Parser Term

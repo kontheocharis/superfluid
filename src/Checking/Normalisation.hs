@@ -6,6 +6,7 @@ module Checking.Normalisation
     resolveShallow,
     normaliseProgram,
     normaliseTerm,
+    expandLit,
   )
 where
 
@@ -23,12 +24,14 @@ import Checking.Context
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, get)
+import Criterion.Types (fromInt)
 import Data.Map (lookup, (!?))
 import Lang
   ( DeclItem (DeclItem),
     HasLoc (..),
     Item (..),
+    Lit (..),
     MapResult (..),
     Pat,
     PiMode (..),
@@ -36,12 +39,18 @@ import Lang
     Term (..),
     TermMappable (..),
     TermValue (..),
+    genTerm,
     isRecursive,
     listToApp,
     locatedAt,
     mapTermM,
   )
 import Lang as DI (DeclItem (..))
+import GHC.Natural (Natural)
+import Debug.Trace (traceM)
+import Data.List (intercalate)
+import Interface.Pretty (printVal)
+import Data.Foldable (toList)
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
@@ -69,6 +78,7 @@ caseMatch (Term (App m t1 t2) _) (Term (App m' t1' t2') _) | m == m' = do
   s2 <- caseMatch t2 t2'
   return $ s1 <> s2
 caseMatch a (Term (V v) _) = return $ Sub [(v, a)]
+caseMatch (Term (Lit l) _) b = caseMatch (expandLit l) b
 caseMatch _ _ = Nothing
 
 tryCaseMatch :: Signature -> Term -> Pat -> Maybe Sub
@@ -99,6 +109,54 @@ normaliseTerm sig (Term (Case s cs) _) =
 normaliseTerm sig (Term (Global g) _) = maybeExpand sig g
 normaliseTerm _ _ = Nothing -- @@Todo: normalise declarations
 
+expandLit :: Lit -> Term
+expandLit (StringLit s) = expandStringToTermOnce s
+expandLit (CharLit c) = expandCharToTermOnce c
+expandLit (NatLit n) = expandNatToTermOnce n
+expandLit (FinLit i n) = expandFinToTermOnce n i
+
+expandNatToTermOnce :: Natural -> Term
+expandNatToTermOnce 0 = genTerm (Global "z")
+expandNatToTermOnce n = listToApp (genTerm (Global "s"), [(Explicit, genTerm (Lit (NatLit (n - 1))))])
+
+expandFinToTermOnce :: Term -> Natural -> Term
+expandFinToTermOnce n 0 = listToApp (genTerm (Global "fz"), [(Implicit, n)])
+expandFinToTermOnce n i =
+  listToApp
+    ( genTerm (Global "fs"),
+      [ (Implicit, n),
+        ( Explicit,
+          genTerm
+            ( Lit
+                ( FinLit
+                    (i - 1)
+                    ( listToApp
+                        ( genTerm (Global "s"),
+                          [(Explicit, n)]
+                        )
+                    )
+                )
+            )
+        )
+      ]
+    )
+
+expandCharToTermOnce :: Char -> Term
+expandCharToTermOnce c =
+  listToApp
+    ( genTerm (Global "char-from-num"),
+      [ (Explicit, genTerm (Lit (FinLit (fromIntegral (fromEnum c)) (genTerm (Lit (NatLit (2 ^ (32 :: Natural))))))))
+      ]
+    )
+
+expandStringToTermOnce :: String -> Term
+expandStringToTermOnce [] = genTerm (Global "snil")
+expandStringToTermOnce (s : ss) =
+  listToApp
+    ( genTerm (Global "scons"),
+      [(Explicit, genTerm (Lit (CharLit s))), (Explicit, genTerm (Lit (StringLit ss)))]
+    )
+
 -- | Try to expand the given definition to the given term.
 maybeExpand :: Signature -> String -> Maybe Term
 maybeExpand sig n = do
@@ -109,7 +167,8 @@ maybeExpand sig n = do
 
 -- | Reduce a term to normal form (fully).
 normaliseTermFully :: Signature -> Term -> Term
-normaliseTermFully sig = mapTermMappable
+normaliseTermFully sig =
+  mapTermMappable
     ( \t -> case normaliseTerm sig t of
         Just t' -> ReplaceAndContinue (normaliseTermFully sig t')
         Nothing -> Continue
@@ -133,8 +192,7 @@ resolveFinal t = do
       case metas !? h of
         Just t' -> do
           -- If the meta is already solved, then we can resolve the term.
-          r <- resolveShallow (listToApp (t', map (Explicit,) ts))
-          return $ normaliseTermFully mempty r
+          resolveFinal (listToApp (t', map (Explicit,) ts))
         Nothing -> do
           -- If the meta is not resolved, then substitute the original hole
           let tLoc = getLoc t
@@ -143,8 +201,8 @@ resolveFinal t = do
             Just (Just v) -> return $ locatedAt tLoc (Hole v)
             Just Nothing -> return $ locatedAt tLoc Wild
             Nothing -> do
-              -- If the hole is not registered, then it is a fresh hole.
-              locatedAt tLoc . Hole <$> freshVar
+              -- If the hole is not registered, then it is still a meta
+              return t
     _ -> return t
 
 -- | Resolve a term by filling in metas if present.

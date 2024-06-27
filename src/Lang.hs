@@ -17,6 +17,7 @@ module Lang
     Item (..),
     PrimItem (..),
     DataItem (..),
+    Lit (..),
     ReprItem (..),
     ReprSomeItem (..),
     ReprDataItem (..),
@@ -57,6 +58,7 @@ import Control.Monad.Identity (runIdentity)
 import Data.Generics (Data)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
+import GHC.Natural (Natural)
 
 -- | Type alias for terms that are expected to be types (just for documentation purposes).
 type Type = Term
@@ -73,6 +75,9 @@ data Var = Var { name :: String, idx :: Int } deriving (Eq, Ord, Generic, Data, 
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit deriving (Eq, Generic, Data, Typeable, Show)
+
+-- | A literal
+data Lit = StringLit String | CharLit Char | NatLit Natural | FinLit Natural Term deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | A term
 data TermValue
@@ -94,6 +99,8 @@ data TermValue
     Global String
   | -- | Hole identified by an integer
     Hole Var
+  | -- | A literal
+    Lit Lit
   | -- | Metavar identified by an integer
     Meta Var
   deriving (Eq, Generic, Data, Typeable, Show)
@@ -351,6 +358,8 @@ mapTermM f term = do
       (Global s) -> return $ Global s
       (Hole i) -> return $ Hole i
       (Meta i) -> return $ Meta i
+      (Lit (FinLit n i)) -> Lit . FinLit n <$> mapTermM f i
+      (Lit l) -> return $ Lit l
 
 class TermMappable t where
   -- | Apply a term function to an item.

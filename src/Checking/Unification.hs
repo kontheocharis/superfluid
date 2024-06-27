@@ -14,19 +14,18 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow)
+import Checking.Normalisation (normaliseTerm, normaliseTermFully, resolveShallow, expandLit)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
 import Lang
-  ( MapResult (..),
-    PiMode (..),
+  ( PiMode (..),
     Term (..),
-    TermMappable (mapTermMappableM),
     TermValue (..),
     Var (..),
     lams,
   )
+import Checking.Utils (showSolvedMetas)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -77,6 +76,9 @@ unifyTerms a' b' = do
       unifyTerms l1 r1
       unifyTerms l2 r2
     unifyTerms' (Term TyT _) (Term TyT _) = return ()
+    unifyTerms' a@(Term (Lit l1) _) b@(Term (Lit l2) _) = if l1 == l2 then return () else throwError $ Mismatch a b
+    unifyTerms' (Term (Lit l1) _) b  = unifyTerms (expandLit l1) b
+    unifyTerms' a (Term (Lit l2) _) = unifyTerms a (expandLit l2)
     unifyTerms' (Term (V l) _) (Term (V r) _) | l == r = return ()
     unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = do
       unifyVarWithTerm a l b `catchError` (\_ -> unifyVarWithTerm b r a)
@@ -111,7 +113,8 @@ normaliseAndUnifyTerms l r = do
     Nothing -> do
       let r' = normaliseTerm sig r
       case r' of
-        Nothing -> throwError $ Mismatch l r
+        Nothing -> do
+          throwError $ Mismatch l r
         Just r'' -> unifyTerms l r''
     Just l'' -> do
       unifyTerms l'' r
