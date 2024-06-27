@@ -112,8 +112,8 @@ prim js-buffer-alloc : JS -> JS
 
 prim js-buffer-byte-length : JS -> JS
 
--- target, targetStart, targetEnd, source, sourceStart, sourceEnd
-prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS -> JS
+-- source, sourceStart, sourceEnd, targetStart, target
+prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS
 
 -- buffer, value, offset
 prim js-buffer-write-uint16-be : JS -> JS -> JS -> JS
@@ -125,6 +125,27 @@ prim js-buffer-read-uint16-be : JS -> JS -> JS
 prim js-buffer-read-uint8 : JS -> JS -> JS
 
 prim js-buffer-subarray : JS -> JS -> JS -> JS
+
+-- Shorthands
+#unfold
+def js-two : JS {
+ js-plus js-one js-one
+}
+
+#unfold
+def js-four : JS {
+ js-times js-two js-two
+}
+
+#unfold
+def js-six : JS {
+ js-plus js-four js-two
+}
+
+#unfold
+def js-eight : JS {
+ js-times js-four js-four
+}
 
 -- General primitives
 

@@ -33,31 +33,6 @@ data UdpPacket : Type {
     UdpPacket
 }
 
-
-
-data Status : Type -> Type -> Type {
-  ok : [O : Type] -> [E : Type] -> O -> Status O E,
-  error : [O : Type] -> [E : Type] -> E -> Status O E,
-}
-
-def process-udp-packet : UdpPacket -> Status Word Bool {
-  \p => case p {
-    mk-udp-packet src-port dst-port len checksum contents => {
-      -- Ensure the first byte exists and is 0x00
-      case contents {
-        bcons i is => case i {
-          fz => case is {
-            bcons j js => ok checksum,
-            bnil => ok src-port,
-          },
-          fs _ => error false
-        },
-        bnil => error false
-      }
-    }
-  }
-}
-
 repr ByteVecRepr {
   data ByteVec n as JS {
     bnil as js-buffer-alloc (js-zero),
@@ -84,33 +59,96 @@ repr ByteVecRepr {
 repr UdpRepr {
   data UdpPacket as JS {
     mk-udp-packet src-port dst-port len checksum contents as {
-      let js-two = js-plus js-one js-one;
-      let js-four = js-times js-two js-two;
-      let js-six = js-plus js-four js-two;
-      let js-eight = js-times js-four js-four;
-      let contents-len = js-buffer-byte-length contents;
-      let len = js-plus contents-len js-eight;
-      let b = js-buffer-alloc len;
-      let b' = js-buffer-write-uint16-be b (to-js src-port) js-zero;
-      let b'' = js-buffer-write-uint16-be b' (to-js dst-port) js-two;
-      let b''' = js-buffer-write-uint16-be b'' (to-js len) js-four;
-      let b'''' = js-buffer-write-uint16-be b''' (to-js checksum) js-six;
-      let b''''' = js-buffer-copy b'''' js-eight len (to-js contents) js-zero contents-len;
+      let total-len = js-plus (cast len) js-eight;
+      let b = js-buffer-alloc total-len;
+      let b' = js-buffer-write-uint16-be (to-js src-port) js-zero b;
+      let b'' = js-buffer-write-uint16-be (to-js dst-port) js-two b';
+      let b''' = js-buffer-write-uint16-be (to-js len) js-four b'';
+      let b'''' = js-buffer-write-uint16-be (to-js checksum) js-six b''';
+      let b''''' = js-buffer-copy (to-js contents) js-zero (to-js len) js-eight b'''';
       b'''''
     },
     case p {
       mk-udp-packet => mk,
     } as {
-      let js-two = js-plus js-one js-one;
-      let js-four = js-times js-two js-two;
-      let js-six = js-plus js-four js-two;
-      let js-eight = js-times js-four js-four;
-      let src-port = js-buffer-read-uint16-be p js-zero;
-      let dst-port = js-buffer-read-uint16-be p js-two;
-      let len = js-buffer-read-uint16-be p js-four;
-      let checksum = js-buffer-read-uint16-be p js-six;
-      let contents = js-buffer-subarray p js-eight (js-plus js-eight len);
-      cast (mk (cast src-port) (cast dst-port) (cast len) (cast checksum) (cast contents))
+      let len = js-buffer-read-uint16-be js-four p;
+      cast (mk
+        (cast (js-buffer-read-uint16-be js-zero p)) -- src-port
+        (cast (js-buffer-read-uint16-be js-two p)) -- dst-port
+        (cast len) -- len
+        (cast (js-buffer-read-uint16-be js-six p)) -- checksum
+        (cast (js-buffer-subarray js-eight (js-plus js-eight len) p))) -- contents
     }
   }
+}
+
+def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
+  \x => case x {
+    fz => true,
+    fs x => case x {
+      fz => false,
+      fs [m] y => fin-is-even [m] y
+    }
+  }
+}
+
+def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
+  \a b => case a {
+    fz => case b {
+      fz => true,
+      fs y => false
+    },
+    fs [n] x => case b {
+      fz => false,
+      fs [m] y => fin-eq [n] [m] x y
+    }
+  }
+}
+
+repr FinFns {
+  def fin-is-even as \n => js-eqq (js-mod n js-two) js-zero
+  def fin-eq as \x y => js-eqq x y
+}
+
+
+
+
+
+
+
+def OWN_PORT : Word {
+  fs (fs (fs (fs (fs (fs (fs (fs (fs (fs fz)))))))))
+}
+
+def handle-packet : UdpPacket -> Maybe UdpPacket {
+  \p => case p {
+    mk-udp-packet src-port dst-port len checksum contents => {
+      -- The rule is, if the source port is even, forward the packet
+      -- to the destination port, setting the source port to be our own.
+      -- Otherwise, drop it.
+      case fin-is-even src-port {
+        true => {
+          let new-p = mk-udp-packet OWN_PORT dst-port len checksum contents;
+          just new-p
+        },
+        false => nothing
+      }
+    }
+  }
+}
+
+
+def main : IO Unit {
+  let test-packet = mk-udp-packet
+    (fs (fs fz))
+    (fs (fs (fs fz)))
+    fz
+    (fs (fs (fs (fs (fs fz)))))
+    bnil;
+
+  let result = handle-packet test-packet;
+
+  io-bind
+    (debug-print test-packet)
+    (\_ => debug-print result)
 }

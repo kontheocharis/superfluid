@@ -243,12 +243,12 @@ generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
 generatePrim "to-js" [_, a] = return a
 generatePrim "js-buffer-alloc" [a] = return $ jsApp (jsVar "Buffer.allocUnsafe") a
 generatePrim "js-buffer-byte-length" [a] = return $ jsApp (jsVar "Buffer.byteLength") a
-generatePrim "js-buffer-copy" [t, ts, te, s, ss, se] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess s "copy") [t, ts, te, ss, se], jsReturn t]
-generatePrim "js-buffer-write-uint16-be" [b, v, o] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess b "writeUInt32BE") [v, o], jsReturn b]
-generatePrim "js-buffer-write-uint8" [b, v, o] = return $ jsBlockExpr [jsExprStat $ jsMultiApp (jsAccess b "writeUInt8") [v, o], jsReturn b]
-generatePrim "js-buffer-read-uint16-be" [b, o] = return $ jsMultiApp (jsAccess b "readUInt16BE") [o]
-generatePrim "js-buffer-read-uint8" [b, o] = return $ jsMultiApp (jsAccess b "readUInt8") [o]
-generatePrim "js-buffer-subarray" [b, s, e] = return $ jsMultiApp (jsAccess b "subarray") [s, e]
+generatePrim "js-buffer-copy" [s, ss, se, ts, t] = return $ jsCommaExpr [jsMultiApp (jsAccess s "copy") [t, ts, ss, se], s]
+generatePrim "js-buffer-write-uint16-be" [v, o, b] = return $ jsCommaExpr [jsMultiApp (jsAccess b "writeUInt16BE") [v, o], b]
+generatePrim "js-buffer-write-uint8" [v, o, b] = return $ jsCommaExpr [jsMultiApp (jsAccess b "writeUInt8") [v, o], b]
+generatePrim "js-buffer-read-uint16-be" [o, b] = return $ jsMultiApp (jsAccess b "readUInt16BE") [o]
+generatePrim "js-buffer-read-uint8" [o, b] = return $ jsMultiApp (jsAccess b "readUInt8") [o]
+generatePrim "js-buffer-subarray" [s, e, b] = return $ jsMultiApp (jsAccess b "subarray") [s, e]
 generatePrim n _ = error $ "Unknown primitive: " ++ n
 
 jsNull :: JsExpr
@@ -346,6 +346,9 @@ jsMultiApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ", " (
 
 jsBlockExpr :: [JsStat] -> JsExpr
 jsBlockExpr ss = JsExpr $ "(() => {\n" ++ indentedFst (intercalate "\n" (map (\(JsStat s) -> s) ss)) ++ "\n})()"
+
+jsCommaExpr :: [JsExpr] -> JsExpr
+jsCommaExpr ss = JsExpr $ "(" ++ intercalate ", " (map (\(JsExpr s) -> s) ss) ++ ")"
 
 jsVar :: String -> JsExpr
 jsVar s = JsExpr s
