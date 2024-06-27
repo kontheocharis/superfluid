@@ -243,19 +243,19 @@ def rec not : Bool -> Bool {
 def rec fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
-    fs [n] f' => s (fin-to-nat [n] f'),
+    fs f' => s (fin-to-nat f'),
   }
 }
 
 def rec map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
-  \[A] [B] f xs => case xs {
+  \f xs => case xs {
     nil => nil,
     cons x xs' => cons (f x) (map f xs')
   }
 }
 
 def rec find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
-  \[A] p xs => case xs {
+  \p xs => case xs {
     nil => nothing,
     cons x xs' => case p x {
       true => just x,
@@ -265,14 +265,14 @@ def rec find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
 }
 
 def rec fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
-  \[A] [B] f acc xs => case xs {
+  \f acc xs => case xs {
     nil => acc,
     cons x xs' => f x (fold f acc xs')
   }
 }
 
 def rec index : [A : Type] -> Nat -> List A -> Maybe A {
-  \[A] n xs => case xs {
+  \n xs => case xs {
     nil => nothing,
     cons x xs' => case n {
       z => just x,

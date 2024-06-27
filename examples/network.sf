@@ -30,7 +30,7 @@ def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
     fz => true,
     fs x => case x {
       fz => false,
-      fs [m] y => fin-is-even [m] y
+      fs y => fin-is-even y
     }
   }
 }
@@ -41,9 +41,9 @@ def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
       fz => true,
       fs y => false
     },
-    fs [n] x => case b {
+    fs x => case b {
       fz => false,
-      fs [m] y => fin-eq [n] [m] x y
+      fs y => fin-eq x y
     }
   }
 }
@@ -76,8 +76,6 @@ def handle-packet : UdpPacket -> Maybe UdpPacket {
       -- Otherwise, drop it.
       case fin-is-even src-port {
         true => {
-
-
           let new-p = mk-udp-packet OWN_PORT dst-port len checksum contents;
           just new-p
         },

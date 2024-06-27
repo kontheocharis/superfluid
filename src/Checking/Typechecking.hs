@@ -561,11 +561,13 @@ checkTerm' ((Term (Lam m1 v t) d1)) ((Term (PiT m2 var' ty1 ty2) d2))
   | m1 == m2 = do
       (t', ty2') <- enterCtxMod (addTyping v ty1) $ checkTerm t (alphaRename var' (v, d2) ty2)
       return (locatedAt d1 (Lam m1 v t'), locatedAt d2 (PiT m2 var' ty1 (alphaRename v (var', d2) ty2')))
-checkTerm' t ty@((Term (PiT Implicit var' _ _) _)) = do
+checkTerm' t ty@((Term (PiT Implicit _ _ _) _)) = do
   p <- gets (\s -> s.inPat)
   if p
     then checkTerm'' t ty
-    else checkTerm (genTerm (Lam Implicit var' t)) ty
+    else do
+      v <- freshVar
+      checkTerm (genTerm (Lam Implicit v t)) ty
 checkTerm' t ty = checkTerm'' t ty
 
 checkTerm'' :: Term -> Term -> Tc (Term, Type)
