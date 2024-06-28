@@ -1,218 +1,93 @@
 
--- PRELUDE
-data Unit : Type {
-  tt : Unit
+
+data List' : Type -> Type {
+  nil' : [A : Type] -> List' A,
+  cons' : [A : Type] -> A -> List' A -> List' A
 }
 
-data Bool : Type {
-  true : Bool,
-  false : Bool
+data PsList : Type -> Type {
+  psnil : [A : Type] -> PsList A,
+  pscons : [A : Type] -> A -> PsList A -> PsList A,
+  psdyn : [A : Type] -> JS -> PsList A
 }
 
-def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
-  \b t f => case b {
-    true => t tt,
-    false => f tt
-  }
+data Prod : Type -> Type -> Type {
+  mk-prod : [A : Type] -> [B : Type] -> A -> B -> Prod A B
 }
 
-def and : Bool -> Bool -> Bool {
-  \x y => case x {
-    true => y,
-    false => false
-  }
-}
-
--- LOW LEVEL TYPES
-prim FlatArray : Type -> Type
-prim Size : Type
-prim ZERO : Size
-prim ONE : Size
-
-prim add : Size -> Size -> Size
-
-prim sub : Size -> Size -> Size
-
-prim len : [A : Type] -> FlatArray A -> Size
-
-prim is-zero : Size -> Bool
-
-prim is-one : Size -> Bool
-
-prim slice : [A : Type] -> FlatArray A -> Size -> Size -> FlatArray A
-
-prim unsafe-cast : [A : Type] -> [B : Type] -> A -> B
-
-prim push-front : [A : Type] -> A -> FlatArray A -> FlatArray A
-
-prim push-back : [A : Type] -> A -> FlatArray A -> FlatArray A
-
-prim empty : [A : Type] -> FlatArray A
-
-prim index : [A : Type] -> FlatArray A -> Size -> A
-
--- HIGH LEVEL TYPES
-
-def id : [A : Type] -> A -> A {
-  \x => x
-}
-
-data List : Type -> Type {
-  nil : [A : Type] -> List A,
-  cons : [A : Type] -> A -> List A -> List A
-}
-
-data SnocList : Type -> Type {
-  lin : [A : Type] -> SnocList A,
-  snoc : [A : Type] -> SnocList A -> A -> SnocList A
-}
-
-def append-snoc : [A : Type] -> SnocList A -> SnocList A -> SnocList A {
-  \l1 l2 => case l2 {
-    lin => l1,
-    snoc l2' x => snoc (append-snoc l1 l2') x
-  }
-}
-
-def append : [A : Type] -> List A -> List A -> List A {
-  \l1 l2 => case l1 {
-    nil => l2,
-    cons x xs => cons x (append xs l2)
-  }
-}
-
-def last : [A : Type] -> A -> List A -> A {
-  \x xs => case xs {
-    nil => x,
-    cons y ys => last y ys
-  }
-}
-
-def init : [A : Type] -> A -> List A -> List A {
-  \x xs => case xs {
-    nil => nil,
-    cons y ys => cons x (init y ys)
-  }
-}
-
-def to-snoc : [A : Type] -> List A -> SnocList A {
+def rec gather-static : [A : Type] -> PsList A -> Prod (List A) (Maybe JS) {
   \l => case l {
-    nil => lin,
-    cons x xs => append-snoc (snoc lin x) (to-snoc xs)
+    psnil => mk-prod nil nothing,
+    pscons x xs => case gather-static xs {
+      mk-prod l j => mk-prod (cons x l) j
+    },
+    psdyn j => mk-prod nil (just j)
   }
 }
 
-def from-snoc : [A : Type] -> SnocList A -> List A {
-  \l => case l {
-    lin => nil,
-    snoc l' x => append (from-snoc l') (cons x nil)
-  }
-}
-
-data Eq : Type -> Type {
-  mk-eq : [A : Type] -> (is-equal : A -> A -> Bool) -> Eq A
-}
-
-def is-equal : [A : Type] -> Eq A -> A -> A -> Bool {
-  \eq x y => case eq {
-    mk-eq is-equal' => is-equal' x y
-  }
-}
-
-data DoubleList : Type -> Type {
-  double-nil : [A : Type] -> DoubleList A,
-  double-one : [A : Type] -> A -> DoubleList A,
-  double-cons : [A : Type] -> A -> List A -> A -> DoubleList A
-}
-
-def to-double : [A : Type] -> List A -> DoubleList A {
-  \l => case l {
-    nil => double-nil,
-    cons x xs => case to-snoc xs {
-      lin => double-one x,
-      snoc ys y => double-cons x (from-snoc ys) y
+def gathered-static-to-js : [A : Type] -> Prod (List A) (Maybe JS) -> JS {
+  \p => case p {
+    mk-prod l j => case j {
+      nothing => {
+        fold (\x acc => js-array-extend-l (to-js x) acc) js-empty-array l
+      },
+      just j' => {
+        fold (\x acc => js-array-extend-l (to-js x) acc) j' l
+      }
     }
   }
 }
 
-def is-palindrome : [A : Type] -> Eq A -> List A -> Bool {
-  \eq l => case to-double l {
-    double-nil => true,
-    double-one _ => true,
-    double-cons x xs y => and (is-equal eq x y) (is-palindrome eq xs)
-  }
+def ps-list-to-js : [A : Type] -> PsList A -> JS {
+  \l => gathered-static-to-js (gather-static l)
 }
 
--- OUTPUT:
---
--- def is-palindrome : [A : Type] -> (n190 : Eq A) -> (n191 : FlatArray A) -> Bool {
---   \[A] eq l => {
---     let l' : FlatArray A = l;
---     if-then-else (is-zero (len l'))
---     (\_ => true)
---     (\_ => if-then-else (is-one (len l'))
---       (\_ => true)
---       (\_ => if-then-else (is-equal eq (index l' ZERO) (index l' (sub (len l') ONE)))
---         (\_ => is-palindrome eq (slice l' ONE (sub (len l') ONE)))
---         (\_ => false)))
---   }
--- }
-
--- REPRESENTATIONS
-
-repr FlatLists {
-  data List A as FlatArray A {
-    nil as empty,
-    cons x xs as push-front x xs,
-
+repr PsListAsJS {
+  data PsList A as JS {
+    psnil as ps-list-to-js psnil,
+    pscons x xs as ps-list-to-js (pscons x xs),
+    psdyn j as j,
     case l {
-      nil => b,
-      cons => r
+      psnil => b,
+      pscons => r,
+      psdyn => j
     } as {
-      if-then-else (is-zero (len l))
-        (\_ => unsafe-cast b)
-        (\_ => unsafe-cast (r (index l ZERO) (slice l ONE (len l))))
+      let m = unrepr List (repr l);
+      case m {
+        nil => cast b,
+        cons [A] x xs => {
+          let inner : PsList A = unrepr PsList (repr xs);
+          cast (r x inner)
+        }
+      }
     }
   }
+}
 
-  data SnocList A as FlatArray A {
-    lin as empty,
-    snoc xs x as push-back x xs,
-
+repr ListAsPsList {
+  data List' A as PsList A {
+    nil' as psnil,
+    cons' x xs as pscons x (repr xs),
     case l {
-      lin => b,
-      snoc => r
+      nil' => b,
+      cons' => r
     } as {
-      if-then-else (is-zero (len l))
-        (\_ => unsafe-cast b)
-        (\_ => unsafe-cast (r (slice l ZERO (sub (len l) ONE)) (index l (sub (len l) ONE))))
+      case (repr l) {
+        psnil => cast b,
+        pscons x xs => cast (r x (unrepr List' xs)),
+        psdyn [A] j => case (unrepr List j) {
+          nil => cast b,
+          cons x xs => {
+            let l' : PsList A = unrepr PsList (repr xs);
+            cast (r x (unrepr List' l'))
+          }
+        }
+      }
     }
   }
+}
 
-  data DoubleList A as FlatArray A {
-    double-nil as empty,
-    double-one x as push-front x empty,
-    double-cons x xs y as push-front x (push-back y xs),
-
-    case l {
-      double-nil => b,
-      double-one => r1,
-      double-cons => r2
-    } as {
-      if-then-else (is-zero (len l))
-        (\_ => unsafe-cast b)
-        (\_ => if-then-else (is-one (len l))
-          (\_ => unsafe-cast (r1 (index l ZERO)))
-          (\_ => unsafe-cast
-            (r2 (index l ZERO)
-              (slice l ONE (sub (len l) ONE))
-              (index l (sub (len l) ONE)))))
-    }
-  }
-
-  def to-snoc as \x => x
-
-  def from-snoc as \x => x
-
-  def to-double as \x => x
+def main : IO Unit {
+  let x : List' Nat = cons' 3 (cons' 4 nil');
+  debug-print (ps-list-to-js (repr x))
 }

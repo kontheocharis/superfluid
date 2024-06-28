@@ -1,18 +1,14 @@
-def field-len : Nat {
-  pow 2 16
-}
-
-def byte-len : Nat {
-  pow 2 16
-}
-
 def Word : Type {
-  Fin field-len
+  Fin (pow 2 16)
+}
+
+def Byte : Type {
+  Fin (pow 2 8)
 }
 
 data ByteVec : [n : Nat] -> Fin n -> Type {
   bnil : [n : Nat] -> ByteVec (fz [n]),
-  bcons : [n : Nat] -> [i : Fin n] -> Fin byte-len -> ByteVec i -> ByteVec (fs i)
+  bcons : [n : Nat] -> [i : Fin n] -> Byte -> ByteVec i -> ByteVec (fs i)
 }
 
 data UdpPacket : Type {

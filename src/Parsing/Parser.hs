@@ -1,8 +1,11 @@
 module Parsing.Parser (parseProgram, parseTerm) where
 
 import Checking.Context (Signature (Signature))
+import Control.Monad (foldM)
 import Control.Monad.Identity (Identity)
+import Control.Monad.RWS (modify)
 import Data.Char (isDigit, isSpace, readLitChar)
+import Data.List.NonEmpty (NonEmpty ((:|)), fromList, singleton)
 import Data.Maybe (fromMaybe, isJust)
 import Data.String
 import Data.Text (Text)
@@ -13,6 +16,7 @@ import Lang
     DataItem (..),
     DeclItem (..),
     GlobalName,
+    HasLoc (getLoc),
     Item (..),
     Lit (..),
     Loc (..),
@@ -44,13 +48,12 @@ import Lang
 import Parsing.Resolution (resolveGlobalsRec)
 import Text.Parsec (Parsec, between, char, choice, eof, getPosition, getState, many, many1, modifyState, noneOf, notFollowedBy, optionMaybe, optional, putState, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>))
 import Text.Parsec.Char (alphaNum, letter)
-import Text.Parsec.Combinator (sepEndBy)
+import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 import Text.Parsec.Token (GenTokenParser)
 import Text.ParserCombinators.Parsec.Token (makeTokenParser)
-import Control.Monad.RWS (modify)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState
@@ -115,6 +118,9 @@ square = between (symbol "[") (symbol "]")
 commaSep :: Parser a -> Parser [a]
 commaSep p = p `sepEndBy` comma
 
+commaSep1 :: Parser a -> Parser (NonEmpty a)
+commaSep1 p = fromList <$> p `sepEndBy1` comma
+
 comment :: Parser ()
 comment = do
   _ <- try (string "--")
@@ -166,16 +172,16 @@ getPos = do
   s <- getPosition
   return (Pos (sourceLine s) (sourceColumn s))
 
-located :: Parser a -> Parser (a, Loc)
-located p = do
+located :: (a -> Loc -> b) -> Parser a -> Parser b
+located f p = do
   start <- getPos
   x <- p
   end <- getPos
-  return (x, Loc start end)
+  return $ f x (Loc start end)
 
 locatedTerm :: Parser TermValue -> Parser Term
 locatedTerm p = do
-  (t, l) <- located p
+  (t, l) <- located (,) p
   return $ Term t (termDataAt l)
 
 -- | Parse a term from a string.
@@ -320,14 +326,14 @@ declSignature = do
 -- Some are grouped to prevent lots of backtracking.
 term :: Parser Term
 term = do
-  t <- choice [caseExpr, lets, repTerm, unrepTerm, piTOrSigmaT, lam, app]
+  t <- choice [caseExpr, lets, piTOrSigmaT, lam, app]
   resolveTerm t
 
 -- | Parse a single term.
 --
 -- This is a term which never requires parentheses to disambiguate.
 singleTerm :: Parser Term
-singleTerm = choice [literal, varOrHole, pairOrParens]
+singleTerm = choice [literal, varOrHole, repTerm, unrepTerm, pairOrParens]
 
 literal :: Parser Term
 literal = locatedTerm $ do
@@ -404,45 +410,51 @@ freshVar = do
   return $ Var ("n" ++ show idx) idx
 
 -- | Parse a named parameter like `(n : Nat)`.
-named :: Parser (PiMode, Var, Type)
+named :: Parser (PiMode, NonEmpty (Loc, Var, Type))
 named =
   (try . parens)
     ( do
-        name <- newVar
-        _ <- colon
-        ty <- term
-        return (Explicit, name, ty)
+        contents <- typings
+        return (Explicit, contents)
     )
     <|> (try . square)
       ( do
-          name <- newVar
-          _ <- colon
-          ty <- term
-          return (Implicit, name, ty)
+          contents <- typings
+          return (Implicit, contents)
       )
     <|> ( do
-            name <- freshVar
-            t <- app
-            return (Explicit, name, t)
+            (Explicit,)
+              <$> located
+                (\(n, t) l -> singleton (l, n, t))
+                ( do
+                    name <- freshVar
+                    t <- app
+                    return (name, t)
+                )
         )
+  where
+    typings :: Parser (NonEmpty (Loc, Var, Type))
+    typings = commaSep1 . located (\(n, t) l -> (l, n, t)) . try $ do
+      name <- newVar
+      _ <- colon
+      ty <- term
+      return (name, ty)
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser Type
-piTOrSigmaT = try . locatedTerm $ do
-  (m, name, ty1) <- named
-  binderT <-
+piTOrSigmaT = try $ do
+  (m, ts) <- named
+  op <-
     (reservedOp "->" >> return (PiT m))
-      <|> ( reservedOp "*" >> case m of
-              Explicit -> return SigmaT
-              Implicit -> fail "Cannot use implicit arguments in a sigma type"
-          )
-  binderT name ty1 <$> term
+      <|> (reservedOp "*" >> return SigmaT)
+  ret <- term
+  return $ foldr (\(l', name, ty) acc -> locatedAt l' (op name ty acc)) ret ts
 
 -- | Parse an application.
 app :: Parser Term
 app = do
   t <- singleTerm
-  ts <- many (((Implicit,) <$> try (square term)) <|> ((Explicit,) <$> singleTerm))
+  ts <- many (((Implicit,) <$> try (square term)) <|> ((Explicit,) <$> try singleTerm))
   return $ listToApp (t, ts)
 
 -- | Parse a representation term
@@ -461,7 +473,7 @@ unrepTerm = locatedTerm $ do
 -- | Parse a series of let terms.
 lets :: Parser Term
 lets = curlies $ do
-  bindings <- many . located $ do
+  bindings <- many . located (,) $ do
     reserved "let"
     v <- newVar
     ty <- optionMaybe $ do
@@ -485,7 +497,7 @@ lets = curlies $ do
 lam :: Parser Term
 lam = do
   reservedOp "\\"
-  v <- many1 (((Implicit,) <$> try (square (located newVar))) <|> ((Explicit,) <$> located newVar))
+  v <- many1 (((Implicit,) <$> try (square (located (,) newVar))) <|> ((Explicit,) <$> located (,) newVar))
   reservedOp "=>"
   t <- term
   end <- getPos

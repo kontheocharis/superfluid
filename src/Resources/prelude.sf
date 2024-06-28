@@ -9,7 +9,7 @@ data Bool : Type {
   false : Bool
 }
 
-def id : [A : Type] -> A -> A {
+def id : [A : Type,] -> A -> A {
   \a => a
 }
 
@@ -383,7 +383,7 @@ repr ListAsArray {
   }
 
   def map as \f xs => unrepr List (js-map (cast f) (repr xs))
-  def fold as \f i xs => cast (js-fold (cast f) (to-js i) (repr xs))
+  def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) (repr xs))
 }
 
 -- More definitions

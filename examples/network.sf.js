@@ -1,21 +1,21 @@
 const { Buffer } = require('node:buffer');
 const prompt = require('prompt-sync')();
-const id = (A) => (a) => a;
+const id = (v0) => (a) => a;
 const if_then_else = (A) => (b) => (t) => (f) => (b) ? ((t)(["tt"])) : ((f)(["tt"]));
 const js_two = (1) + (1);
 const js_four = ((1) + (1)) * ((1) + (1));
 const js_six = (((1) + (1)) * ((1) + (1))) + ((1) + (1));
 const js_eight = (((1) + (1)) * ((1) + (1))) * (((1) + (1)) * ((1) + (1)));
-const debug_print = (A) => (a) => (() => ((console).log)(a));
+const debug_print = (v1) => (a) => (() => ((console).log)(a));
 const sub = (m) => (n) => ((n) === (0)) ? (m) : (((m) === (0)) ? (0) : (((sub)((m) - (1)))((n) - (1))));
-const find = (A) => (p) => (xs) => (() => {
+const find = (v30) => (p) => (xs) => (() => {
   const l_p_ = xs;
   return (((l_p_).length) === (0)) ? (null) : (((p)((l_p_)[0])) ? ((l_p_)[0]) : ((((find)(null))(p))((l_p_).slice(1, (l_p_).length))));
 })();
-const field_len = (2) ** (16);
-const byte_len = (2) ** (16);
 const Word = null;
+const Byte = null;
 const OWN_PORT = 4;
+const max_fin = (v184) => (x) => (y) => ((x) === (0)) ? (y) : (((y) === (0)) ? (x) : ((1) + ((((max_fin)(null))((x) - (1)))((y) - (1)))));
 const handle_packet = (p) => (() => {
   const p_p_ = p;
   const len = ((p_p_).readUInt16BE)(4);

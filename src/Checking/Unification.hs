@@ -118,7 +118,8 @@ introSubst v t = do
   s <- inCtx (lookupSubst v)
   case s of
     Nothing -> modifyCtx (addSubst v t)
-    Just t' -> unifyTerms t t'
+    Just t' -> do
+      unifyTerms t t' `catchError` (\_ -> return ()) -- If the terms don't unify, just ignore the substitution.
 
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()

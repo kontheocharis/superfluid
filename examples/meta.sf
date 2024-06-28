@@ -1,0 +1,106 @@
+
+data Desc : Type {
+  var : Desc,
+  one : Desc,
+  choice : (S : Type) -> (S -> Desc) -> Desc,
+  prod : (S : Type) -> (S -> Desc) -> Desc,
+  foreign : (S : Type) -> Desc,
+}
+
+data IDesc : Type -> Type {
+  ask : [I : Type] -> I -> IDesc I,
+  give : [I : Type] -> I -> IDesc I,
+  ichoice : [I : Type] -> (S : Type) -> (S -> IDesc I) -> IDesc I,
+  iprod : [I : Type] -> (S : Type) -> (S -> IDesc I) -> IDesc I,
+  iforeign : [I : Type] -> (S : Type) -> IDesc I,
+}
+
+data Sigma : (I : Type, S : I -> Type) -> Type {
+  pair : [I : Type, S : I -> Type] -> (i : I) -> S i -> Sigma I S
+}
+
+def rec Interp : Desc -> Type -> Type {
+  \d X => case d {
+    var => X,
+    one => Unit,
+    choice S f => (x : S) * Interp (f x) X,
+    prod S f => (x : S) -> Interp (f x) X,
+    foreign S => S,
+  }
+}
+
+def rec IInterp : [I : Type] -> IDesc I -> (I -> Type) -> (I -> Type) {
+  \[I] d X i => case d {
+    ask i' => X i',
+    give i' =>  Equal i i',
+    ichoice S f => (x : S) * IInterp (f x) X i,
+    iprod S f => (x : S) -> IInterp (f x) X i,
+    iforeign S => S,
+  }
+}
+
+def orn : [X : Type] -> (d : Desc) -> ((Interp d) X -> X) -> IDesc X {
+  ?h3
+}
+
+def iorn : [I : Type, X : I -> Type, i : I] -> (d : IDesc I) -> (IInterp d X i -> X i) -> IDesc ((i : I) * X i) {
+  ?h4
+}
+
+data Mu : Desc -> Type {
+  mu : [d : Desc] -> Interp d (Mu d) -> Mu d
+}
+
+data IMu : [I : Type] -> IDesc I -> I -> Type {
+  imu : [I : Type, d : IDesc I, i : I] -> IInterp d (IMu d) i -> IMu d i
+}
+
+data Rep : Desc -> Type {
+  mk-rep :
+    [d : Desc]
+    -> (
+      R : Type,
+      represent : Interp d R -> R,
+      view : (r : R) -> IMu (orn d represent) r
+    )
+    -> Rep d
+}
+
+data IRep : [I : Type] -> IDesc I -> Type {
+  mk-irep :
+    [I : Type, d : IDesc I]
+    -> (
+      R : I -> Type,
+      represent : [i : I] -> IInterp [I] d R i -> R i,
+      view : [i : I] -> (r : R i) -> IMu (iorn [I] [_] [i] d represent) (i, r), -- TODO: Better inference!
+    )
+    -> IRep d
+}
+
+data ListE : Type {
+  list-nil : ListE,
+  list-cons : ListE,
+}
+
+data ConsE : Type {
+  cons-x : ConsE,
+  cons-xs : ConsE,
+}
+
+def list-d : Type -> Desc {
+  \T => choice ListE (\x => case x {
+    list-nil => one,
+    list-cons => prod ConsE (\a => case a {
+      cons-x => foreign T,
+      cons-xs => var,
+    })
+  })
+}
+
+def List' : Type -> Type {
+  \T => Mu (list-d T)
+}
+
+def nil' : [T : Type] -> List' T {
+  \[T] => mu [list-d T] (list-nil, ?h1)
+}
