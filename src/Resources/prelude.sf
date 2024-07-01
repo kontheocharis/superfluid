@@ -212,6 +212,16 @@ def rec mul : Nat -> Nat -> Nat {
   }
 }
 
+def rec is-even : Nat -> Bool {
+  \n => case n {
+    z => true,
+    s n' => case n' {
+      z => false,
+      s n'' => is-even n'',
+    }
+  }
+}
+
 def rec pow : Nat -> Nat -> Nat {
   \m n => case n {
     z => s z,
@@ -244,6 +254,29 @@ def rec fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
     fs f' => s (fin-to-nat f'),
+  }
+}
+
+def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
+  \x => case x {
+    fz => true,
+    fs x => case x {
+      fz => false,
+      fs y => fin-is-even y
+    }
+  }
+}
+
+def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
+  \a b => case a {
+    fz => case b {
+      fz => true,
+      fs y => false
+    },
+    fs x => case b {
+      fz => false,
+      fs y => fin-eq x y
+    }
   }
 }
 
@@ -318,6 +351,7 @@ repr NatAsNumber {
   def add as \a b => unrepr Nat (js-plus (repr a) (repr b))
   def mul as \a b => unrepr Nat (js-times (repr a) (repr b))
   def pow as \a b => unrepr Nat (js-pow (repr a) (repr b))
+  def is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
 }
 
 repr FinAsNumber {
@@ -335,6 +369,8 @@ repr FinAsNumber {
   }
 
   def fin-to-nat as \n => unrepr Nat (repr n)
+  def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
+  def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
 }
 
 repr MaybeAsNullable {
@@ -389,7 +425,7 @@ repr ListAsArray {
 -- More definitions
 
 data Char : Type {
-  char-from-num : Fin (pow 2 5) -> Char,
+  char-from-num : Fin 32 -> Char,
 }
 
 data String : Type {

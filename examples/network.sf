@@ -1,9 +1,9 @@
 def Word : Type {
-  Fin (pow 2 16)
+  Fin 65536
 }
 
 def Byte : Type {
-  Fin (pow 2 8)
+  Fin 256
 }
 
 data ByteVec : [n : Nat] -> Fin n -> Type {
@@ -21,37 +21,9 @@ data UdpPacket : Type {
     UdpPacket
 }
 
-def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
-  \x => case x {
-    fz => true,
-    fs x => case x {
-      fz => false,
-      fs y => fin-is-even y
-    }
-  }
-}
-
-def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
-  \a b => case a {
-    fz => case b {
-      fz => true,
-      fs y => false
-    },
-    fs x => case b {
-      fz => false,
-      fs y => fin-eq x y
-    }
-  }
-}
-
-repr FinFns {
-  def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
-  def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
-}
-
 
 def OWN_PORT : Word {
-  4n
+  3096n
 }
 
 def rec max-fin : [n : Nat] -> Fin n -> Fin n -> Fin n {
@@ -81,20 +53,56 @@ def handle-packet : UdpPacket -> Maybe UdpPacket {
   }
 }
 
+def rec repeat : [n : Nat] -> (f : Fin n) -> Byte -> ByteVec f {
+  \f b => case f {
+    fz => bnil,
+    fs f' => bcons b (repeat f' b)
+  }
+}
+
+def rec io-mapM_ : [A : Type] -> (A -> IO Unit) -> List A -> IO Unit {
+  \f xs => case xs {
+    nil => io-return tt,
+    cons x xs' => {
+      let m = io-bind (f x) (\_ => io-mapM_ f xs'); -- @@FIXME dies without this let??
+      m
+    }
+  }
+}
+
+def rec list-range : Nat -> List Nat {
+  \n => case n {
+    z => nil,
+    s n' => cons n' (list-range n')
+  }
+}
 
 def main : IO Unit {
-  let test-packet = mk-udp-packet
+  let packet-size : Word = 20000n;
+
+  let contents = repeat packet-size 42n;
+
+  let test-packet = to-bytes (mk-udp-packet
     2n
     3n
-    3n
+    packet-size
     5n
-    (bcons 1n (bcons 2n (bcons 3n bnil)));
+    contents);
 
-  let result = handle-packet test-packet;
+  io-mapM_ (\i => {
+    io-bind (debug-print i) (\_ => {
+      let result = handle-packet test-packet;
 
-  io-bind
-    (debug-print test-packet)
-    (\_ => debug-print result)
+      case result {
+        just r => case r {
+          mk-udp-packet _ _ len _ _ => debug-print len
+        },
+        nothing => {
+          debug-print "No UDP packet!"
+        }
+      }
+    })
+  }) (list-range 200)
 }
 
 
@@ -139,11 +147,12 @@ repr UdpRepr {
     } as {
       let p' = repr p;
       let len = js-buffer-read-uint16-be (repr 4) p';
-      let src-port = js-buffer-read-uint16-be (repr 0) p';
-      let dst-port = js-buffer-read-uint16-be (repr 2) p';
-      let checksum = js-buffer-read-uint16-be (repr 6) p';
-      let contents = js-buffer-subarray (repr 8) (js-plus (repr 8) len) p';
-      cast (mk (unrepr Fin src-port) (unrepr Fin dst-port) (unrepr Fin len) (unrepr Fin checksum) (unrepr ByteVec contents))
+      cast (mk
+        (unrepr Fin (js-buffer-read-uint16-be (repr 0) p'))
+        (unrepr Fin (js-buffer-read-uint16-be (repr 2) p'))
+        (unrepr Fin len)
+        (unrepr Fin (js-buffer-read-uint16-be (repr 6) p'))
+        (unrepr ByteVec (js-buffer-subarray (repr 8) (js-plus (repr 8) len) p')))
     }
   }
 }

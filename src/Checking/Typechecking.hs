@@ -18,9 +18,11 @@ import Checking.Context
     addTyping,
     addTypings,
     enterCtx,
+    enterCtxEffect,
     enterCtxMod,
     enterPat,
     enterSignatureMod,
+    findReprForGlobal,
     freshMeta,
     freshMetaAt,
     freshVar,
@@ -29,15 +31,16 @@ import Checking.Context
     inCtx,
     inSignature,
     lookupItemOrCtor,
+    lookupSubst,
     lookupType,
     modifyCtx,
     modifySignature,
-    setType, findReprForGlobal, lookupSubst, enterCtxEffect,
+    setType,
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Representation (representCtx, representTerm)
-import Checking.Unification (unifyAllTerms, unifyTerms, introSubst)
+import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
 import Checking.Utils (showHole)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
@@ -479,12 +482,21 @@ inferTerm' (Term (Lit (NatLit l)) d1) = do
 inferTerm' (Term (Lit (FinLit i n)) d1) = do
   (n', _) <- checkTerm n (locatedAt n (Global "Nat"))
   m <- freshMeta
-  let minIndex = listToApp (genTerm (Global "add"), [(Explicit, genTerm (Lit (NatLit i))), (Explicit, m)])
-  unifyTerms minIndex n'
-  return
-    ( locatedAt d1 (Lit (FinLit i n')),
-      listToApp (locatedAt d1 (Global "Fin"), [(Explicit, listToApp (genTerm (Global "s"), [(Explicit, n')]))])
-    )
+  -- Shortcut if both are literals
+  case n'.value of
+    Lit (NatLit l)
+      | i < l + 1 ->
+          return
+            ( locatedAt d1 (Lit (FinLit i n')),
+              listToApp (locatedAt d1 (Global "Fin"), [(Explicit, genTerm (Lit (NatLit (l + 1))))])
+            )
+    _ -> do
+      let minIndex = listToApp (genTerm (Global "add"), [(Explicit, genTerm (Lit (NatLit i))), (Explicit, m)])
+      unifyTerms minIndex n'
+      return
+        ( locatedAt d1 (Lit (FinLit i n')),
+          listToApp (locatedAt d1 (Global "Fin"), [(Explicit, listToApp (genTerm (Global "s"), [(Explicit, n')]))])
+        )
 
 inferOrCheckLet :: (Term -> Tc (Term, Type)) -> Var -> Type -> Term -> Term -> Tc ((Type, Term, Term), Type)
 inferOrCheckLet f var ty tm ret = do

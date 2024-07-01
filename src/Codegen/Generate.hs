@@ -6,7 +6,7 @@ import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Debug.Trace (traceM)
 import Interface.Pretty (Print (printVal), indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var, appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value, Lit (..))
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var (..), appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value, Lit (..))
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
@@ -49,7 +49,7 @@ jsProgFromStats :: [JsStat] -> JsProg
 jsProgFromStats stats = JsProg $ intercalate "\n" $ map (\(JsStat s) -> s) stats
 
 jsConst :: String -> JsExpr -> JsStat
-jsConst name (JsExpr e) = JsStat $ "const " ++ name ++ " = " ++ e ++ ";"
+jsConst name (JsExpr e) = JsStat $ "var " ++ name ++ " = " ++ e ++ ";"
 
 jsExprStat :: JsExpr -> JsStat
 jsExprStat (JsExpr e) = JsStat e
@@ -71,6 +71,12 @@ jsName "undefined" = "UNDEFINED"
 jsName "String" = "STRING"
 jsName n = concatMap (\c -> if c == '-' then "_" else if c == '\'' then "_p_" else [c]) n
 
+jsGlobal :: String -> JsExpr
+jsGlobal s = JsExpr $ jsName s
+
+jsVar :: Var -> String
+jsVar (Var name idx) = jsName (name ++ show idx)
+
 addDecl :: JsStat -> Gen ()
 addDecl d = modify (\s -> s {decls = s.decls ++ [d]})
 
@@ -84,7 +90,7 @@ generateProgram p@(Program items) = do
   modify (\s -> s {program = p})
   addStdlibImports
   mapM_ generateItem items
-  addDecl $ jsExprStat (jsInvoke $ jsVar "main")
+  addDecl $ jsExprStat (jsInvoke $ jsGlobal "main")
   ds <- gets (\s -> s.decls)
   return $ jsProgFromStats ds
 
@@ -105,14 +111,14 @@ generateExpr (Term (SigmaT {}) _) = return jsNull
 generateExpr (Term TyT _) = return jsNull
 generateExpr (Term (Lam _ v t) _) = do
   t' <- generateExpr t
-  return $ jsLam (jsName v.name) t'
+  return $ jsLam (jsVar v) t'
 generateExpr ls@(Term (Let {}) _) = do
   let (xs, ret) = letToList ls
   statements <-
     mapM
       ( \(v, _, t) -> do
           t' <- generateExpr t
-          return $ jsConst (jsName v.name) t'
+          return $ jsConst (jsVar v) t'
       )
       xs
   ret' <- jsReturn <$> generateExpr ret
@@ -133,7 +139,7 @@ generateExpr t@(Term (App {}) _) = do
       a' <- generateExpr subject
       return $ foldl jsApp a' args'
 generateExpr (Term (Global s) _) = generateGlobal s []
-generateExpr (Term (V v) _) = return $ jsVar (jsName v.name)
+generateExpr (Term (V v) _) = return . JsExpr $ jsVar v
 generateExpr (Term (Pair t1 t2) _) = do
   t1' <- generateExpr t1
   t2' <- generateExpr t2
@@ -193,7 +199,7 @@ generateGlobal :: String -> [JsExpr] -> Gen JsExpr
 generateGlobal name args = do
   sig <- gets (\s -> asSig s.program)
   case lookupItemOrCtor name sig of
-    Just (Left (Decl d)) -> return $ foldl jsApp (jsVar (jsName d.name)) args
+    Just (Left (Decl d)) -> return $ foldl jsApp (jsGlobal d.name) args
     Just (Left (Data _)) -> return jsNull
     Just (Left (Repr _)) -> return jsNull
     Just (Left (Prim p)) -> generatePrim p.name args
@@ -244,11 +250,11 @@ generatePrim "JS" _ = return jsNull
 generatePrim "impossible" [_] = return $ JsExpr "({ throw new Error('impossible'); })()"
 generatePrim "io-return" [_, a] = return $ jsLazy a
 generatePrim "io-bind" [_, _, a, f] = return $ jsLazy $ jsInvoke (jsApp f (jsInvoke a))
-generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsVar "console") "log" `jsApp` a
-generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsVar "prompt")
+generatePrim "js-console-log" [a] = return $ jsLazy $ jsAccess (jsGlobal "console") "log" `jsApp` a
+generatePrim "js-prompt" [] = return $ jsLazy $ jsInvoke (jsGlobal "prompt")
 generatePrim "to-js" [_, a] = return a
-generatePrim "js-buffer-alloc" [a] = return $ jsApp (jsVar "Buffer.allocUnsafe") a
-generatePrim "js-buffer-byte-length" [a] = return $ jsApp (jsVar "Buffer.byteLength") a
+generatePrim "js-buffer-alloc" [a] = return $ jsApp (jsGlobal "Buffer.allocUnsafe") a
+generatePrim "js-buffer-byte-length" [a] = return $ jsApp (jsGlobal "Buffer.byteLength") a
 generatePrim "js-buffer-copy" [s, ss, se, ts, t] = return $ jsCommaExpr [jsMultiApp (jsAccess s "copy") [t, ts, ss, se], t]
 generatePrim "js-buffer-write-uint16-be" [v, o, b] = return $ jsCommaExpr [jsMultiApp (jsAccess b "writeUInt16BE") [v, o], b]
 generatePrim "js-buffer-write-uint8" [v, o, b] = return $ jsCommaExpr [jsMultiApp (jsAccess b "writeUInt8") [v, o], b]
@@ -355,9 +361,6 @@ jsBlockExpr ss = JsExpr $ "(() => {\n" ++ indentedFst (intercalate "\n" (map (\(
 
 jsCommaExpr :: [JsExpr] -> JsExpr
 jsCommaExpr ss = JsExpr $ "(" ++ intercalate ", " (map (\(JsExpr s) -> s) ss) ++ ")"
-
-jsVar :: String -> JsExpr
-jsVar s = JsExpr s
 
 jsStringLit :: String -> JsExpr
 jsStringLit s = JsExpr $ "\"" ++ s ++ "\""

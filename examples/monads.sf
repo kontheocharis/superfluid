@@ -58,7 +58,7 @@ def maybe-monad : Monad Maybe {
     })
 }
 
-def three-things : [F : Type -> Type] -> Monad F -> [A : Type] -> F A -> F A -> F A -> F (A ** (A ** A)) {
+def three-things : [F : Type -> Type] -> Monad F -> [A : Type] -> F A -> F A -> F A -> F (A * (A * A)) {
   \m x y z => bind m x (\a =>
     bind m y (\b =>
       bind m z (\c =>
@@ -68,7 +68,7 @@ def three-things : [F : Type -> Type] -> Monad F -> [A : Type] -> F A -> F A -> 
   )
 }
 
-def three-things-maybe : [A : Type] -> Maybe A -> Maybe A -> Maybe A -> Maybe (A ** (A ** A)) {
+def three-things-maybe : [A : Type] -> Maybe A -> Maybe A -> Maybe A -> Maybe (A * (A * A)) {
   three-things maybe-monad
 }
 

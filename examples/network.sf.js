@@ -1,77 +1,49 @@
-const { Buffer } = require('node:buffer');
-const prompt = require('prompt-sync')();
-const id = (v0) => (a) => a;
-const if_then_else = (A) => (b) => (t) => (f) => (b) ? ((t)(["tt"])) : ((f)(["tt"]));
-const js_two = (1) + (1);
-const js_four = ((1) + (1)) * ((1) + (1));
-const js_six = (((1) + (1)) * ((1) + (1))) + ((1) + (1));
-const js_eight = (((1) + (1)) * ((1) + (1))) * (((1) + (1)) * ((1) + (1)));
-const debug_print = (v1) => (a) => (() => ((console).log)(a));
-const sub = (m) => (n) => ((n) === (0)) ? (m) : (((m) === (0)) ? (0) : (((sub)((m) - (1)))((n) - (1))));
-const find = (v30) => (p) => (xs) => (() => {
-  const l_p_ = xs;
-  return (((l_p_).length) === (0)) ? (null) : (((p)((l_p_)[0])) ? ((l_p_)[0]) : ((((find)(null))(p))((l_p_).slice(1, (l_p_).length))));
+var { Buffer } = require('node:buffer');
+var prompt = require('prompt-sync')();
+var id = (v00) => (a5) => a5;
+var if_then_else = (A12) => (b13) => (t14) => (f15) => (b13) ? ((t14)(["tt"])) : ((f15)(["tt"]));
+var js_two = (1) + (1);
+var js_four = ((1) + (1)) * ((1) + (1));
+var js_six = (((1) + (1)) * ((1) + (1))) + ((1) + (1));
+var js_eight = (((1) + (1)) * ((1) + (1))) * (((1) + (1)) * ((1) + (1)));
+var debug_print = (v11) => (a120) => (() => ((console).log)(a120));
+var sub = (m167) => (n168) => ((n168) === (0)) ? (m167) : (((m167) === (0)) ? (0) : (((sub)((m167) - (1)))((n168) - (1))));
+var find = (v4747) => (p266) => (xs267) => (() => {
+  var l_p_379 = xs267;
+  return (((l_p_379).length) === (0)) ? (null) : (((p266)((l_p_379)[0])) ? ((l_p_379)[0]) : ((((find)(null))(p266))((l_p_379).slice(1, (l_p_379).length))));
 })();
-const Word = null;
-const Byte = null;
-const OWN_PORT = 4;
-const max_fin = (v184) => (x) => (y) => ((x) === (0)) ? (y) : (((y) === (0)) ? (x) : ((1) + ((((max_fin)(null))((x) - (1)))((y) - (1)))));
-const handle_packet = (p) => (() => {
-  const p_p_ = p;
-  const len = ((p_p_).readUInt16BE)(4);
-  const src_port = ((p_p_).readUInt16BE)(0);
-  const dst_port = ((p_p_).readUInt16BE)(2);
-  const checksum = ((p_p_).readUInt16BE)(6);
-  const contents = ((p_p_).subarray)(8, (8) + (len));
-  return (((src_port) % ((1) + (1))) === (0)) ? ((() => {
-    const new_p = (() => {
-      const len_p_ = len;
-      const total_len = (len_p_) + (8);
-      const b = (Buffer.allocUnsafe)(total_len);
-      const b_p_ = (((b).writeUInt16BE)(OWN_PORT, 0), b);
-      const b_p__p_ = (((b_p_).writeUInt16BE)(dst_port, 2), b_p_);
-      const b_p__p__p_ = (((b_p__p_).writeUInt16BE)(len_p_, 4), b_p__p_);
-      const b_p__p__p__p_ = (((b_p__p__p_).writeUInt16BE)(checksum, 6), b_p__p__p_);
-      const b_p__p__p__p__p_ = (((contents).copy)(b_p__p__p__p_, 8, 0, len_p_), b_p__p__p__p_);
-      return b_p__p__p__p__p_;
-    })();
-    return new_p;
-  })()) : (null);
+var Word = null;
+var Byte = null;
+var OWN_PORT = 3096;
+var max_fin = (v190190) => (x24) => (y25) => ((x24) === (0)) ? (y25) : (((y25) === (0)) ? (x24) : ((1) + ((((max_fin)(null))((x24) - (1)))((y25) - (1)))));
+var handle_packet = (p35) => (() => {
+  switch ((p35)[0]) {
+    case "mk_udp_packet": return ((((p35)[(1) + (0)]) % ((1) + (1))) === (0)) ? ((() => {
+      var new_p44 = ["mk_udp_packet", OWN_PORT, (p35)[(1) + ((1) + (0))], (p35)[(1) + ((1) + ((1) + (0)))], (p35)[(1) + ((1) + ((1) + ((1) + (0))))], (p35)[(1) + ((1) + ((1) + ((1) + ((1) + (0)))))]];
+      return new_p44;
+    })()) : (null);
+  }
 })();
-const main = (() => {
-  const test_packet = (() => {
-    const len_p_ = 3;
-    const total_len = (len_p_) + (8);
-    const b = (Buffer.allocUnsafe)(total_len);
-    const b_p_ = (((b).writeUInt16BE)(2, 0), b);
-    const b_p__p_ = (((b_p_).writeUInt16BE)(3, 2), b_p_);
-    const b_p__p__p_ = (((b_p__p_).writeUInt16BE)(len_p_, 4), b_p__p_);
-    const b_p__p__p__p_ = (((b_p__p__p_).writeUInt16BE)(5, 6), b_p__p__p_);
-    const b_p__p__p__p__p_ = ((((() => {
-      const xs_p_ = (() => {
-        const xs_p_ = (() => {
-          const xs_p_ = (Buffer.allocUnsafe)(0);
-          const old_len = (Buffer.byteLength)(xs_p_);
-          const new_len = (old_len) + (1);
-          const b = (Buffer.allocUnsafe)(new_len);
-          const b_p_ = (((b).writeUInt8)(3, 0), b);
-          return (((xs_p_).copy)(b_p_, 1, 0, old_len), b_p_);
-        })();
-        const old_len = (Buffer.byteLength)(xs_p_);
-        const new_len = (old_len) + (1);
-        const b = (Buffer.allocUnsafe)(new_len);
-        const b_p_ = (((b).writeUInt8)(2, 0), b);
-        return (((xs_p_).copy)(b_p_, 1, 0, old_len), b_p_);
-      })();
-      const old_len = (Buffer.byteLength)(xs_p_);
-      const new_len = (old_len) + (1);
-      const b = (Buffer.allocUnsafe)(new_len);
-      const b_p_ = (((b).writeUInt8)(1, 0), b);
-      return (((xs_p_).copy)(b_p_, 1, 0, old_len), b_p_);
-    })()).copy)(b_p__p__p__p_, 8, 0, len_p_), b_p__p__p__p_);
-    return b_p__p__p__p__p_;
-  })();
-  const result = (handle_packet)(test_packet);
-  return (() => (((_) => ((debug_print)(null))(result))((((debug_print)(null))(test_packet))()))());
+var repeat = (v202202) => (f52) => (b53) => ((f52) === (0)) ? (["bnil", null]) : (["bcons", null, (f52) - (1), b53, (((repeat)(null))((f52) - (1)))(b53)]);
+var io_mapM_ = (v210210) => (f67) => (xs68) => (() => {
+  var l_p_379 = xs68;
+  return (((l_p_379).length) === (0)) ? ((() => ["tt"])) : ((() => {
+    var m75 = (() => (((_77) => (((io_mapM_)(null))(f67))((l_p_379).slice(1, (l_p_379).length)))(((f67)((l_p_379)[0]))()))());
+    return m75;
+  })());
+})();
+var list_range = (n80) => ((n80) === (0)) ? ([]) : ([(n80) - (1), ...((list_range)((n80) - (1)))]);
+var main = (() => {
+  var packet_size85 = 20000;
+  var contents86 = (((repeat)(65536))(packet_size85))(42);
+  var test_packet87 = ["mk_udp_packet", 2, 3, packet_size85, 5, contents86];
+  return (((io_mapM_)(null))((i88) => (() => (((_90) => (() => {
+    var result91 = (handle_packet)(test_packet87);
+    return ((result91) === (null)) ? (((debug_print)(null))("No UDP packet!")) : ((() => {
+      switch ((result91)[0]) {
+        case "mk_udp_packet": return ((debug_print)(Word))((result91)[(1) + ((1) + ((1) + (0)))]);
+      }
+    })());
+  })())((((debug_print)(null))(i88))()))())))((list_range)(200));
 })();
 (main)()
