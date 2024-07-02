@@ -116,7 +116,7 @@ normaliseTerm _ (Term (App m (Term (Lam m' v t1) _) t2) _)
 normaliseTerm sig (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm sig t1
   return (Term (App m t1' t2) d1)
-normaliseTerm sig (Term (Case s cs) _) =
+normaliseTerm sig (Term (Case _ s cs) _) =
   foldr
     ( \(p, c) acc ->
         acc <|> do

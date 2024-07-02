@@ -526,7 +526,7 @@ caseExpr = locatedTerm $ do
   reserved "case"
   t <- term
   clauses <- curlies (commaSep caseClause)
-  return $ Case t clauses
+  return $ Case Nothing t clauses
 
 caseClause :: Parser (Pat, Term)
 caseClause = do

@@ -146,7 +146,7 @@ representTermRec = \case
         return $ ReplaceAndContinue term'
   Term (Rep r) _ -> Replace <$> representTerm r
   Term (Unrep _ r) _ -> Replace <$> representTerm r
-  Term (Case s cs) _ -> do
+  Term (Case (Just elimTy) s cs) _ -> do
     case s.dat.annotTy of
       Just t -> do
         t' <- resolveShallow t
@@ -160,8 +160,6 @@ representTermRec = \case
                 xs <- caseElimsToAppArgs g cs
                 s' <- resolveDeep s
                 xs' <- mapM resolveDeep xs
-                elimTy <- freshMeta
-                -- @@FIXME: This is not the right elimination type!
                 return $ ReplaceAndContinue (listToApp (term', map (Explicit,) (elimTy : s' : xs')))
           _ -> error $ "Case subject is not a global type: " ++ printVal t'
       _ -> trace ("No type found for subject " ++ printVal s) $ return Continue

@@ -144,7 +144,7 @@ generateExpr (Term (Pair t1 t2) _) = do
   t1' <- generateExpr t1
   t2' <- generateExpr t2
   return $ jsArray [t1', t2']
-generateExpr (Term (Case t cs) _) = do
+generateExpr (Term (Case _ t cs) _) = do
   t' <- generateExpr t
   cs' <-
     mapM

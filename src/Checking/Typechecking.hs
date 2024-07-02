@@ -49,7 +49,7 @@ import Control.Monad.State (get, gets, modify, put)
 import Data.Foldable (find)
 import Data.List (sort)
 import Data.Map (insert)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
 import Debug.Trace (traceM)
 import Interface.Pretty (printVal)
 import Lang
@@ -78,11 +78,12 @@ import Lang
     Var,
     appToList,
     genTerm,
+    lams,
     listToApp,
     listToPiType,
     locatedAt,
     piTypeToList,
-    termDataAt, lams,
+    termDataAt,
   )
 import Lang as DI (DeclItem (..), Lit (StringLit))
 
@@ -446,10 +447,12 @@ inferTerm' t@(Term (V v) _) = do
 inferTerm' (Term (Let var ty tm ret) d1) = do
   ((ty'', tm', ret'), typ') <- inferOrCheckLet inferTerm var ty tm ret
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
-inferTerm' (Term (Case s cs) _) = do
+inferTerm' (Term (Case e s cs) _) = do
   ((s', cs'), tys) <- inferOrCheckCase inferTerm s cs
   ret <- unifyAllTerms tys
-  return (locatedAt s (Case s' cs'), ret)
+  sTy <- makeCaseElimTy s' ret
+  e' <- unifyMaybes e (Just sTy)
+  return (locatedAt s (Case e' s' cs'), ret)
 inferTerm' (Term Wild d1) = do
   typ <- freshMetaAt d1
   m <- registerWild (getLoc d1) typ
@@ -527,13 +530,24 @@ inferOrCheckCase f s cs = do
       )
       cs
 
-  -- case s' of
-  --   Term (V v) _ -> do
-  --     let elimTy = lams [(Explicit, v)]
-  --     unifyTerms sTy vTy
-  --   _ -> return ()
-
   return ((s', cs'), tys)
+
+unifyMaybes :: Maybe Term -> Maybe Term -> Tc (Maybe Term)
+unifyMaybes (Just t1) (Just t2) = unifyTerms t1 t2 >> return (Just t1)
+unifyMaybes Nothing Nothing = return Nothing
+unifyMaybes (Just t1) Nothing = return $ Just t1
+unifyMaybes Nothing (Just t2) = return $ Just t2
+
+makeCaseElimTy :: Term -> Type -> Tc Term
+makeCaseElimTy s ty = do
+  case s of
+    Term (V v) _ -> do
+      let elimTy = lams [(Explicit, v)] ty
+      return elimTy
+    _ -> do
+      v <- freshVar
+      let elimTy = lams [(Explicit, v)] ty
+      return elimTy
 
 -- | Register a hole.
 registerHole :: Loc -> Var -> Tc Term
@@ -604,9 +618,11 @@ checkTerm'' t@(Term (V v) _) typ = do
 checkTerm'' (Term (Let var ty tm ret) d1) typ = do
   ((ty'', tm', ret'), typ') <- inferOrCheckLet (`checkTerm` typ) var ty tm ret
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
-checkTerm'' (Term (Case s cs) _) typ = do
+checkTerm'' (Term (Case e s cs) _) typ = do
   ((s', cs'), _) <- inferOrCheckCase (`checkTerm` typ) s cs
-  return (locatedAt s (Case s' cs'), typ)
+  sTy <- makeCaseElimTy s' typ
+  e' <- unifyMaybes e (Just sTy)
+  return (locatedAt s (Case e' s' cs'), typ)
 checkTerm'' (Term Wild d1) typ = do
   m <- registerWild (getLoc d1) typ
   return (m, typ)

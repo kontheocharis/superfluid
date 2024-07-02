@@ -71,7 +71,7 @@ instance Print TermValue where
               (\(v, ty, t) -> "let " ++ printVal v ++ " : " ++ printVal ty ++ " = " ++ printVal t ++ ";")
               binds
               ++ [printVal ret]
-  printVal (Case t cs) =
+  printVal (Case _ t cs) =
     "case "
       ++ printSingleVal t
       ++ " "

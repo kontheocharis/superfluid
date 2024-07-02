@@ -1,11 +1,8 @@
 
 
 def rec nat-ind : (n : Nat) -> (P : Nat -> Type) -> P z -> ((n' : Nat) -> P n' -> P (s n')) -> P n {
-  \n P b r => {
-    let x : P n = case n {
-      z => b,
-      s n' => r n' (nat-ind n' P b r),
-    };
-    x
+  \n P b r => case n {
+    z => b,
+    s n' => r n' (nat-ind n' P b r),
   }
 }

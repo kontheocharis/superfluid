@@ -96,7 +96,7 @@ unifyTerms a' b' = do
       if l == r
         then return ()
         else normaliseAndUnifyTerms a b
-    unifyTerms' (Term (Case su1 cs1) _) (Term (Case su2 cs2) _) = do
+    unifyTerms' (Term (Case _ su1 cs1) _) (Term (Case _ su2 cs2) _) = do
       unifyTerms su1 su2
       mapM_
         ( \((p1, t1), (p2, t2)) -> do
@@ -181,10 +181,11 @@ validateProb hole spine rhs = do
           t' <- validateRhs vs t
           v' <- validateRhs (x : vs) v
           return $ Term (Let x ty' t' v') r'.dat
-        Case t cs -> do
+        Case e t cs -> do
+          e' <- traverse (validateRhs vs) e
           t' <- validateRhs vs t
           cs' <- mapM (\(p, c) -> (,) <$> validateRhs vs p <*> validateRhs vs c) cs
-          return $ Term (Case t' cs') r'.dat
+          return $ Term (Case e' t' cs') r'.dat
         App m t1 t2 -> do
           t1' <- validateRhs vs t1
           t2' <- validateRhs vs t2
