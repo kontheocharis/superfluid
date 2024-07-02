@@ -116,7 +116,7 @@ instance TermMappable Ctx where
   mapTermMappableM f (Ctx js) = Ctx <$> mapM (mapTermMappableM f) js
 
 instance Show Ctx where
-  show (Ctx js) = intercalate "\n" $ map show js
+  show (Ctx js) = intercalate "\n" . reverse $ map show js
 
 -- | A signature, represented as a list of items.
 newtype Signature = Signature [Item] deriving (Show)

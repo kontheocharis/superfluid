@@ -41,7 +41,7 @@ import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Representation (representCtx, representTerm)
 import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole)
+import Checking.Utils (showHole, showSolvedMetas)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
 import Control.Monad.Except (throwError)
@@ -82,7 +82,7 @@ import Lang
     listToPiType,
     locatedAt,
     piTypeToList,
-    termDataAt,
+    termDataAt, lams,
   )
 import Lang as DI (DeclItem (..), Lit (StringLit))
 
@@ -526,6 +526,13 @@ inferOrCheckCase f s cs = do
           return ((pt', t'), ty)
       )
       cs
+
+  -- case s' of
+  --   Term (V v) _ -> do
+  --     let elimTy = lams [(Explicit, v)]
+  --     unifyTerms sTy vTy
+  --   _ -> return ()
+
   return ((s', cs'), tys)
 
 -- | Register a hole.

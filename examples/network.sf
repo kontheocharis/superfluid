@@ -6,9 +6,9 @@ def Byte : Type {
   Fin 256
 }
 
-data ByteVec : [n : Nat] -> Fin n -> Type {
-  bnil : [n : Nat] -> ByteVec (fz [n]),
-  bcons : [n : Nat] -> [i : Fin n] -> Byte -> ByteVec i -> ByteVec (fs i)
+data ByteVec : (n : Nat) -> Type {
+  bnil : ByteVec z,
+  bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
 }
 
 data UdpPacket : Type {
@@ -17,46 +17,31 @@ data UdpPacket : Type {
     (dst-port : Word) ->
     (len : Word) ->
     (checksum : Word) ->
-    (contents : ByteVec len) ->
+    (contents : ByteVec (fin-to-nat len)) ->
     UdpPacket
 }
 
-
-def OWN_PORT : Word {
-  3096n
-}
-
-def rec max-fin : [n : Nat] -> Fin n -> Fin n -> Fin n {
-  \x y => case x {
-    fz => y,
-    fs x' => case y {
-      fz => x,
-      fs y' => fs (max-fin x' y')
-    }
-  }
-}
-
-def handle-packet : UdpPacket -> Maybe UdpPacket {
-  \p => case p {
+def handle-packet : Nat -> UdpPacket -> Maybe UdpPacket {
+  \seq p => case p {
     mk-udp-packet src-port dst-port len checksum contents => {
       -- The rule is, if the source port is even, forward the packet
       -- to the destination port, setting the source port to be our own.
       -- Otherwise, drop it.
-      case fin-is-even src-port {
-        true => {
-          let new-p = mk-udp-packet OWN_PORT dst-port len checksum contents;
-          just new-p
-        },
-        false => nothing
-      }
+      let own-port : Word = case is-even seq {
+        true => 42n,
+        false => 24n,
+      };
+
+      let new-p = mk-udp-packet own-port dst-port len checksum contents;
+      just new-p
     }
   }
 }
 
-def rec repeat : [n : Nat] -> (f : Fin n) -> Byte -> ByteVec f {
-  \f b => case f {
-    fz => bnil,
-    fs f' => bcons b (repeat f' b)
+def rec repeat : (n : Nat) -> Byte -> ByteVec n {
+  \n b => case n {
+    z => bnil,
+    s n' => bcons b (repeat n' b)
   }
 }
 
@@ -70,40 +55,43 @@ def rec io-mapM_ : [A : Type] -> (A -> IO Unit) -> List A -> IO Unit {
   }
 }
 
-def rec list-range : Nat -> List Nat {
+def rec count-to : Nat -> List Nat {
   \n => case n {
     z => nil,
-    s n' => cons n' (list-range n')
+    s n' => cons n' (count-to n')
   }
 }
 
 def main : IO Unit {
   let packet-size : Word = 20000n;
 
-  let contents = repeat packet-size 42n;
+  let contents = repeat (fin-to-nat packet-size) 42n;
 
-  let test-packet = to-bytes (mk-udp-packet
+  let b : ByteVec _ = ..;
+
+  let packet = byte-buffer-to-udp-packet b;
+
+  let test-packet = mk-udp-packet
     2n
     3n
     packet-size
     5n
-    contents);
+    contents;
 
   io-mapM_ (\i => {
     io-bind (debug-print i) (\_ => {
-      let result = handle-packet test-packet;
+      let result = handle-packet i test-packet;
 
       case result {
-        just r => case r {
-          mk-udp-packet _ _ len _ _ => debug-print len
-        },
+        just r => debug-print r,
         nothing => {
           debug-print "No UDP packet!"
         }
       }
     })
-  }) (list-range 200)
+  }) (count-to 2000)
 }
+
 
 
 repr ByteVecRepr {
@@ -156,3 +144,50 @@ repr UdpRepr {
     }
   }
 }
+
+
+-- data Prod : Type -> Type -> Type {
+--   mk-prod : [A : Type] -> [B : Type] -> A -> B -> Prod A B
+-- }
+
+-- def word-to-big-endian-bytes : Word -> Prod Byte Byte {
+--   ?word-to-big-endian-bytes
+-- }
+
+-- def rec write-other-byte-vec : [n : Nat, l : Nat] -> (src : ByteVec l) -> (i : Fin n) -> (target : ByteVec (add l n)) -> ByteVec (add l n) {
+--   \src i target => case i {
+--     fz => case src {
+--       bcons b src' => bcons b target
+--     },
+--     fs i' => case src {
+--       bcons b src' => bcons b (write-other-byte-vec src' i' target)
+--     }
+--   }
+-- }
+
+-- def rec write-word-big-endian : (w : Word) -> [n : Nat] -> (i : Fin n) -> ByteVec (s (s n)) -> ByteVec (s (s n)) {
+--   \w i xs => {
+--     let bytes = word-to-big-endian-bytes w;
+--     case bytes {
+--       mk-prod b1 b2 => case i {
+--         fz => case xs {
+--           bcons b xs' => case xs' {
+--             bcons b' xs'' => bcons b1 (bcons b2 xs'')
+--           },
+--         },
+--         fs i' => case xs {
+--           bcons b xs' => bcons b (write-word-big-endian w i' xs'),
+--         }
+--       }
+--     }
+--   }
+-- }
+
+
+-- def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
+--   ?udp-packet-to-buffer
+-- }
+
+-- def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> UdpPacket {
+--   ?buffer-to-udp-packet
+-- }

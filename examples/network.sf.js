@@ -14,36 +14,58 @@ var find = (v4747) => (p266) => (xs267) => (() => {
 })();
 var Word = null;
 var Byte = null;
-var OWN_PORT = 3096;
-var max_fin = (v190190) => (x24) => (y25) => ((x24) === (0)) ? (y25) : (((y25) === (0)) ? (x24) : ((1) + ((((max_fin)(null))((x24) - (1)))((y25) - (1)))));
-var handle_packet = (p35) => (() => {
-  switch ((p35)[0]) {
-    case "mk_udp_packet": return ((((p35)[(1) + (0)]) % ((1) + (1))) === (0)) ? ((() => {
-      var new_p44 = ["mk_udp_packet", OWN_PORT, (p35)[(1) + ((1) + (0))], (p35)[(1) + ((1) + ((1) + (0)))], (p35)[(1) + ((1) + ((1) + ((1) + (0))))], (p35)[(1) + ((1) + ((1) + ((1) + ((1) + (0)))))]];
-      return new_p44;
-    })()) : (null);
-  }
+var handle_packet = (seq22) => (p23) => (() => {
+  var p_p_128 = p23;
+  var len129 = ((p_p_128).readUInt16BE)(4);
+  return (() => {
+    var own_port30 = (((seq22) % ((1) + (1))) === (0)) ? (42) : (24);
+    var new_p34 = (() => {
+      var len_p_116 = len129;
+      var total_len117 = (len_p_116) + (8);
+      var b118 = (Buffer.allocUnsafe)(total_len117);
+      var b_p_119 = (((b118).writeUInt16BE)(own_port30, 0), b118);
+      var b_p__p_121 = (((b_p_119).writeUInt16BE)(((p_p_128).readUInt16BE)(2), 2), b_p_119);
+      var b_p__p__p_122 = (((b_p__p_121).writeUInt16BE)(len_p_116, 4), b_p__p_121);
+      var b_p__p__p__p_123 = (((b_p__p__p_122).writeUInt16BE)(((p_p_128).readUInt16BE)(6), 6), b_p__p__p_122);
+      var b_p__p__p__p__p_124 = (((((p_p_128).subarray)(8, (8) + (len129))).copy)(b_p__p__p__p_123, 8, 0, len_p_116), b_p__p__p__p_123);
+      return b_p__p__p__p__p_124;
+    })();
+    return new_p34;
+  })();
 })();
-var repeat = (v202202) => (f52) => (b53) => ((f52) === (0)) ? (["bnil", null]) : (["bcons", null, (f52) - (1), b53, (((repeat)(null))((f52) - (1)))(b53)]);
-var io_mapM_ = (v210210) => (f67) => (xs68) => (() => {
-  var l_p_379 = xs68;
+var repeat = (n38) => (b39) => ((n38) === (0)) ? ((Buffer.allocUnsafe)(0)) : ((() => {
+  var xs_p_90 = ((repeat)((n38) - (1)))(b39);
+  var old_len91 = (Buffer.byteLength)(xs_p_90);
+  var new_len93 = (old_len91) + (1);
+  var b95 = (Buffer.allocUnsafe)(new_len93);
+  var b_p_96 = (((b95).writeUInt8)(b39, 0), b95);
+  return (((xs_p_90).copy)(b_p_96, 1, 0, old_len91), b_p_96);
+})());
+var io_mapM_ = (v189189) => (f53) => (xs54) => (() => {
+  var l_p_379 = xs54;
   return (((l_p_379).length) === (0)) ? ((() => ["tt"])) : ((() => {
-    var m75 = (() => (((_77) => (((io_mapM_)(null))(f67))((l_p_379).slice(1, (l_p_379).length)))(((f67)((l_p_379)[0]))()))());
-    return m75;
+    var m61 = (() => (((_63) => (((io_mapM_)(null))(f53))((l_p_379).slice(1, (l_p_379).length)))(((f53)((l_p_379)[0]))()))());
+    return m61;
   })());
 })();
-var list_range = (n80) => ((n80) === (0)) ? ([]) : ([(n80) - (1), ...((list_range)((n80) - (1)))]);
+var count_to = (n66) => ((n66) === (0)) ? ([]) : ([(n66) - (1), ...((count_to)((n66) - (1)))]);
 var main = (() => {
-  var packet_size85 = 20000;
-  var contents86 = (((repeat)(65536))(packet_size85))(42);
-  var test_packet87 = ["mk_udp_packet", 2, 3, packet_size85, 5, contents86];
-  return (((io_mapM_)(null))((i88) => (() => (((_90) => (() => {
-    var result91 = (handle_packet)(test_packet87);
-    return ((result91) === (null)) ? (((debug_print)(null))("No UDP packet!")) : ((() => {
-      switch ((result91)[0]) {
-        case "mk_udp_packet": return ((debug_print)(Word))((result91)[(1) + ((1) + ((1) + (0)))]);
-      }
-    })());
-  })())((((debug_print)(null))(i88))()))())))((list_range)(200));
+  var packet_size71 = 20000;
+  var contents72 = ((repeat)(packet_size71))(42);
+  var test_packet73 = (() => {
+    var len_p_116 = packet_size71;
+    var total_len117 = (len_p_116) + (8);
+    var b118 = (Buffer.allocUnsafe)(total_len117);
+    var b_p_119 = (((b118).writeUInt16BE)(2, 0), b118);
+    var b_p__p_121 = (((b_p_119).writeUInt16BE)(3, 2), b_p_119);
+    var b_p__p__p_122 = (((b_p__p_121).writeUInt16BE)(len_p_116, 4), b_p__p_121);
+    var b_p__p__p__p_123 = (((b_p__p__p_122).writeUInt16BE)(5, 6), b_p__p__p_122);
+    var b_p__p__p__p__p_124 = (((contents72).copy)(b_p__p__p__p_123, 8, 0, len_p_116), b_p__p__p__p_123);
+    return b_p__p__p__p__p_124;
+  })();
+  return (((io_mapM_)(null))((i74) => (() => (((_76) => (() => {
+    var result77 = ((handle_packet)(i74))(test_packet73);
+    return ((result77) === (null)) ? (((debug_print)(null))("No UDP packet!")) : (((debug_print)(null))(result77));
+  })())((((debug_print)(null))(i74))()))())))((count_to)(2000));
 })();
 (main)()

@@ -11,13 +11,15 @@ repr MyListAsList {
       mnil => b,
       mcons => r
     } as {
-      -- @@FIXME: how can we make this case expression not require a cast??
-      let l' = repr l;
-      case l' {
-        nil => ?h2,
-        -- cons n ns => r n (unrepr MyList ns),
-        cons n ns => ?h1
-      }
+
+      unrepr List (repr l) =? unrepr List nil
+
+      l =? mnil
+
+      (\l' => case l' {
+        nil => b,
+        cons n ns => ?h2,
+      }) (repr l)
     }
   }
 }
