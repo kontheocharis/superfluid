@@ -150,29 +150,32 @@ def word-to-big-endian-bytes : Word -> ByteVec 2 {
   ?word-to-big-endian-bytes
 }
 
-data ByteVecMod : (n : Nat) -> Type {
-  bvm-chain : [n : Nat] -> ByteVecMod n -> ByteVecMod n -> ByteVecMod n,
-  bvm-return : [n : Nat] -> ByteVecMod n,
-  bvm-write : [n : Nat, l : Nat] -> (src : ByteVec l, start : Fin (s n)) -> ByteVecMod (add n l),
+data ByteVecMod : Nat -> Type {
+  bv-write : [n : Nat, l : Nat] -> (src : ByteVec l, start : Fin (s n)) -> ByteVecMod (add n l),
+}
+
+data ByteVecRecipe : (n : Nat) -> Type {
+  bv-zeroed : (n : Nat) -> ByteVecRecipe n,
+  bv-chain : [n : Nat] -> ByteVecMod n -> ByteVecRecipe n -> ByteVecRecipe n,
 }
 
 def add-comm : [n : Nat] -> [m : Nat] -> Equal (add n m) (add m n) {
   ?add-comm
 }
 
-def bvm-write-word : [n : Nat] -> (src : Word, start : Fin (s n)) -> ByteVecMod (add 2 n) {
-  \src start => subst (\n => ByteVecMod n) add-comm (bvm-write (word-to-big-endian-bytes src) start)
+def bv-write-word : [n : Nat] -> (src : Word, start : Fin (s n)) -> ByteVecMod (add 2 n) {
+  \src start => subst (\n => ByteVecMod n) add-comm (bv-write (word-to-big-endian-bytes src) start)
 }
 
-def bvm-read-word : [n : Nat] -> (start : Fin (s n), src : ByteVec (add 2 n)) -> Word {
-  ?bvm-read-word
+def bv-read-word : [n : Nat] -> (start : Fin (s n), src : ByteVec (add 2 n)) -> Word {
+  ?bv-read-word
 }
 
-def bvm-read : [n : Nat] -> (start : Fin (s n), l : Nat, src : ByteVec (add n l)) -> ByteVec l {
-  ?bvm-read
+def bv-read : [n : Nat] -> (start : Fin (s n), l : Nat, src : ByteVec (add n l)) -> ByteVec l {
+  ?bv-read
 }
 
-def rec apply-bvm : [n : Nat] -> ByteVecMod n -> ByteVec n -> ByteVec n {
+def rec make-bv : [n : Nat] -> ByteVecRecipe n -> ByteVec n {
   ?apply-byte-vec-mod
 }
 
@@ -185,14 +188,14 @@ def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
     mk-udp-packet src-port dst-port len checksum contents => {
       let len' = fin-to-nat len;
       let total-len = add 8 len';
-      let mods : ByteVecMod total-len = {
-        bvm-chain (bvm-write-word src-port 0n)
-        (bvm-chain (bvm-write-word dst-port 2n)
-        (bvm-chain (bvm-write-word len 4n)
-        (bvm-chain (bvm-write-word checksum 6n)
-        (bvm-write contents 8n))))
+      let recipe : ByteVecRecipe total-len = {
+        bv-chain (bv-write-word src-port 0n)
+        (bv-chain (bv-write-word dst-port 2n)
+        (bv-chain (bv-write-word len 4n)
+        (bv-chain (bv-write-word checksum 6n)
+        (bv-chain (bv-write contents 8n) (bv-zeroed total-len)))))
       };
-      let b = apply-bvm mods (repeat total-len 0n);
+      let b = make-bv recipe;
       (len', b)
     }
   }
@@ -200,11 +203,11 @@ def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
 
 def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> Either UdpParseError UdpPacket {
   \[l] xs => {
-    let src-port = bvm-read-word 0n xs;
-    let dst-port = bvm-read-word 2n xs;
-    let len = bvm-read-word 4n xs;
-    let checksum = bvm-read-word 6n xs;
-    let contents = bvm-read 8n l xs;
+    let src-port = bv-read-word 0n xs;
+    let dst-port = bv-read-word 2n xs;
+    let len = bv-read-word 4n xs;
+    let checksum = bv-read-word 6n xs;
+    let contents = bv-read 8n l xs;
     case (nat-eq l (fin-to-nat len)) {
       yes p => right (
         mk-udp-packet
