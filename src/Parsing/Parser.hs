@@ -528,11 +528,11 @@ caseExpr = locatedTerm $ do
   clauses <- curlies (commaSep caseClause)
   return $ Case Nothing t clauses
 
-caseClause :: Parser (Pat, Term)
+caseClause :: Parser (Pat, Maybe Term)
 caseClause = do
   p <- pat
   reservedOp "=>"
-  t' <- term
+  t' <- (try (symbol "!") >> return Nothing) <|> Just <$> term
   return (p, t')
 
 -- | Resolve the "primitive" data types and constructors in a term.

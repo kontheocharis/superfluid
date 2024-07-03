@@ -1,16 +1,16 @@
 module Codegen.Generate (Gen, runGen, generateProgram, JsProg (..), renderJsProg) where
 
 import Checking.Context (Signature, asSig, classifyApp, lookupItemOrCtor, patVarToVar)
+import Checking.Normalisation (normaliseTermFully)
 import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Debug.Trace (traceM)
 import Interface.Pretty (Print (printVal), indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), PiMode (Explicit), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var (..), appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value, Lit (..))
+import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), Lit (..), PiMode (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var (..), appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value)
 import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
 import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
 import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
-import Checking.Normalisation (normaliseTermFully)
 
 data GenState = GenState
   { decls :: [JsStat],
@@ -152,7 +152,12 @@ generateExpr (Term (Case _ t cs) _) = do
           (p', args) <- generatePat p
           let body =
                 listToApp
-                  ( lams args c,
+                  ( lams
+                      args
+                      ( case c of
+                          Nothing -> listToApp (genTerm (Global "impossible"), [(Implicit, genTerm Wild)])
+                          Just c' -> c'
+                      ),
                     zipWith
                       (\(m, _) i -> (m, listToApp (genTerm (Global "js-index"), [(Explicit, t), (Explicit, intToNat i)])))
                       args
@@ -368,7 +373,7 @@ jsStringLit s = JsExpr $ "\"" ++ s ++ "\""
 jsIntLit :: Integer -> JsExpr
 jsIntLit i = JsExpr $ show i
 
-jsCharLit  :: Char -> JsExpr
+jsCharLit :: Char -> JsExpr
 jsCharLit c = JsExpr $ show c
 
 jsArray :: [JsExpr] -> JsExpr

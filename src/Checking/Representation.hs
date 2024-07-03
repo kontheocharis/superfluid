@@ -98,7 +98,7 @@ representCtx = modifyCtxM $ mapTermMappableM representTermRec
 
 -- | Convert a list of case eliminations to a list of arguments for the "represented" application.
 -- Assumes the case expression has already been checked.
-caseElimsToAppArgs :: String -> [(Pat, Term)] -> Tc [Term]
+caseElimsToAppArgs :: String -> [(Pat, Maybe Term)] -> Tc [Term]
 caseElimsToAppArgs dName clauses = do
   dCtors <- inSignature (getDataItem dName)
   clauses' <-
@@ -125,7 +125,17 @@ caseElimsToAppArgs dName clauses = do
                     _ -> throwError (PatternNotSupported p)
                 )
                 xs
-            return (idx, (c, lams xs' t))
+            return
+              ( idx,
+                ( c,
+                  lams
+                    xs'
+                    ( case t of
+                        Just t' -> t'
+                        Nothing -> listToApp (genTerm (Global "impossible"), [(Implicit, genTerm Wild)])
+                    )
+                )
+              )
         )
         clauses
 

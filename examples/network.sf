@@ -171,8 +171,16 @@ def bv-read-word : [n : Nat] -> (start : Fin (s n), src : ByteVec (add 2 n)) -> 
   ?bv-read-word
 }
 
+def bv-take : [n : Nat] -> [l : Nat] -> ByteVec (add n l) -> ByteVec n {
+  \src => {
+    ?bv-take
+  }
+}
+
 def bv-read : [n : Nat] -> (start : Fin (s n), l : Nat, src : ByteVec (add n l)) -> ByteVec l {
-  ?bv-read
+  \start l src => {
+    ?bv-read
+  }
 }
 
 def rec make-bv : [n : Nat] -> ByteVecRecipe n -> ByteVec n {

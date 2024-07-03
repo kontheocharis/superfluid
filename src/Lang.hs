@@ -88,7 +88,7 @@ data TermValue
   | App PiMode Term Term
   | SigmaT Var Type Term
   | Pair Term Term
-  | Case (Maybe Term) Term [(Pat, Term)]
+  | Case (Maybe Term) Term [(Pat, Maybe Term)] -- if the branch is Nothing, it is "impossible"
   | -- | Type of types (no universe polymorphism)
     TyT
   | -- | Variable
@@ -355,7 +355,7 @@ mapTermM f term = do
       (App m t1 t2) -> App m <$> mapTermM f t1 <*> mapTermM f t2
       (SigmaT v t1 t2) -> SigmaT v <$> mapTermM f t1 <*> mapTermM f t2
       (Pair t1 t2) -> Pair <$> mapTermM f t1 <*> mapTermM f t2
-      (Case elim t cs) -> Case <$> traverse (mapTermM f) elim <*> mapTermM f t <*> mapM (\(p, c) -> (,) <$> mapTermM f p <*> mapTermM f c) cs
+      (Case elim t cs) -> Case <$> traverse (mapTermM f) elim <*> mapTermM f t <*> mapM (\(p, c) -> (,) <$> mapTermM f p <*> traverse (mapTermM f) c) cs
       TyT -> return TyT
       Wild -> return Wild
       (V v) -> return $ V v

@@ -20,11 +20,13 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveShallow, resolveDeep)
+import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveDeep, resolveShallow)
 import Checking.Utils (showSolvedMetas)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
+import Debug.Trace (traceM)
+import Interface.Pretty (Print (printVal))
 import Lang
   ( PiMode (..),
     Term (..),
@@ -32,8 +34,6 @@ import Lang
     Var (..),
     lams,
   )
-import Interface.Pretty (Print(printVal))
-import Debug.Trace (traceM)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -98,16 +98,19 @@ unifyTerms a' b' = do
       if l == r
         then return ()
         else normaliseAndUnifyTerms a b
-    unifyTerms' (Term (Case _ su1 cs1) _) (Term (Case _ su2 cs2) _) = do
+    unifyTerms' a@(Term (Case _ su1 cs1) _) b@(Term (Case _ su2 cs2) _) = do
       unifyTerms su1 su2
       mapM_
         ( \((p1, t1), (p2, t2)) -> do
             unifyTerms p1 p2
-            unifyTerms t1 t2
+            case (t1, t2) of
+              (Just t1', Just t2') -> unifyTerms t1' t2'
+              (Nothing, Nothing) -> return ()
+              _ -> throwError $ Mismatch a b
         )
         (zip cs1 cs2)
     unifyTerms' a@(Term (App m1 l1 l2) _) b@(Term (App m2 r1 r2) _)
-      | m1 == m2 =
+      | m1 == m2 = -- @@Fixme : This is wrong! Inconsistent for non-injective l1/r1
           do
             unifyTerms l1 r1
             unifyTerms l2 r2
@@ -120,8 +123,9 @@ introSubst v t = do
   s <- inCtx (lookupSubst v)
   case s of
     Nothing -> modifyCtx (addSubst v t)
-    Just t' -> do
-      unifyTerms t t' `catchError` (\_ -> return ()) -- If the terms don't unify, just ignore the substitution.
+    Just t' -> unifyTerms t t'
+      -- @@Fixme: if they dont unify because we *don't know if they are equal* we should just remove the previous substitution??
+      -- unifyTerms t t' `catchError` (\_ -> return ()) -- If the terms don't unify, just ignore the substitution.
 
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()
@@ -189,7 +193,7 @@ validateProb hole spine rhs = do
         Case e t cs -> do
           e' <- traverse (validateRhs vs) e
           t' <- validateRhs vs t
-          cs' <- mapM (\(p, c) -> (,) <$> validateRhs vs p <*> validateRhs vs c) cs
+          cs' <- mapM (\(p, c) -> (,) <$> validateRhs vs p <*> traverse (validateRhs vs) c) cs
           return $ Term (Case e' t' cs') r'.dat
         App m t1 t2 -> do
           t1' <- validateRhs vs t1

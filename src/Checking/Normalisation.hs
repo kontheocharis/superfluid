@@ -119,9 +119,11 @@ normaliseTerm sig (Term (App m t1 t2) d1) = do
 normaliseTerm sig (Term (Case e s cs) d1) =
   foldr
     ( \(p, c) acc ->
-        acc <|> do
-          sb <- tryCaseMatch sig s p
-          return (sub sb c)
+        case c of
+          Just c' -> acc <|> do
+            sb <- tryCaseMatch sig s p
+            return (sub sb c')
+          Nothing -> acc
     )
     Nothing
     cs

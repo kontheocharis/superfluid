@@ -78,7 +78,12 @@ instance Print TermValue where
       ++ curlies
         ( intercalate
             ",\n"
-            (map (\(p, c) -> printVal p ++ " => " ++ printVal c) cs)
+            ( map
+                ( \(p, c) ->
+                    printVal p ++ " => " ++ maybe "!" printVal c
+                )
+                cs
+            )
         )
   printVal TyT = "Type"
   printVal Wild = "_"
@@ -90,13 +95,11 @@ instance Print TermValue where
   printVal (Rep s) = "repr " ++ printSingleVal s
   printVal (Unrep n s) = "unrepr " ++ n ++ " " ++ printSingleVal s
 
-
 instance Print Lit where
   printVal (NatLit i) = show i
   printVal (FinLit i n) = show i ++ "n" ++ printSingleVal n
   printVal (StringLit s) = show s
   printVal (CharLit c) = show c
-
 
 instance Print Loc where
   printVal NoLoc = ""

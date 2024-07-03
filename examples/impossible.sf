@@ -1,0 +1,14 @@
+
+
+def minus-one : (n : Nat) -> Fin n -> Nat {
+  \n f => case f {
+    fz => case n {
+      z => !,
+      s n' => n',
+    },
+    fs f' => case n {
+      z => !,
+      s n' => n'
+    }
+  }
+}

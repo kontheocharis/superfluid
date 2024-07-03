@@ -44,7 +44,7 @@ import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
 import Checking.Utils (showHole, showSolvedMetas)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
-import Control.Monad.Except (throwError)
+import Control.Monad.Except (throwError, runExceptT, tryError)
 import Control.Monad.State (get, gets, modify, put)
 import Data.Foldable (find)
 import Data.List (sort)
@@ -508,25 +508,42 @@ inferOrCheckLet f var ty tm ret = do
   (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxEffect (introSubst var tm') $ f ret
   return ((ty'', tm', ret'), subVar var tm' typ')
 
-inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Term)] -> Tc ((Term, [(Pat, Term)]), [Type])
+inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Maybe Term)] -> Tc ((Term, [(Pat, Maybe Term)]), [Type])
 inferOrCheckCase f s cs = do
   (s', sTy) <- inferAtomicTerm s
   (cs', tys) <-
     mapAndUnzipM
       ( \(p, t) -> enterCtx $ do
-          pt' <- enterPat $ do
-            (pt', _) <- checkTerm p sTy
+          case t of
+            Nothing -> do
+              -- Ensure that checking the pattern is impossible
+              pt' <- tryError . enterPat $ do
+                (pt', _) <- checkTerm p sTy
+                -- If the subject is a variable,
+                -- then we can unify with the pattern for dependent
+                -- pattern matching.
+                case s' of
+                  Term (V _) _ -> unifyTerms pt' s'
+                  _ -> return ()
+              case pt' of
+                Left _ -> do
+                  m <- freshMeta
+                  return ((p, Nothing), m)
+                Right _ -> throwError $ PatternNotImpossible p
+            Just t' -> do
+              pt' <- enterPat $ do
+                (pt', _) <- checkTerm p sTy
 
-            -- If the subject is a variable,
-            -- then we can unify with the pattern for dependent
-            -- pattern matching.
-            case s' of
-              Term (V _) _ -> unifyTerms pt' s'
-              _ -> return ()
+                -- If the subject is a variable,
+                -- then we can unify with the pattern for dependent
+                -- pattern matching.
+                case s' of
+                  Term (V _) _ -> unifyTerms pt' s'
+                  _ -> return ()
 
-            return pt'
-          (t', ty) <- f t
-          return ((pt', t'), ty)
+                return pt'
+              (t'', ty) <- f t'
+              return ((pt', Just t''), ty)
       )
       cs
 
