@@ -12,13 +12,13 @@ data ByteVec : (n : Nat) -> Type {
 }
 
 data UdpPacket : Type {
-  mk-udp-packet :
-    (src-port : Word) ->
-    (dst-port : Word) ->
-    (len : Word) ->
-    (checksum : Word) ->
-    (contents : ByteVec (fin-to-nat len)) ->
-    UdpPacket
+  mk-udp-packet : (
+    src-port : Word,
+    dst-port : Word,
+    len : Word,
+    checksum : Word,
+    contents : ByteVec (fin-to-nat len),
+  ) -> UdpPacket
 }
 
 def handle-packet : Nat -> UdpPacket -> Maybe UdpPacket {
@@ -66,10 +66,6 @@ def main : IO Unit {
   let packet-size : Word = 20000n;
 
   let contents = repeat (fin-to-nat packet-size) 42n;
-
-  let b : ByteVec _ = ..;
-
-  let packet = byte-buffer-to-udp-packet b;
 
   let test-packet = mk-udp-packet
     2n
@@ -146,48 +142,79 @@ repr UdpRepr {
 }
 
 
--- data Prod : Type -> Type -> Type {
---   mk-prod : [A : Type] -> [B : Type] -> A -> B -> Prod A B
--- }
+data Prod : Type -> Type -> Type {
+  mk-prod : [A : Type] -> [B : Type] -> A -> B -> Prod A B
+}
 
--- def word-to-big-endian-bytes : Word -> Prod Byte Byte {
---   ?word-to-big-endian-bytes
--- }
+def word-to-big-endian-bytes : Word -> ByteVec 2 {
+  ?word-to-big-endian-bytes
+}
 
--- def rec write-other-byte-vec : [n : Nat, l : Nat] -> (src : ByteVec l) -> (i : Fin n) -> (target : ByteVec (add l n)) -> ByteVec (add l n) {
---   \src i target => case i {
---     fz => case src {
---       bcons b src' => bcons b target
---     },
---     fs i' => case src {
---       bcons b src' => bcons b (write-other-byte-vec src' i' target)
---     }
---   }
--- }
+data ByteVecMod : (n : Nat) -> Type {
+  bvm-chain : [n : Nat] -> ByteVecMod n -> ByteVecMod n -> ByteVecMod n,
+  bvm-return : [n : Nat] -> ByteVecMod n,
+  bvm-write : [n : Nat, l : Nat] -> (src : ByteVec l, start : Fin (s n)) -> ByteVecMod (add n l),
+}
 
--- def rec write-word-big-endian : (w : Word) -> [n : Nat] -> (i : Fin n) -> ByteVec (s (s n)) -> ByteVec (s (s n)) {
---   \w i xs => {
---     let bytes = word-to-big-endian-bytes w;
---     case bytes {
---       mk-prod b1 b2 => case i {
---         fz => case xs {
---           bcons b xs' => case xs' {
---             bcons b' xs'' => bcons b1 (bcons b2 xs'')
---           },
---         },
---         fs i' => case xs {
---           bcons b xs' => bcons b (write-word-big-endian w i' xs'),
---         }
---       }
---     }
---   }
--- }
+def add-comm : [n : Nat] -> [m : Nat] -> Equal (add n m) (add m n) {
+  ?add-comm
+}
 
+def bvm-write-word : [n : Nat] -> (src : Word, start : Fin (s n)) -> ByteVecMod (add 2 n) {
+  \src start => subst (\n => ByteVecMod n) add-comm (bvm-write (word-to-big-endian-bytes src) start)
+}
 
--- def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
---   ?udp-packet-to-buffer
--- }
+def bvm-read-word : [n : Nat] -> (start : Fin (s n), src : ByteVec (add 2 n)) -> Word {
+  ?bvm-read-word
+}
 
--- def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> UdpPacket {
---   ?buffer-to-udp-packet
--- }
+def bvm-read : [n : Nat] -> (start : Fin (s n), l : Nat, src : ByteVec (add n l)) -> ByteVec l {
+  ?bvm-read
+}
+
+def rec apply-bvm : [n : Nat] -> ByteVecMod n -> ByteVec n -> ByteVec n {
+  ?apply-byte-vec-mod
+}
+
+data UdpParseError : Type {
+  invalid-length : UdpParseError,
+}
+
+def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
+  \u => case u {
+    mk-udp-packet src-port dst-port len checksum contents => {
+      let len' = fin-to-nat len;
+      let total-len = add 8 len';
+      let mods : ByteVecMod total-len = {
+        bvm-chain (bvm-write-word src-port 0n)
+        (bvm-chain (bvm-write-word dst-port 2n)
+        (bvm-chain (bvm-write-word len 4n)
+        (bvm-chain (bvm-write-word checksum 6n)
+        (bvm-write contents 8n))))
+      };
+      let b = apply-bvm mods (repeat total-len 0n);
+      (len', b)
+    }
+  }
+}
+
+def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> Either UdpParseError UdpPacket {
+  \[l] xs => {
+    let src-port = bvm-read-word 0n xs;
+    let dst-port = bvm-read-word 2n xs;
+    let len = bvm-read-word 4n xs;
+    let checksum = bvm-read-word 6n xs;
+    let contents = bvm-read 8n l xs;
+    case (nat-eq l (fin-to-nat len)) {
+      yes p => right (
+        mk-udp-packet
+          src-port
+          dst-port
+          len
+          checksum
+          (subst (\n => ByteVec n) p contents)
+      ),
+      no _ => left invalid-length
+    }
+  }
+}

@@ -6,3 +6,41 @@ def rec nat-ind : (n : Nat) -> (P : Nat -> Type) -> P z -> ((n' : Nat) -> P n' -
     s n' => r n' (nat-ind n' P b r),
   }
 }
+
+data Vec : Type -> Nat -> Type {
+  vnil : [A : Type] -> Vec A z,
+  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n),
+}
+
+data MVec : Type -> Nat -> Type {
+  mvnil : [A : Type] -> MVec A z,
+  mvcons : [A : Type] -> [n : Nat] -> A -> MVec A n -> MVec A (s n),
+}
+
+def rec vec-ind : (P : (A : Type) -> (n : Nat) -> Vec A n -> Type)
+  -> ([A : Type] -> P A z vnil)
+  -> ([A : Type] -> [n' : Nat] -> (x : A) -> (xs' : Vec A n') -> P A n' xs' -> P A (s n') (vcons x xs'))
+  -> [A : Type] -> [m : Nat] -> (xs : Vec A m) -> P A m xs
+{
+  \P b r xs => case xs {
+    vnil => b,
+    vcons x xs' => r x xs' (vec-ind P b r xs'),
+  }
+}
+
+def typeof : [A : Type] -> A -> Type {
+  \[A] a => A
+}
+
+repr VecAsMVec {
+  data Vec A n as MVec A n {
+    vnil [A] as mvnil [A],
+    vcons [A] [n] x xs as mvcons [A] [n] x (repr xs),
+    case l {
+      vnil => b,
+      vcons => r
+    } as {
+      ?h1
+    }
+  }
+}

@@ -164,6 +164,11 @@ data Maybe : Type -> Type {
   just : [A : Type] -> A -> Maybe A
 }
 
+data Either : Type -> Type -> Type {
+  left : [A : Type, B : Type] -> A -> Either A B,
+  right : [A : Type, B : Type] -> B -> Either A B
+}
+
 data Equal : [A : Type] -> A -> A -> Type {
   refl : [A : Type] -> [x : A] -> Equal x x
 }
@@ -186,6 +191,17 @@ data Vec : Type -> Nat -> Type {
 data Fin : Nat -> Type {
   fz : [n : Nat] -> Fin (s n),
   fs : [n : Nat] -> Fin n -> Fin (s n)
+}
+
+data Empty : Type {}
+
+def void : [A : Type] -> Empty -> A {
+  \m => case m {}
+}
+
+data Dec : Type -> Type {
+  yes : [A : Type] -> A -> Dec A,
+  no : [A : Type] -> (A -> Empty) -> Dec A
 }
 
 def rec add : Nat -> Nat -> Nat {
@@ -310,6 +326,62 @@ def rec index : [A : Type] -> Nat -> List A -> Maybe A {
     cons x xs' => case n {
       z => just x,
       s n' => index n' xs'
+    }
+  }
+}
+
+def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
+  \P e p => case e {
+    refl => p
+  }
+}
+
+def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
+  \f e => case e {
+    refl => refl
+  }
+}
+
+def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
+  \e => case e {
+    refl => refl
+  }
+}
+
+def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
+  \p => subst (\n => case n {
+    z => Unit,
+    s _ => Empty,
+  }) p tt
+}
+
+def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
+  \m p => m (sym p)
+}
+
+-- @@Fixme : this can prove that any f : A -> B is injective!!
+def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
+  \e => case e {
+    refl => refl
+  }
+}
+
+def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
+  \m p => m (s-inj p)
+}
+
+def rec nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
+  \n m => case n {
+    z => case m {
+      z => yes refl,
+      s m' => no z-neq-s,
+    },
+    s n' => case m {
+      z => no (co-sym z-neq-s),
+      s m' => case nat-eq n' m' {
+        yes e => yes (cong s e),
+        no f => no (s-co-cong f)
+      }
     }
   }
 }

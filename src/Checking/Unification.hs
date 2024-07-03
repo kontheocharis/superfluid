@@ -20,7 +20,7 @@ import Checking.Context
     solveMeta,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveShallow)
+import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveShallow, resolveDeep)
 import Checking.Utils (showSolvedMetas)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
@@ -32,6 +32,8 @@ import Lang
     Var (..),
     lams,
   )
+import Interface.Pretty (Print(printVal))
+import Debug.Trace (traceM)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -90,8 +92,8 @@ unifyTerms a' b' = do
     unifyTerms' (Term (V l) _) (Term (V r) _) | l == r = return ()
     unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = do
       unifyVarWithTerm a l b `catchError` (\_ -> unifyVarWithTerm b r a)
-    unifyTerms' a@(Term (V l) _) b = unifyVarWithTerm a l b
-    unifyTerms' a b@(Term (V r) _) = unifyVarWithTerm b r a
+    unifyTerms' a@(Term (V l) _) b = unifyVarWithTerm a l b `catchError` (\_ -> normaliseAndUnifyTerms a b)
+    unifyTerms' a b@(Term (V r) _) = unifyVarWithTerm b r a `catchError` (\_ -> normaliseAndUnifyTerms a b)
     unifyTerms' a@(Term (Global l) _) b@(Term (Global r) _) =
       if l == r
         then return ()
@@ -125,16 +127,19 @@ introSubst v t = do
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()
 normaliseAndUnifyTerms l r = do
   sig <- gets (\s -> s.signature)
-  let l' = normaliseTerm sig l
-  case l' of
+  l' <- resolveDeep l
+  let l'' = normaliseTerm sig l'
+  case l'' of
     Nothing -> do
-      let r' = normaliseTerm sig r
-      case r' of
+      r' <- resolveDeep r
+      let r'' = normaliseTerm sig r'
+      case r'' of
         Nothing -> do
-          throwError $ Mismatch l r
-        Just r'' -> unifyTerms l r''
-    Just l'' -> do
-      unifyTerms l'' r
+          throwError $ Mismatch l' r'
+        Just r''' -> do
+          unifyTerms l r'''
+    Just l''' -> do
+      unifyTerms l''' r
 
 -- | Validate a pattern unification problem, returning the spine variables.
 validateProb :: Var -> [Term] -> Term -> Tc ([Var], Term)

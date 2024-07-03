@@ -116,7 +116,7 @@ normaliseTerm _ (Term (App m (Term (Lam m' v t1) _) t2) _)
 normaliseTerm sig (Term (App m t1 t2) d1) = do
   t1' <- normaliseTerm sig t1
   return (Term (App m t1' t2) d1)
-normaliseTerm sig (Term (Case _ s cs) _) =
+normaliseTerm sig (Term (Case e s cs) d1) =
   foldr
     ( \(p, c) acc ->
         acc <|> do
@@ -125,6 +125,10 @@ normaliseTerm sig (Term (Case _ s cs) _) =
     )
     Nothing
     cs
+    <|> ( case normaliseTerm sig s of
+            Just s' -> Just (Term (Case e s' cs) d1)
+            Nothing -> Nothing
+        )
 normaliseTerm sig (Term (Global g) _) = maybeExpand sig g
 normaliseTerm sig (Term (Rep r) _) = tryExpandRep sig r
 normaliseTerm _ _ = Nothing -- @@Todo: normalise declarations
@@ -235,6 +239,9 @@ resolveShallow (Term (Meta h) d) = do
 resolveShallow (Term (App m t1 t2) d) = do
   t1' <- resolveShallow t1
   return $ normaliseTermFully mempty (Term (App m t1' t2) d)
+resolveShallow (Term (Case e s cs) d) = do
+  s' <- resolveShallow s
+  return $ Term (Case e s' cs) d
 resolveShallow t = return t
 
 resolveDeep :: Term -> Tc Term

@@ -41,7 +41,7 @@ var repeat = (n38) => (b39) => ((n38) === (0)) ? ((Buffer.allocUnsafe)(0)) : (((
   var b_p_96 = (((b95).writeUInt8)(b39, 0), b95);
   return (((xs_p_90).copy)(b_p_96, 1, 0, old_len91), b_p_96);
 })());
-var io_mapM_ = (v189189) => (f53) => (xs54) => (() => {
+var io_mapM_ = (v191191) => (f53) => (xs54) => (() => {
   var l_p_379 = xs54;
   return (((l_p_379).length) === (0)) ? ((() => ["tt"])) : ((() => {
     var m61 = (() => (((_63) => (((io_mapM_)(null))(f53))((l_p_379).slice(1, (l_p_379).length)))(((f53)((l_p_379)[0]))()))());
@@ -68,4 +68,6 @@ var main = (() => {
     return ((result77) === (null)) ? (((debug_print)(null))("No UDP packet!")) : (((debug_print)(null))(result77));
   })())((((debug_print)(null))(i74))()))())))((count_to)(2000));
 })();
+var word_to_big_endian_bytes = null;
+var write_other_byte_vec = (v274274) => (v275275) => null;
 (main)()
