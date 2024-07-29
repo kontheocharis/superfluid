@@ -17,25 +17,15 @@ import Checking.Context
     TcState (..),
     classifyApp,
     findReprForGlobal',
-    freshVar,
-    inCtx,
-    inSignature,
     lookupItemOrCtor,
-    lookupSubst,
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
-import Control.Monad.State (evalState, get, gets, put, runState)
-import Criterion.Types (fromInt)
-import Data.Foldable (toList)
-import Data.List (intercalate)
+import Control.Monad.State (gets)
 import Data.Map (lookup, (!?))
-import Debug.Trace (traceM)
 import GHC.Natural (Natural)
-import Interface.Pretty (printVal)
 import Lang
-  ( DeclItem (DeclItem),
-    HasLoc (..),
+  ( HasLoc (..),
     Item (..),
     Lit (..),
     MapResult (..),

@@ -60,8 +60,7 @@ import Checking.Errors (TcError (..))
 import Control.Applicative ((<|>))
 import Control.Monad (join)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (MonadState (..), StateT (runStateT), gets, modify, runState)
-import Control.Monad.State.Lazy (StateT)
+import Control.Monad.State (MonadState (..), StateT (runStateT), gets, modify)
 import Data.List (find, intercalate)
 import Data.Map (Map, empty, insert)
 import Data.Maybe (isJust)
@@ -96,7 +95,6 @@ import Lang
     locatedAt,
     mapTermM,
   )
-import Debug.Trace (traceM)
 
 -- | A typing judgement.
 data Judgement = Typing Var Type | Subst Var Term

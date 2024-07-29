@@ -1,16 +1,13 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
 module Codegen.Generate (Gen, runGen, generateProgram, JsProg (..), renderJsProg) where
 
-import Checking.Context (Signature, asSig, classifyApp, lookupItemOrCtor, patVarToVar)
+import Checking.Context (asSig, lookupItemOrCtor)
 import Checking.Normalisation (normaliseTermFully)
-import Checking.Vars (Sub)
 import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
-import Debug.Trace (traceM)
 import Interface.Pretty (Print (printVal), indentedFst)
-import Lang (CtorItem (..), DataItem (DataItem), DeclItem, Item (..), Lit (..), PiMode (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Type, Var (..), appToList, genTerm, lams, letToList, listToApp, name, piTypeToList, value)
-import Language.C (CExtDecl, CExternalDeclaration, CTranslUnit, CTranslationUnit (..), undefNode)
-import Language.JavaScript.Parser (JSAST (JSAstProgram), JSAnnot (JSNoAnnot), JSAssignOp (..), JSExpression (JSAssignExpression, JSIdentifier, JSStringLiteral), JSStatement (JSConstant))
-import Language.JavaScript.Parser.AST (JSCommaList (JSLOne), JSSemi (..))
+import Lang (CtorItem (..), DeclItem, Item (..), Lit (..), PiMode (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Var (..), appToList, genTerm, lams, letToList, listToApp, name, value)
 
 data GenState = GenState
   { decls :: [JsStat],
@@ -204,7 +201,7 @@ generateGlobal :: String -> [JsExpr] -> Gen JsExpr
 generateGlobal name args = do
   sig <- gets (\s -> asSig s.program)
   case lookupItemOrCtor name sig of
-    Just (Left (Decl d)) -> return $ foldl jsApp (jsGlobal d.name) args
+    Just (Left (Decl d)) -> return $ foldl jsApp (jsGlobal d.name) args -- %%TODO: make lambda if needed
     Just (Left (Data _)) -> return jsNull
     Just (Left (Repr _)) -> return jsNull
     Just (Left (Prim p)) -> generatePrim p.name args

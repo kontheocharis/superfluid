@@ -14,7 +14,6 @@ import Checking.Context
     addEmptyRepr,
     addItem,
     addItemToRepr,
-    addSubst,
     addTyping,
     addTypings,
     enterCtx,
@@ -31,27 +30,23 @@ import Checking.Context
     inCtx,
     inSignature,
     lookupItemOrCtor,
-    lookupSubst,
     lookupType,
     modifyCtx,
     modifySignature,
     setType,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (expandLit, fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
-import Checking.Representation (representCtx, representTerm)
+import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
 import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole, showSolvedMetas)
+import Checking.Utils (showHole)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
-import Control.Monad.Except (throwError, runExceptT, tryError)
+import Control.Monad.Except (throwError, tryError)
 import Control.Monad.State (get, gets, modify, put)
 import Data.Foldable (find)
 import Data.List (sort)
 import Data.Map (insert)
-import Data.Maybe (fromJust, isJust)
-import Debug.Trace (traceM)
-import Interface.Pretty (printVal)
+import Data.Maybe (fromJust)
 import Lang
   ( CtorItem (..),
     DataItem (..),
@@ -85,7 +80,7 @@ import Lang
     piTypeToList,
     termDataAt,
   )
-import Lang as DI (DeclItem (..), Lit (StringLit))
+import Lang as DI (DeclItem (..))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program

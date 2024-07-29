@@ -7,7 +7,6 @@ import Checking.Context
     enterSignatureMod,
     findReprForCase,
     findReprForGlobal,
-    freshMeta,
     getDataItem,
     inSignature,
     modifyCtxM,
@@ -29,11 +28,6 @@ import Lang
     Pat,
     PiMode (..),
     Program (..),
-    ReprDataCaseItem (ReprDataCaseItem),
-    ReprDataCtorItem (ReprDataCtorItem),
-    ReprDataItem (ReprDataItem),
-    ReprItem (..),
-    ReprSomeItem (ReprData),
     Term (..),
     TermMappable (mapTermMappableM),
     TermValue (..),
@@ -44,7 +38,6 @@ import Lang
     lams,
     listToApp,
     mapTermM,
-    piTypeToList,
   )
 
 -- | Represent a checked program

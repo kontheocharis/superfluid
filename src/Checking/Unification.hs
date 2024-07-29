@@ -11,7 +11,6 @@ import Checking.Context
     TcState (..),
     addSubst,
     classifyApp,
-    enterCtxMod,
     freshMeta,
     inCtx,
     lookupSubst,
@@ -21,12 +20,9 @@ import Checking.Context
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveDeep, resolveShallow)
-import Checking.Utils (showSolvedMetas)
 import Checking.Vars (alphaRename)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
-import Debug.Trace (traceM)
-import Interface.Pretty (Print (printVal))
 import Lang
   ( PiMode (..),
     Term (..),

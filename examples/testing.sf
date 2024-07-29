@@ -4,6 +4,66 @@ data Lam : Type {
   lam : Lam -> Lam,
 }
 
+data Lazy : Type -> Type {
+  lazy : [A : Type] -> (Unit -> A) -> Lazy A
+}
+
+data List : Type -> Type {
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A
+}
+
+data Bits : Nat -> Type {
+  empty : Bits z,
+  is-on : Bits n -> Bool -> Bits (s n),
+}
+
+data Integer : Type {
+  neg : Nat -> Integer,
+  pos : Nat -> Integer,
+  zero-is-zero : neg 0 = pos 0
+}
+
+data Rational : Type {
+  rational : Integer -> Integer -> Rational
+  divisors : [a : Integer, b : Integer, c : Integer] -> rational a b = rational (mul a c) (mul b c)
+}
+
+data Float64OrNaN : Type {
+  float64 : Float64,
+  nan : Float64
+}
+
+data Float64 : Type {
+  float64 : (sign : Bool, exp : Fin (pow 2 11), mantissa : Fin (pow 2 53)) -> Float64
+}
+
+def concat-bits : [m, n : Nat] -> Bits n -> Bits m -> Bits (add m n) {
+  \m n b1 b2 => case b2 {
+    empty => b1,
+    is-on b2' b => is-on (concat-bits m n b1 b2') b
+  }
+}
+
+repr data Float64 as Bits 64 {
+  float64 sign exp mantissa as concat-bits (repr sign) (concat-bits (repr exp) (repr mantissa))
+  case l {
+    float64 => b,
+  } as {
+    b (unrepr Bool (slice l 0 1)) (unrepr Fin (slice l 1 12)) (unrepr Fin (slice l 12 64))
+  }
+}
+
+def float64-add : Float64 -> Float64 -> Float64 {
+  \n m => unrepr Float64 (intrinsic-f64-add (repr n) (repr m))
+}
+
+def force : [A : Type] -> Lazy A -> A {
+  \l => case l {
+    mk-lazy _ f => f unit
+  }
+}
+
 def rec fib : Nat -> Nat {
   \n => case n {
     z => z,
