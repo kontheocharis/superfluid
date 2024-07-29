@@ -34,6 +34,7 @@ instance Print TermValue where
 
   printVal (PiT Explicit v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") -> " ++ printVal t2
   printVal (PiT Implicit v t1 t2) = "[" ++ printVal v ++ " : " ++ printVal t1 ++ "] -> " ++ printVal t2
+  printVal (PiT Instance v t1 t2) = "[[" ++ printVal v ++ " : " ++ printVal t1 ++ "]] -> " ++ printVal t2
   printVal l@(Lam {}) =
     let (vs, b) = lamsToList (genTerm l)
      in "\\"
@@ -43,6 +44,7 @@ instance Print TermValue where
                 ( \(m, v) -> case m of
                     Explicit -> printSingleVal v
                     Implicit -> "[" ++ printVal v ++ "]"
+                    Instance -> "[[" ++ printVal v ++ "]]"
                 )
                 vs
             )
@@ -60,6 +62,7 @@ instance Print TermValue where
                 ( \(m, x') -> case m of
                     Explicit -> printSingleVal x'
                     Implicit -> "[" ++ printVal x' ++ "]"
+                    Instance -> "[[" ++ printVal x' ++ "]]"
                 )
                 xs
             )

@@ -74,7 +74,7 @@ type GlobalName = String
 data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Generic, Data, Typeable, Show)
 
 -- | Whether a pi type is implicit or explicit.
-data PiMode = Implicit | Explicit deriving (Eq, Generic, Data, Typeable, Show)
+data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | A literal
 data Lit = StringLit String | CharLit Char | NatLit Natural | FinLit Natural Term deriving (Eq, Generic, Data, Typeable, Show)

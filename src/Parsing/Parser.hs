@@ -47,11 +47,8 @@ import Parsing.Resolution (resolveGlobalsRec)
 import Text.Parsec (Parsec, between, char, choice, eof, getPosition, getState, many, many1, modifyState, noneOf, notFollowedBy, optionMaybe, optional, putState, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>))
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
-import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
-import Text.Parsec.Token (GenTokenParser)
-import Text.ParserCombinators.Parsec.Token (makeTokenParser)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState

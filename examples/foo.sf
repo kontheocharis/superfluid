@@ -1,3 +1,44 @@
+data Functor : (Type -> Type) -> Type {
+  mk-functor : [F : Type -> Type] -> ([A : Type] -> [B : Type] -> (A -> B) -> F A -> F B) -> Functor F
+}
+
+data Monad : (Type -> Type) -> Type {
+  mk-monad : [M : Type -> Type] ->
+    Functor M ->
+    (return : [A : Type] -> A -> M A) ->
+    (bind : [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B) ->
+    Monad M
+}
+
+-- #instance
+def io-is-functor : Functor IO {
+  mk-functor (\f a => io-bind a (\x => io-return (f x)))
+}
+
+-- #instance
+def io-is-monad : Monad IO {
+  mk-monad io-is-functor (\a => io-return a) (\a b => io-bind a b)
+}
+
+-- def fmap : [F : Type -> Type] -> [[Functor F]] -> [A : Type] -> [B : Type] -> (A -> B) -> (F A -> F B) {
+--   \m => case m {
+--     mk-functor _ f => f
+--   }
+-- }
+
+-- def return : [M : Type -> Type] -> [[Monad M]] -> [A : Type] -> A -> M A {
+--   \m => case m {
+--     mk-monad _ _ r _ => r
+--   }
+-- }
+
+-- def bind : [M : Type -> Type] -> [[Monad M]] -> [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B {
+--   \m => case m {
+--     mk-monad _ _ _ b => b
+--   }
+-- }
+
 def main : IO Unit {
+  let x = 3;
   io-return tt
 }

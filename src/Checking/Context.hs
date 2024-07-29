@@ -460,7 +460,7 @@ globalAppSubjectNameM p =
 
 -- | A version of `findReprForGlobal` that returns the result directly.
 findReprForGlobal' :: Signature -> String -> Maybe ([(PiMode, Var)], Term)
-findReprForGlobal' sig s = case runStateT (findReprForGlobal s) (emptyTcState {signature = sig}) of
+findReprForGlobal' si s = case runStateT (findReprForGlobal s) (emptyTcState {signature = si}) of
   Right (r, _) -> r
   Left e -> error $ "findReprForGlobal' failed: " ++ show e
 
