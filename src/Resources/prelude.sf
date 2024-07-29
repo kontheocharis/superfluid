@@ -296,6 +296,13 @@ def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
   }
 }
 
+def rec length : [A : Type] -> List A -> Nat {
+  \xs => case xs {
+    nil => z,
+    cons _ xs' => s (length xs'),
+  }
+}
+
 def rec map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
   \f xs => case xs {
     nil => nil,
@@ -481,6 +488,7 @@ repr def index as {
   }
 }
 
+repr def length as \l => unrepr Nat (js-length (repr l))
 repr def map as \f xs => unrepr List (js-map (cast f) (repr xs))
 repr def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) (repr xs))
 

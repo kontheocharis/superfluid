@@ -398,7 +398,8 @@ inferTerm' (Term (App m t1 t2) d1) = do
     (Term (PiT Implicit _ _ _) _) -> goImplicit
     _ -> do
       sig <- gets (\s -> s.signature)
-      let subjectTy' = normaliseTerm sig subjectTyRes
+      c <- gets (\s -> s.ctx)
+      let subjectTy' = normaliseTerm c sig subjectTyRes
       subjectTyRes' <- case subjectTy' of
         Just t -> Just <$> resolveShallow t
         Nothing -> return Nothing
@@ -571,7 +572,8 @@ checkTerm :: Term -> Type -> Tc (Term, Type)
 checkTerm v t = do
   tResolved <- resolveShallow t
   (v', t') <- checkTerm' v tResolved
-  let t'' = normaliseTermFully mempty t'
+  c <- gets (\s -> s.ctx)
+  let t'' = normaliseTermFully c mempty t'
   v'' <- setType v' t''
   return (v'', t'')
 

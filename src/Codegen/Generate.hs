@@ -161,7 +161,7 @@ generateExpr (Term (Case _ t cs) _) = do
                       args
                       [1 .. length args]
                   )
-          let body' = normaliseTermFully mempty body
+          let body' = normaliseTermFully mempty mempty body
           body'' <- generateExpr body'
           return (p', body'')
       )

@@ -1,0 +1,24 @@
+
+data Elem : [A : Type] -> A -> List A -> Type {
+  here : [A : Type] -> [x : A] -> [xs : List A] -> Elem x (cons x xs),
+  there : [A : Type] -> [x : A] -> [y : A] -> [xs : List A] -> Elem x xs -> Elem x (cons y xs)
+}
+
+def elem-value : [A : Type] -> [x : A] -> [xs : List A] -> Elem x xs -> A {
+  \[A] [x] [xs] e => x
+}
+
+def rec elem-index : [A : Type] -> [x : A] -> [xs : List A] -> Elem x xs -> Fin (length xs) {
+  \e => case e {
+    here => fz,
+    there e' => fs (elem-index e')
+  }
+}
+
+data Enum : Type -> Type {
+  mk-enum : [A : Type] -> (l : List A) -> ((a : A) -> Elem a l) -> Enum A
+}
+
+data Flags : Type -> Type {
+  mk-flags : [A : Type] -> Enum A -> (A -> Bool) -> Flags A
+}

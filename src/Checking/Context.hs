@@ -102,6 +102,12 @@ instance Show Judgement where
 -- | A context, represented as a list of typing judgements.
 newtype Ctx = Ctx [Judgement]
 
+instance Semigroup Ctx where
+  Ctx a <> Ctx b = Ctx (a <> b)
+
+instance Monoid Ctx where
+  mempty = Ctx []
+
 instance TermMappable Judgement where
   mapTermMappableM f (Typing v ty) = Typing v <$> mapTermM f ty
   mapTermMappableM f (Subst v t) = Subst v <$> mapTermM f t

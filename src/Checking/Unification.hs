@@ -126,13 +126,14 @@ introSubst v t = do
 -- | Unify two terms, normalising them first.
 normaliseAndUnifyTerms :: Term -> Term -> Tc ()
 normaliseAndUnifyTerms l r = do
+  c <- gets (\s -> s.ctx)
   sig <- gets (\s -> s.signature)
   l' <- resolveDeep l
-  let l'' = normaliseTerm sig l'
+  let l'' = normaliseTerm c sig l'
   case l'' of
     Nothing -> do
       r' <- resolveDeep r
-      let r'' = normaliseTerm sig r'
+      let r'' = normaliseTerm c sig r'
       case r'' of
         Nothing -> do
           throwError $ Mismatch l' r'
@@ -205,7 +206,7 @@ validateProb hole spine rhs = do
 solve :: Var -> [Term] -> Term -> Tc ()
 solve hole spine rhs = do
   (vars, rhs') <- validateProb hole spine rhs
-  let solution = normaliseTermFully mempty $ lams (map (Explicit,) vars) rhs'
+  let solution = normaliseTermFully mempty mempty $ lams (map (Explicit,) vars) rhs'
   solveMeta hole solution
 
 -- | Solve a pattern unification problem, or try another action if it fails.
