@@ -93,7 +93,8 @@ generateProgram p@(Program items) = do
 
 generateItem :: Item -> Gen ()
 generateItem (Data _) = return ()
-generateItem (Repr _) = error "Found repr item in generateItem"
+generateItem (ReprData _) = error "Found repr item in generateItem"
+generateItem (ReprDecl _) = error "Found repr item in generateItem"
 generateItem (Decl d) = generateDeclItem d
 generateItem (Prim _) = return ()
 
@@ -203,7 +204,8 @@ generateGlobal name args = do
   case lookupItemOrCtor name sig of
     Just (Left (Decl d)) -> return $ foldl jsApp (jsGlobal d.name) args -- %%TODO: make lambda if needed
     Just (Left (Data _)) -> return jsNull
-    Just (Left (Repr _)) -> return jsNull
+    Just (Left (ReprData _)) -> return jsNull
+    Just (Left (ReprDecl _)) -> return jsNull
     Just (Left (Prim p)) -> generatePrim p.name args
     Just (Right c) -> generateCtor c.name args
     Nothing -> error $ "Global not found: " ++ name

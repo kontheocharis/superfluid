@@ -120,7 +120,8 @@ instance Print Term where
 instance Print Item where
   printVal (Decl d) = printVal d
   printVal (Data d) = printVal d
-  printVal (Repr r) = printVal r
+  printVal (ReprData r) = printVal r
+  printVal (ReprDecl r) = printVal r
   printVal (Prim p) = printVal p
 
 instance Print PrimItem where
@@ -151,20 +152,9 @@ instance Print DataItem where
 instance Print CtorItem where
   printVal (CtorItem name ty _ _) = name ++ " : " ++ printVal ty
 
-instance Print ReprItem where
-  printVal (ReprItem name cs) =
-    "repr "
-      ++ name
-      ++ " "
-      ++ curlies (intercalate "\n\n" (map printVal cs))
-
-instance Print ReprSomeItem where
-  printVal (ReprData d) = printVal d
-  printVal (ReprDecl d) = printVal d
-
 instance Print ReprDataItem where
   printVal (ReprDataItem src target ctors cse) =
-    "data "
+    "repr data "
       ++ printVal src
       ++ " as "
       ++ printVal target
@@ -192,7 +182,7 @@ instance Print ReprDataCaseItem where
       ++ printVal target
 
 instance Print ReprDeclItem where
-  printVal (ReprDeclItem name target) = "def " ++ name ++ " as " ++ printVal target
+  printVal (ReprDeclItem name target) = "repr def " ++ name ++ " as " ++ printVal target
 
 instance Print Program where
   printVal (Program ds) = intercalate "\n\n" $ map printVal ds

@@ -387,112 +387,102 @@ def rec nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
 }
 
 -- Default representations
+repr data Bool as JS {
+  true as js-true,
+  false as js-false,
 
-repr BoolAsBoolean {
-  data Bool as JS {
-    true as js-true,
-    false as js-false,
-
-    case b {
-      true => t,
-      false => f,
-    } as {
-      js-if (repr b) (cast t) (cast f)
-    }
-  }
-
-  def and as \a b => unrepr Bool (js-and (repr a) (repr b))
-  def or as \a b => unrepr Bool (js-or (repr a) (repr b))
-  def not as \a => unrepr Bool (js-not (repr a))
-}
-
-repr NatAsNumber {
-  data Nat as JS {
-    z as js-zero,
-    s n as js-plus js-one (repr n),
-    case n {
-      z => b,
-      s => r,
-    } as {
-      js-if (js-eqq (repr n) js-zero)
-        (cast b)
-        (cast (r (unrepr Nat (js-minus (repr n) js-one))))
-    }
-  }
-
-  def add as \a b => unrepr Nat (js-plus (repr a) (repr b))
-  def mul as \a b => unrepr Nat (js-times (repr a) (repr b))
-  def pow as \a b => unrepr Nat (js-pow (repr a) (repr b))
-  def is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
-}
-
-repr FinAsNumber {
-  data Fin n as JS {
-    fz as js-zero,
-    fs n as js-plus js-one (repr n),
-    case n {
-      fz => b,
-      fs => r,
-    } as {
-      js-if (js-eqq (repr n) js-zero)
-        (cast b)
-        (cast (r (unrepr Fin (js-minus (repr n) js-one))))
-    }
-  }
-
-  def fin-to-nat as \n => unrepr Nat (repr n)
-  def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
-  def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
-}
-
-repr MaybeAsNullable {
-  data Maybe A as JS { -- Here we really need a bound "A represents as JS"
-    nothing as js-null,
-    just a as to-js a,
-
-    case m {
-      nothing => n,
-      just => j,
-    } as {
-      js-if (js-eqq (repr m) js-null)
-        (cast n)
-        (cast (j (cast m)))
-    }
+  case b {
+    true => t,
+    false => f,
+  } as {
+    js-if (repr b) (cast t) (cast f)
   }
 }
 
-repr ListAsArray {
-  data List A as JS {
-    nil as js-empty-array,
-    cons x xs as js-array-extend-l (to-js x) (repr xs),
+repr def and as \a b => unrepr Bool (js-and (repr a) (repr b))
+repr def or as \a b => unrepr Bool (js-or (repr a) (repr b))
+repr def not as \a => unrepr Bool (js-not (repr a))
 
-    case l {
-      nil => n,
-      cons => c,
-    } as {
-      let l' = repr l;
-      js-if (js-eqq (js-length l') js-zero)
-        (cast n)
-        (cast (c (cast (js-index l' js-zero)) (unrepr List (js-slice l' js-one (js-length l')))))
-    }
+
+repr data Nat as JS {
+  z as js-zero,
+  s n as js-plus js-one (repr n),
+  case n {
+    z => b,
+    s => r,
+  } as {
+    js-if (js-eqq (repr n) js-zero)
+      (cast b)
+      (cast (r (unrepr Nat (js-minus (repr n) js-one))))
   }
-
-  def index as {
-    \i l => {
-      let l' = repr l;
-      let i' = repr i;
-
-      unrepr Maybe (
-        js-if (js-lt i' (js-length l'))
-          (cast (js-index l' i'))
-          (cast js-null)
-      )
-    }
-  }
-
-  def map as \f xs => unrepr List (js-map (cast f) (repr xs))
-  def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) (repr xs))
 }
+
+repr def add as \a b => unrepr Nat (js-plus (repr a) (repr b))
+repr def mul as \a b => unrepr Nat (js-times (repr a) (repr b))
+repr def pow as \a b => unrepr Nat (js-pow (repr a) (repr b))
+repr def is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
+
+repr data Fin n as JS {
+  fz as js-zero,
+  fs n as js-plus js-one (repr n),
+  case n {
+    fz => b,
+    fs => r,
+  } as {
+    js-if (js-eqq (repr n) js-zero)
+      (cast b)
+      (cast (r (unrepr Fin (js-minus (repr n) js-one))))
+  }
+}
+
+repr def fin-to-nat as \n => unrepr Nat (repr n)
+repr def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
+repr def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
+
+repr data Maybe A as JS { -- Here we really need a bound "A represents as JS"
+  nothing as js-null,
+  just a as to-js a,
+
+  case m {
+    nothing => n,
+    just => j,
+  } as {
+    js-if (js-eqq (repr m) js-null)
+      (cast n)
+      (cast (j (cast m)))
+  }
+}
+
+repr data List A as JS {
+  nil as js-empty-array,
+  cons x xs as js-array-extend-l (to-js x) (repr xs),
+
+  case l {
+    nil => n,
+    cons => c,
+  } as {
+    let l' = repr l;
+    js-if (js-eqq (js-length l') js-zero)
+      (cast n)
+      (cast (c (cast (js-index l' js-zero)) (unrepr List (js-slice l' js-one (js-length l')))))
+  }
+}
+
+repr def index as {
+  \i l => {
+    let l' = repr l;
+    let i' = repr i;
+
+    unrepr Maybe (
+      js-if (js-lt i' (js-length l'))
+        (cast (js-index l' i'))
+        (cast js-null)
+    )
+  }
+}
+
+repr def map as \f xs => unrepr List (js-map (cast f) (repr xs))
+repr def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) (repr xs))
 
 -- More definitions
 

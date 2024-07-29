@@ -21,12 +21,12 @@ data Bits : Nat -> Type {
 data Integer : Type {
   neg : Nat -> Integer,
   pos : Nat -> Integer,
-  zero-is-zero : neg 0 = pos 0
+  -- zero-is-zero : neg 0 = pos 0
 }
 
 data Rational : Type {
   rational : Integer -> Integer -> Rational
-  divisors : [a : Integer, b : Integer, c : Integer] -> rational a b = rational (mul a c) (mul b c)
+  -- divisors : [a : Integer, b : Integer, c : Integer] -> rational a b = rational (mul a c) (mul b c)
 }
 
 data Float64OrNaN : Type {
@@ -38,7 +38,7 @@ data Float64 : Type {
   float64 : (sign : Bool, exp : Fin (pow 2 11), mantissa : Fin (pow 2 53)) -> Float64
 }
 
-def concat-bits : [m, n : Nat] -> Bits n -> Bits m -> Bits (add m n) {
+def concat-bits : [m : Nat, n : Nat] -> Bits n -> Bits m -> Bits (add m n) {
   \m n b1 b2 => case b2 {
     empty => b1,
     is-on b2' b => is-on (concat-bits m n b1 b2') b
@@ -87,9 +87,7 @@ def rec nat-eq : Nat -> Nat -> Bool {
   }
 }
 
-repr NatEqAsEq {
-  def nat-eq as \n m => js-eqq n m
-}
+repr def nat-eq as \n m => js-eqq n m
 
 def rec subst : Lam -> Nat -> Lam -> Lam {
   \e n t => case e {

@@ -47,9 +47,10 @@ representProgram (Program decls) = do
   (reprs, rest) <-
     foldrM
       ( \x (reprs', rest') -> case x of
-          Repr r -> return (Repr r : reprs', rest')
+          ReprData r -> return (ReprData r : reprs', rest')
+          ReprDecl r -> return (ReprDecl r : reprs', rest')
           it -> do
-            itRepr <- enterSignatureMod (const (Signature decls)) $ findReprForGlobal (itemName it)
+            itRepr <- enterSignatureMod (const (Signature decls)) $ findReprForGlobal (fromJust $ itemName it)
             case itRepr of
               Nothing -> return (reprs', x : rest') -- Not a repr item, so retain
               Just _ -> return (reprs', rest') -- Already represented, so discard
@@ -144,7 +145,7 @@ representTermRec = \case
     r <- findReprForGlobal g
     case r of
       Nothing -> return Continue
-      Just (_, _, term) -> do
+      Just (_, term) -> do
         term' <- resolveDeep term
         return $ ReplaceAndContinue term'
   Term (Rep r) _ -> Replace <$> representTerm r
@@ -158,7 +159,7 @@ representTermRec = \case
             r <- findReprForCase g
             case r of
               Nothing -> return Continue
-              Just (_, term) -> do
+              Just term -> do
                 term' <- resolveDeep term
                 xs <- caseElimsToAppArgs g cs
                 s' <- resolveDeep s

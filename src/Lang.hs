@@ -18,8 +18,6 @@ module Lang
     PrimItem (..),
     DataItem (..),
     Lit (..),
-    ReprItem (..),
-    ReprSomeItem (..),
     ReprDataItem (..),
     ReprDeclItem (..),
     ReprDataCtorItem (..),
@@ -37,6 +35,8 @@ module Lang
     listToPiType,
     listToApp,
     itemName,
+    ItemId(..),
+    itemId,
     isValidPat,
     termLoc,
     genTerm,
@@ -71,7 +71,7 @@ type GlobalName = String
 
 -- | A variable
 -- Represented by a string name and a unique integer identifier (no shadowing).
-data Var = Var { name :: String, idx :: Int } deriving (Eq, Ord, Generic, Data, Typeable, Show)
+data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Generic, Data, Typeable, Show)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit deriving (Eq, Generic, Data, Typeable, Show)
@@ -235,26 +235,35 @@ lams ((m, v) : vs) t = Term (Lam m v (lams vs t)) (termDataAt t)
 data Item
   = Decl DeclItem
   | Data DataItem
-  | Repr ReprItem
+  | ReprData ReprDataItem
+  | ReprDecl ReprDeclItem
   | Prim PrimItem
   deriving (Eq, Generic, Data, Typeable, Show)
 
+-- | An identifier for an item in a signature.
+data ItemId
+  = DataId String
+  | DeclId String
+  | ReprDataId String
+  | ReprDeclId String
+  | PrimId String
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+-- | Get the identifier of an item.
+itemId :: Item -> ItemId
+itemId (Decl (DeclItem name _ _ _ _ _)) = DeclId name
+itemId (Data (DataItem name _ _)) = DataId name
+itemId (ReprData (ReprDataItem src _ _ _)) = ReprDataId (show src)
+itemId (ReprDecl (ReprDeclItem name _)) = ReprDeclId name
+itemId (Prim (PrimItem name _)) = PrimId name
+
 -- | Get the name of an item.
-itemName :: Item -> String
-itemName (Decl d) = d.name
-itemName (Data (DataItem name _ _)) = name
-itemName (Repr (ReprItem name _)) = name
-itemName (Prim (PrimItem name _)) = name
-
--- | A representation item is a name, label, inputs, and target term.
-data ReprItem = ReprItem
-  { name :: String,
-    contents :: [ReprSomeItem]
-  }
-  deriving (Eq, Generic, Data, Typeable, Show)
-
-data ReprSomeItem = ReprData ReprDataItem | ReprDecl ReprDeclItem
-  deriving (Eq, Generic, Data, Typeable, Show)
+itemName :: Item -> Maybe String
+itemName (Decl d) = Just d.name
+itemName (Data d) = Just d.name
+itemName (ReprData _) = Nothing
+itemName (ReprDecl _) = Nothing
+itemName (Prim p) = Just p.name
 
 data ReprDataCaseItem = ReprDataCaseItem
   { binds :: (Pat, Var, [(String, Pat)]), -- subjectBind, elimBind, [(ctorName, elimBind)]
@@ -383,12 +392,9 @@ mapCtorItemM f (CtorItem name ty idx d) = CtorItem name <$> mapTermM f ty <*> pu
 mapItemM :: (Monad m) => (Term -> m (MapResult Term)) -> Item -> m Item
 mapItemM f (Decl (DeclItem name ty term pos recu unf)) = Decl <$> (DeclItem name <$> mapTermM f ty <*> mapTermM f term <*> pure pos <*> pure recu <*> pure unf)
 mapItemM f (Data (DataItem name ty ctors)) = Data <$> (DataItem name <$> mapTermM f ty <*> mapM (mapCtorItemM f) ctors)
-mapItemM f (Repr (ReprItem name c)) = Repr . ReprItem name <$> mapM (mapReprSomeItemM f) c
+mapItemM f (ReprData d) = ReprData <$> mapReprDataItemM f d
+mapItemM f (ReprDecl d) = ReprDecl <$> mapReprDeclItemM f d
 mapItemM f (Prim (PrimItem name ty)) = Prim . PrimItem name <$> mapTermM f ty
-
-mapReprSomeItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprSomeItem -> m ReprSomeItem
-mapReprSomeItemM f (ReprData d) = ReprData <$> mapReprDataItemM f d
-mapReprSomeItemM f (ReprDecl d) = ReprDecl <$> mapReprDeclItemM f d
 
 mapReprDataItemM :: (Monad m) => (Term -> m (MapResult Term)) -> ReprDataItem -> m ReprDataItem
 mapReprDataItemM f (ReprDataItem src target ctors caseItem) =

@@ -8,12 +8,8 @@ where
 import Checking.Context
   ( Tc,
     TcState (..),
-    addCaseItemToRepr,
-    addCtorItemToRepr,
-    addEmptyDataItemToRepr,
-    addEmptyRepr,
+    addCaseItemToDataRepr,
     addItem,
-    addItemToRepr,
     addTyping,
     addTypings,
     enterCtx,
@@ -33,7 +29,7 @@ import Checking.Context
     lookupType,
     modifyCtx,
     modifySignature,
-    setType,
+    setType, addEmptyDataItem, modifyItem, addCtorItemToDataRepr,
   )
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
@@ -63,8 +59,6 @@ import Lang
     ReprDataCtorItem (..),
     ReprDataItem (..),
     ReprDeclItem (ReprDeclItem),
-    ReprItem (..),
-    ReprSomeItem (..),
     Term (..),
     TermMappable (mapTermMappableM),
     TermValue (..),
@@ -80,7 +74,7 @@ import Lang
     piTypeToList,
     termDataAt,
   )
-import Lang as DI (DeclItem (..))
+import Lang as DI (DeclItem (..), ItemId (ReprDataId))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -92,7 +86,8 @@ checkProgram (Program decls) = do
 checkItem :: Item -> Tc Item
 checkItem (Decl decl) = Decl <$> checkDeclItem decl
 checkItem (Data dat) = Data <$> checkDataItem dat
-checkItem (Repr r) = Repr <$> checkReprItem r
+checkItem (ReprData r) = ReprData <$> checkReprDataItem r
+checkItem (ReprDecl r) = ReprDecl <$> checkReprDeclItem r
 checkItem (Prim p) = Prim <$> checkPrimItem p
 
 -- | Check a prim item.
@@ -102,19 +97,6 @@ checkPrimItem (PrimItem name ty) = do
   let result = PrimItem name ty'
   modifySignature (addItem (Prim result))
   return result
-
--- | Check a repr item.
-checkReprItem :: ReprItem -> Tc ReprItem
-checkReprItem (ReprItem name cs) = do
-  -- Check each item and add it to the context.
-  modifySignature (addEmptyRepr name)
-  cs' <- mapM (checkSomeReprItem name) cs
-  return (ReprItem name cs')
-
--- | Check an item inside a repr.
-checkSomeReprItem :: String -> ReprSomeItem -> Tc ReprSomeItem
-checkSomeReprItem rName (ReprData d) = ReprData <$> checkReprDataItem rName d
-checkSomeReprItem _ (ReprDecl d) = ReprDecl <$> checkReprDeclItem d
 
 -- | Check that a term (t x1..xn) is a valid (full) application of a pi type.
 --
@@ -139,8 +121,8 @@ checkBindAppMatchesPi src ty f = do
     return (src', res)
 
 -- | Check a repr data item.
-checkReprDataItem :: String -> ReprDataItem -> Tc ReprDataItem
-checkReprDataItem rName (ReprDataItem src target ctors cse) = do
+checkReprDataItem :: ReprDataItem -> Tc ReprDataItem
+checkReprDataItem (ReprDataItem src target ctors cse) = do
   -- Ensure that the name exists
   name <- globalAppSubjectNameM src
   decl <- inSignature (lookupItemOrCtor name)
@@ -153,10 +135,10 @@ checkReprDataItem rName (ReprDataItem src target ctors cse) = do
         return target'
 
       -- Add the data type to the context without constructors
-      modifySignature $ addEmptyDataItemToRepr rName src' target'
+      modifySignature $ addEmptyDataItem src' target'
 
       -- Check each constructor
-      ctors' <- mapM (checkReprDataCtorItem rName d.name) ctors
+      ctors' <- mapM (checkReprDataCtorItem d.name) ctors
 
       -- Check that all the constructors are present
       let given = map (\c -> globalAppSubjectName c.src) ctors
@@ -164,18 +146,18 @@ checkReprDataItem rName (ReprDataItem src target ctors cse) = do
       when (sort given /= sort expected) $ throwError $ WrongConstructors given expected
 
       -- Check the case expression
-      cse' <- traverse (checkReprDataCaseItem rName d) cse
+      cse' <- traverse (checkReprDataCaseItem d) cse
 
       -- Add the final data type to the context
       let result = ReprDataItem src' target' ctors' cse'
-      modifySignature $ addItemToRepr rName (ReprData result)
+      modifySignature $ modifyItem (ReprDataId d.name) (const (ReprData result))
 
       return result
     _ -> throwError $ ItemNotFound name
 
 -- | Check a repr data constructor item.
-checkReprDataCtorItem :: String -> String -> ReprDataCtorItem -> Tc ReprDataCtorItem
-checkReprDataCtorItem rName dName (ReprDataCtorItem src target) = do
+checkReprDataCtorItem :: String -> ReprDataCtorItem -> Tc ReprDataCtorItem
+checkReprDataCtorItem dName (ReprDataCtorItem src target) = do
   -- Ensure that the name exists
   name <- globalAppSubjectNameM src
   decl <- inSignature (lookupItemOrCtor name)
@@ -189,14 +171,14 @@ checkReprDataCtorItem rName dName (ReprDataCtorItem src target) = do
 
       -- Add the constructor to the context
       let result = ReprDataCtorItem src' target'
-      modifySignature $ addCtorItemToRepr rName dName result
+      modifySignature $ addCtorItemToDataRepr dName result
 
       return result
     _ -> throwError $ ItemNotFound name
 
 -- | Check a repr data case item.
-checkReprDataCaseItem :: String -> DataItem -> ReprDataCaseItem -> Tc ReprDataCaseItem
-checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) target) = do
+checkReprDataCaseItem :: DataItem -> ReprDataCaseItem -> Tc ReprDataCaseItem
+checkReprDataCaseItem dat (ReprDataCaseItem (subject, elimName, ctors) target) = do
   -- Ensure that all the constructors are present
   let given = map fst ctors
   let expected = map (\c -> c.name) dat.ctors
@@ -268,7 +250,7 @@ checkReprDataCaseItem rName dat (ReprDataCaseItem (subject, elimName, ctors) tar
 
         -- Add the case representation to the context
         let result = ReprDataCaseItem (subjectAsTerm, elimName, ctors') target'
-        modifySignature $ addCaseItemToRepr rName dat.name result
+        modifySignature $ addCaseItemToDataRepr dat.name result
         return result
 
 -- | Check a repr decl item.
@@ -282,7 +264,7 @@ checkReprDeclItem (ReprDeclItem name target) = do
       -- Check the target against the represented declaration type
       (target', _) <- checkTerm target d.ty
       let result = ReprDeclItem name target'
-      modifySignature $ addItemToRepr name (ReprDecl result)
+      modifySignature $ addItem (ReprDecl result)
       return result
     _ -> throwError $ ItemNotFound name
 
@@ -430,7 +412,8 @@ inferTerm' t@(Term (Global g) _) = do
     Nothing -> throwError $ ItemNotFound g
     Just (Left (Decl decl')) -> return decl'.ty
     Just (Left (Data dat)) -> return dat.ty
-    Just (Left (Repr _)) -> throwError $ CannotUseReprAsTerm g
+    Just (Left (ReprData _)) -> throwError $ CannotUseReprAsTerm g
+    Just (Left (ReprDecl _)) -> throwError $ CannotUseReprAsTerm g
     Just (Left (Prim p)) -> return p.ty
     Just (Right ctor) -> return ctor.ty
   return (t, expectedTyp)
@@ -466,7 +449,7 @@ inferTerm' (Term (Unrep n r) d1) = do
   rep <- findReprForGlobal n
   case rep of
     Nothing -> throwError $ ItemNotFound n
-    Just (_, params, term) -> do
+    Just (params, term) -> do
       paramMetas <- mapM (\(m, _) -> (m,) <$> freshMeta) params
       -- Ensure that the term to be unrepresented has the correct represented type
       unifyTerms (listToApp (term, paramMetas)) ty

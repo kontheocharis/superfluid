@@ -86,7 +86,7 @@ expandRep sig t = do
   case t' of
     (Term (Global g) _, xs) -> do
       case findReprForGlobal' sig g of
-        Just (_, _, x') -> Just $ listToApp (x', xs)
+        Just (_, x') -> Just $ listToApp (x', xs)
         _ -> Nothing
     _ -> Nothing
 

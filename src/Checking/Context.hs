@@ -5,11 +5,8 @@ module Checking.Context
     TcState (..),
     Tc,
     FlexApp (..),
-    addEmptyDataItemToRepr,
-    addCtorItemToRepr,
     addItem,
     addItems,
-    addCaseItemToRepr,
     addSubst,
     enterCtxEffect,
     addTyping,
@@ -41,9 +38,10 @@ module Checking.Context
     getDataItem,
     modifyCtx,
     modifyItem,
-    addItemToRepr,
     modifySignature,
-    addEmptyRepr,
+    addEmptyDataItem,
+    addCaseItemToDataRepr,
+    addCtorItemToDataRepr,
     setType,
     solveMeta,
     withinCtx,
@@ -79,8 +77,6 @@ import Lang
     ReprDataCtorItem (..),
     ReprDataItem (..),
     ReprDeclItem (..),
-    ReprItem (..),
-    ReprSomeItem (..),
     Term (..),
     TermMappable (..),
     TermValue (..),
@@ -93,7 +89,7 @@ import Lang
     lams,
     listToApp,
     locatedAt,
-    mapTermM,
+    mapTermM, ItemId (..), itemId,
   )
 
 -- | A typing judgement.
@@ -282,7 +278,7 @@ lookupTypeOrError v c = case lookupType v c of
 -- | Lookup the declaration of a global variable in the signature.
 lookupItemOrCtor :: String -> Signature -> Maybe (Either Item CtorItem)
 lookupItemOrCtor _ (Signature []) = Nothing
-lookupItemOrCtor s (Signature (d : _)) | s == itemName d = Just (Left d)
+lookupItemOrCtor s (Signature (d : _)) | Just s == itemName d = Just (Left d)
 lookupItemOrCtor s (Signature ((Data (DataItem _ _ ctors)) : c)) =
   (Right <$> find (\(CtorItem name _ _ _) -> name == s) ctors) <|> lookupItemOrCtor s (Signature c)
 lookupItemOrCtor s (Signature (_ : c)) = lookupItemOrCtor s (Signature c)
@@ -309,9 +305,9 @@ addItems :: [Item] -> Signature -> Signature
 addItems is s = foldl (flip addItem) s is
 
 -- | Modify an item in the signature.
-modifyItem :: String -> (Item -> Item) -> Signature -> Signature
+modifyItem :: ItemId -> (Item -> Item) -> Signature -> Signature
 modifyItem _ _ (Signature []) = Signature []
-modifyItem s f (Signature (d : c)) | s == itemName d = Signature (f d : c)
+modifyItem s f (Signature (d : c)) | s == itemId d = Signature (f d : c)
 modifyItem _ _ (Signature (d : c)) = Signature (d : c)
 
 -- | Get a fresh variable.
@@ -366,32 +362,32 @@ classifyApp (Term (App Explicit t1 t2) _) = do
 classifyApp _ = Nothing
 
 -- | Add a representation to the signature, without any contents.
-addEmptyRepr :: String -> Signature -> Signature
-addEmptyRepr rName = addItem (Repr (ReprItem rName []))
+-- addEmptyRepr :: String -> Signature -> Signature
+-- addEmptyRepr rName = addItem (Repr (ReprItem rName []))
 
 -- | Add a representation item to a representation in the signature.
-addItemToRepr :: String -> ReprSomeItem -> Signature -> Signature
-addItemToRepr rName item = modifyItem rName $ \case
-  Repr (ReprItem n cs) -> Repr (ReprItem n (item : cs))
-  _ -> error $ "Representation" ++ rName ++ " is not a representation item"
+-- addItemToRepr :: String -> ReprSomeItem -> Signature -> Signature
+-- addItemToRepr rName item = modifyItem rName $ \case
+--   Repr (ReprItem n cs) -> Repr (ReprItem n (item : cs))
+--   _ -> error $ "Representation" ++ rName ++ " is not a representation item"
 
 -- | Add an empty data item to a representation in a signature.
 --
 -- Assumes that the representation is already present and empty.
-addEmptyDataItemToRepr :: String -> Pat -> Term -> Signature -> Signature
-addEmptyDataItemToRepr rName src target = addItemToRepr rName $ ReprData (ReprDataItem src target [] Nothing)
+addEmptyDataItem :: Pat -> Term -> Signature -> Signature
+addEmptyDataItem src target = addItem $ ReprData (ReprDataItem src target [] Nothing)
 
 -- | Modify representation items in a signature.
-modifyReprItems :: String -> (ReprSomeItem -> ReprSomeItem) -> Signature -> Signature
-modifyReprItems rName f =
-  modifyItem rName $ \case
-    Repr (ReprItem n cs) ->
-      Repr $ ReprItem n $ map f cs
-    _ -> error $ "Representation" ++ rName ++ " is not a representation item"
+-- modifyReprItems :: String -> (ReprSomeItem -> ReprSomeItem) -> Signature -> Signature
+-- modifyReprItems rName f =
+--   modifyItem rName $ \case
+--     Repr (ReprItem n cs) ->
+--       Repr $ ReprItem n $ map f cs
+--     _ -> error $ "Representation" ++ rName ++ " is not a representation item"
 
 -- | Add a constructor item to a representation in a signature.
-addCtorItemToRepr :: String -> String -> ReprDataCtorItem -> Signature -> Signature
-addCtorItemToRepr rName dName item = modifyReprItems rName go
+addCtorItemToDataRepr :: String -> ReprDataCtorItem -> Signature -> Signature
+addCtorItemToDataRepr dName item = modifyItem (ReprDataId dName) go
   where
     go t@(ReprData d)
       | globalAppSubjectName d.src == dName = ReprData $ d {ctors = d.ctors ++ [item]}
@@ -399,8 +395,8 @@ addCtorItemToRepr rName dName item = modifyReprItems rName go
     go t = t
 
 -- | Add a case item to a representation in a signature.
-addCaseItemToRepr :: String -> String -> ReprDataCaseItem -> Signature -> Signature
-addCaseItemToRepr rName dName item = modifyReprItems rName go
+addCaseItemToDataRepr :: String -> ReprDataCaseItem -> Signature -> Signature
+addCaseItemToDataRepr dName item = modifyItem (ReprDataId dName) go
   where
     go t@(ReprData d)
       | globalAppSubjectName d.src == dName = ReprData $ d {cse = Just item}
@@ -463,55 +459,56 @@ globalAppSubjectNameM p =
         _ -> throwError $ PatternNotSupported p
 
 -- | A version of `findReprForGlobal` that returns the result directly.
-findReprForGlobal' :: Signature -> String -> Maybe (String, [(PiMode, Var)], Term)
+findReprForGlobal' :: Signature -> String -> Maybe ([(PiMode, Var)], Term)
 findReprForGlobal' sig s = case runStateT (findReprForGlobal s) (emptyTcState {signature = sig}) of
   Right (r, _) -> r
   Left e -> error $ "findReprForGlobal' failed: " ++ show e
 
 -- | Find a representation for the given global name.
 -- Returns the name of the representation, the parameters, and the term.
-findReprForGlobal :: String -> Tc (Maybe (String, [(PiMode, Var)], Term))
+findReprForGlobal :: String -> Tc (Maybe ([(PiMode, Var)], Term))
 findReprForGlobal name = do
   (Signature items) <- gets sig
   join . find isJust <$> mapM findRepr items
   where
-    findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
-    findRepr _ = return Nothing
+    -- findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
+    -- findRepr _ = return Nothing
 
-    findReprData rName (ReprDecl d)
-      | d.src == name = return $ Just (rName, [], d.target)
+    findRepr (ReprDecl d)
+      | d.src == name = return $ Just ([], d.target)
       | otherwise = return Nothing
-    findReprData rName (ReprData d)
+    findRepr (ReprData d)
       | globalAppSubjectName d.src == name = do
           params <- appVarArgs d.src
-          return $ Just (rName, params, lams params d.target)
-      | otherwise = join . find isJust <$> mapM (findReprDataCtor rName) d.ctors
+          return $ Just (params, lams params d.target)
+      | otherwise = join . find isJust <$> mapM findReprDataCtor d.ctors
+    findRepr _ = return Nothing
 
-    findReprDataCtor :: String -> ReprDataCtorItem -> Tc (Maybe (String, [(PiMode, Var)], Term))
-    findReprDataCtor rName c
+    findReprDataCtor :: ReprDataCtorItem -> Tc (Maybe ([(PiMode, Var)], Term))
+    findReprDataCtor c
       | globalAppSubjectName c.src == name = do
           params <- appVarArgs c.src
-          return $ Just (rName, params, lams params c.target)
+          return $ Just (params, lams params c.target)
       | otherwise = return Nothing
 
 -- | Find a representation for the case expression of the given global type name.
-findReprForCase :: String -> Tc (Maybe (String, Term))
+findReprForCase :: String -> Tc (Maybe Term)
 findReprForCase tyName = do
   (Signature items) <- gets sig
   join . find isJust <$> mapM findRepr items
   where
-    findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
-    findRepr _ = return Nothing
+    -- findRepr (Repr (ReprItem rName contents)) = join . find isJust <$> mapM (findReprData rName) contents
+    -- findRepr _ = return Nothing
 
-    findReprData rName (ReprData d)
+    findRepr (ReprData d)
       | globalAppSubjectName d.src == tyName =
           case d.cse of
             Just reprCase -> do
               let (subjectBind, elim, ctors) = reprCase.binds
               bindsAsVars <- (elim :) <$> mapM patVarToVar (subjectBind : map snd ctors)
-              return $ Just (rName, lams (map (Explicit,) bindsAsVars) reprCase.target)
+              return $ Just (lams (map (Explicit,) bindsAsVars) reprCase.target)
             Nothing -> return Nothing
-    findReprData _ _ = return Nothing
+    findRepr _ = return Nothing
 
 -- | Get the data item for a given name in a signature.
 --

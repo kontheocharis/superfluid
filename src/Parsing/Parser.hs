@@ -30,8 +30,6 @@ import Lang
     ReprDataCtorItem (ReprDataCtorItem),
     ReprDataItem (ReprDataItem),
     ReprDeclItem (..),
-    ReprItem (..),
-    ReprSomeItem (..),
     Term (..),
     TermMappable (..),
     TermValue (..),
@@ -203,7 +201,14 @@ parseProgram filename contents prelude = case runParser
 -- | Parse a program.
 program :: Maybe Program -> Parser Program
 program prelude = whiteWrap $ do
-  ds <- many (Data <$> dataItem <|> Decl <$> declItem <|> Repr <$> reprItem <|> Prim <$> primItem)
+  ds <-
+    many
+      ( Data <$> dataItem
+          <|> Decl <$> declItem
+          <|> ReprData <$> reprDataItem
+          <|> ReprDecl <$> reprDeclItem
+          <|> Prim <$> primItem
+      )
   let ds' =
         case prelude of
           Just (Program ds'') -> ds''
@@ -220,20 +225,9 @@ whiteWrap p = do
   anyWhite
   return x
 
--- | Parse a data item.
-reprItem :: Parser ReprItem
-reprItem = whiteWrap $ do
-  symbol "repr"
-  name <- identifier
-  ReprItem name <$> curlies reprItems -- Just a single clause for now
-
--- | Parse a series of repr items
-reprItems :: Parser [ReprSomeItem]
-reprItems = many1 $ choice [ReprData <$> reprDataItem, ReprDecl <$> reprDeclItem]
-
 reprDataItem :: Parser ReprDataItem
 reprDataItem = whiteWrap $ do
-  symbol "data"
+  try (symbol "repr" >> symbol "data")
   src <- pat
   symbol "as"
   target <- term
@@ -245,7 +239,7 @@ reprDataItem = whiteWrap $ do
 
 reprDeclItem :: Parser ReprDeclItem
 reprDeclItem = whiteWrap $ do
-  symbol "def"
+  try (symbol "repr" >> symbol "def")
   name <- identifier
   reservedOp "as"
   ReprDeclItem name <$> term
