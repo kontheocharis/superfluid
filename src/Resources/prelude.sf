@@ -151,6 +151,10 @@ def js-eight : JS {
 
 prim cast : [A : Type] -> [B : Type] -> A -> B
 
+def from-js : [A : Type] -> JS -> A {
+  \a => cast a
+}
+
 prim io-return : [A : Type] -> A -> IO A
 
 prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B

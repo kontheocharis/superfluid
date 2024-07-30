@@ -1,0 +1,55 @@
+data Pair : Type -> Type -> Type {
+  pair : [A : Type, B : Type] -> A -> B -> Pair A B
+}
+
+def fst : [A : Type, B : Type] -> Pair A B -> A {
+  \p => case p {
+    pair a _ => a
+  }
+}
+
+def snd : [A : Type, B : Type] -> Pair A B -> B {
+  \p => case p {
+    pair _ b => b
+  }
+}
+
+data State : Type -> Type -> Type {
+  mk-state : [S : Type, R : Type]
+    -> (run-state : S -> Pair R S)
+    -> State S R
+}
+
+data Cell : Type -> Type {
+  cell : [A : Type] -> A -> Cell A
+}
+
+def get-cell : [A : Type] -> Cell A -> A {
+  \c => case c {
+    cell a => a
+  }
+}
+
+def map-cell : [A : Type] -> (A -> A) -> Cell A -> Cell A {
+  \f c => case c {
+    cell a => cell (f a)
+  }
+}
+
+repr data Cell A as JS {
+  cell a as to-js a,
+  case a {
+    cell => c
+  } as {
+    let x = c (from-js (repr a));
+    cast x
+  }
+}
+
+repr def get-cell as \c => from-js (repr c)
+
+-- repr def map-cell as \f c => {
+
+-- }
+
+-- repr data State S A as ()

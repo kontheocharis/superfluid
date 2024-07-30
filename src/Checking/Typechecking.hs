@@ -35,17 +35,18 @@ import Checking.Context
     setType,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow, resolveDeep)
+import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveDeep, resolveShallow)
 import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole, showSolvedMetas, showContext)
+import Checking.Utils (showContext, showHole, showSolvedMetas)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
-import Control.Monad.Except (throwError, tryError)
+import Control.Monad.Except (catchError, throwError, tryError)
 import Control.Monad.State (get, gets, modify, put)
 import Data.Foldable (find)
 import Data.List (sort)
 import Data.Map (insert)
 import Data.Maybe (fromJust)
+import Debug.Trace (traceM)
 import Interface.Pretty (printVal)
 import Lang
   ( CtorItem (..),
@@ -79,7 +80,6 @@ import Lang
     termDataAt,
   )
 import Lang as DI (DeclItem (..), ItemId (ReprDataId))
-import Debug.Trace (traceM)
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -492,10 +492,18 @@ inferOrCheckLet f var ty tm ret = do
   (ty', _) <- checkTermExpected ty TyT
   (tm', ty'') <- checkTerm tm ty'
   (ret', typ') <- enterCtxMod (addTyping var ty') . enterCtxEffect (introSubst var tm') $ f ret
+  -- (ret', typ') <- enterCtxMod (addTyping var ty') $ f ret
   return ((ty'', tm', ret'), subVar var tm' typ')
 
 inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Maybe Term)] -> Tc ((Term, [(Pat, Maybe Term)]), [Type])
 inferOrCheckCase f s cs = do
+  let unifyWithSubject pt' s' = case s' of
+        -- If the subject is a variable,
+        -- then we can unify with the pattern for dependent
+        -- pattern matching.
+        Term (V _) _ -> unifyTerms pt' s' `catchError` (\_ -> return ())
+        _ -> return ()
+
   (s', sTy) <- inferAtomicTerm s
   (cs', tys) <-
     mapAndUnzipM
@@ -505,12 +513,7 @@ inferOrCheckCase f s cs = do
               -- Ensure that checking the pattern is impossible
               pt' <- tryError . enterPat $ do
                 (pt', _) <- checkTerm p sTy
-                -- If the subject is a variable,
-                -- then we can unify with the pattern for dependent
-                -- pattern matching.
-                case s' of
-                  Term (V _) _ -> unifyTerms pt' s'
-                  _ -> return ()
+                unifyWithSubject pt' s'
               case pt' of
                 Left _ -> do
                   m <- freshMeta
@@ -519,14 +522,7 @@ inferOrCheckCase f s cs = do
             Just t' -> do
               pt' <- enterPat $ do
                 (pt', _) <- checkTerm p sTy
-
-                -- If the subject is a variable,
-                -- then we can unify with the pattern for dependent
-                -- pattern matching.
-                case s' of
-                  Term (V _) _ -> unifyTerms pt' s'
-                  _ -> return ()
-
+                unifyWithSubject pt' s'
                 return pt'
               (t'', ty) <- f t'
               return ((pt', Just t''), ty)

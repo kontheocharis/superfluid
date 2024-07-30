@@ -30,6 +30,8 @@ import Lang
     Var (..),
     lams,
   )
+import Debug.Trace (traceM)
+import Interface.Pretty (Print(printVal))
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term

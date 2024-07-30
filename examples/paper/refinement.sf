@@ -5,17 +5,29 @@ data Vec : Type -> Nat -> Type {
   vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
 }
 
-data Sigma : (A : Type) -> (A -> Type) -> Type {
-  sigma : [A : Type] -> [B : A -> Type] -> (x : A) -> B x -> Sigma A B
-}
-
 data ListWithLength : Type -> Nat -> Type {
   mk-list-with-length : [A : Type] -> [n : Nat] -> (l : List A) -> Equal n (length l) -> ListWithLength A n
 }
 
-repr data Vec A n as (l : List A) * Equal n (length l) {
-  vnil as (nil, refl),
-  vcons x xs as ?h1,
+def proj-list : [A : Type] -> [n : Nat] -> ListWithLength A n -> List A {
+  \l => case l {
+    mk-list-with-length l' _ => l'
+  }
+}
+
+def proj-list-len : [A : Type] -> [n : Nat] -> (l : ListWithLength A n) -> Equal n (length (proj-list l)) {
+  ?h1
+}
+
+repr data Vec A n as ListWithLength A n {
+  vnil as mk-list-with-length nil refl,
+  vcons x xs as {
+    let l = proj-list (repr xs);
+    -- let p = proj-list-len (repr xs);
+    let m = mk-list-with-length [_] [s _] (cons x l) refl;
+    -- m
+    ?h1
+  },
   case xs {
     vnil => n,
     vcons => c
