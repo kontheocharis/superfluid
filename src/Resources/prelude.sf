@@ -183,11 +183,6 @@ data List : Type -> Type {
   cons : [A : Type] -> A -> List A -> List A
 }
 
-data Vec : Type -> Nat -> Type {
-  vnil : [A : Type] -> Vec A z,
-  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
-}
-
 data Fin : Nat -> Type {
   fz : [n : Nat] -> Fin (s n),
   fs : [n : Nat] -> Fin n -> Fin (s n)

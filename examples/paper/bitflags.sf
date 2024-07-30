@@ -15,10 +15,74 @@ def rec elem-index : [A : Type] -> [x : A] -> [xs : List A] -> Elem x xs -> Fin 
   }
 }
 
+data Eq : Type -> Type {
+  mk-eq : [A : Type] -> (A -> A -> Bool) -> Eq A
+}
+
+-- Problem: we cannot recover Eq A and Enum A from a representation
+-- We need instance arguments and/or QTT
+
 data Enum : Type -> Type {
-  mk-enum : [A : Type] -> (l : List A) -> ((a : A) -> Elem a l) -> Enum A
+  mk-enum : [A : Type] -> Eq A -> (l : List A) -> ((a : A) -> Elem a l) -> Enum A
 }
 
 data Flags : Type -> Type {
   mk-flags : [A : Type] -> Enum A -> (A -> Bool) -> Flags A
+}
+
+def toggle-flag : [A : Type] -> A -> Flags A -> Flags A {
+  \a f => case f {
+    mk-flags enum p => case enum {
+      mk-enum eq _ _ => case eq {
+        mk-eq is-eq => {
+          mk-flags enum (\a' => case (is-eq a a') {
+            true => not (p a'),
+            false => p a'
+          })
+        }
+      }
+    }
+  }
+}
+
+def set-flag : [A : Type] -> A -> Flags A -> Flags A {
+  \a f => case f {
+    mk-flags enum p => case enum {
+      mk-enum eq _ _ => case eq {
+        mk-eq is-eq => {
+          mk-flags enum (\a' => case (is-eq a a') {
+            true => true,
+            false => p a'
+          })
+        }
+      }
+    }
+  }
+}
+
+def unset-flag : [A : Type] -> A -> Flags A -> Flags A {
+  \a f => case f {
+    mk-flags enum p => case enum {
+      mk-enum eq _ _ => case eq {
+        mk-eq is-eq => {
+          mk-flags enum (\a' => case (is-eq a a') {
+            true => false,
+            false => p a'
+          })
+        }
+      }
+    }
+  }
+}
+
+def get-flag : [A : Type] -> A -> Flags A -> Bool {
+  \a f => case f {
+    mk-flags _ p => p a
+  }
+}
+
+def map-flags : [A : Type] -> ((A -> Bool) -> (A -> Bool)) -> Flags A -> Flags A {
+  \f fl => case fl {
+    mk-flags enum p => mk-flags enum (f p)
+  }
 }

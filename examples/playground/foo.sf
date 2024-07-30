@@ -42,3 +42,8 @@ def main : IO Unit {
   let x = 3;
   io-return tt
 }
+
+
+repr (A : Type) data List A as Vec A z {
+
+}

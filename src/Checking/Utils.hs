@@ -7,9 +7,9 @@ import Control.Monad.Error.Class (MonadError (catchError), throwError)
 import Control.Monad.State (gets, runStateT)
 import Data.List (intercalate)
 import Data.Map (toList)
-import Debug.Trace (traceM)
 import Interface.Pretty (Print (..), indentedFst)
 import Lang (Term, Type)
+import Debug.Trace (traceM)
 
 -- | Run a typechecking computation.
 runTc :: Tc a -> Either TcError (a, TcState)

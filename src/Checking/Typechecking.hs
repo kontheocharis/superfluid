@@ -9,6 +9,8 @@ import Checking.Context
   ( Tc,
     TcState (..),
     addCaseItemToDataRepr,
+    addCtorItemToDataRepr,
+    addEmptyDataItem,
     addItem,
     addTyping,
     addTypings,
@@ -28,13 +30,14 @@ import Checking.Context
     lookupItemOrCtor,
     lookupType,
     modifyCtx,
+    modifyItem,
     modifySignature,
-    setType, addEmptyDataItem, modifyItem, addCtorItemToDataRepr,
+    setType,
   )
 import Checking.Errors (TcError (..))
-import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow)
+import Checking.Normalisation (fillAllMetas, normaliseTerm, normaliseTermFully, resolveShallow, resolveDeep)
 import Checking.Unification (introSubst, unifyAllTerms, unifyTerms)
-import Checking.Utils (showHole)
+import Checking.Utils (showHole, showSolvedMetas, showContext)
 import Checking.Vars (Sub (..), Subst (..), alphaRename, subVar)
 import Control.Monad (mapAndUnzipM, when)
 import Control.Monad.Except (throwError, tryError)
@@ -43,6 +46,7 @@ import Data.Foldable (find)
 import Data.List (sort)
 import Data.Map (insert)
 import Data.Maybe (fromJust)
+import Interface.Pretty (printVal)
 import Lang
   ( CtorItem (..),
     DataItem (..),
@@ -75,6 +79,7 @@ import Lang
     termDataAt,
   )
 import Lang as DI (DeclItem (..), ItemId (ReprDataId))
+import Debug.Trace (traceM)
 
 -- | Check the program
 checkProgram :: Program -> Tc Program
@@ -104,19 +109,21 @@ checkPrimItem (PrimItem name ty) = do
 checkBindAppMatchesPi :: Pat -> Type -> (Type -> Tc a) -> Tc (Pat, a)
 checkBindAppMatchesPi src ty f = do
   let (params, ret) = piTypeToList ty
-  holeSub <-
-    Sub
-      <$> mapM
-        ( \(_, v, _) -> do
-            m <- freshMeta
-            return (v, m)
-        )
-        params
-  let retApplied = sub holeSub ret
 
   enterCtx $ do
-    (src', retApplied') <- enterPat $ checkTerm src retApplied
-    let ret' = locatedAt retApplied' (Rep retApplied)
+    (src', srcTy) <- enterPat $ inferAtomicTerm src
+
+    holeSub <-
+      Sub
+        <$> mapM
+          ( \(_, v, _) -> do
+              m <- freshMeta
+              return (v, m)
+          )
+          params
+    let retApplied = sub holeSub ret
+    unifyTerms srcTy retApplied
+    let ret' = locatedAt retApplied (Rep retApplied)
     res <- f ret'
     return (src', res)
 
@@ -603,7 +610,7 @@ checkTerm' t ty = checkTerm'' t ty
 checkTerm'' :: Term -> Term -> Tc (Term, Type)
 checkTerm'' (Term (Pair t1 t2) d1) (Term (SigmaT v ty1 ty2) d2) = do
   (t1', ty1') <- checkTerm t1 ty1
-  (t2', ty2') <- checkTerm t2 (subVar v t1 ty2)
+  (t2', ty2') <- checkTerm t2 (subVar v t1' ty2)
   return (locatedAt d1 (Pair t1' t2'), locatedAt d2 (SigmaT v ty1' ty2'))
 checkTerm'' t@(Term (V v) _) typ = do
   p <- gets (\s -> s.inPat)
@@ -628,7 +635,14 @@ checkTerm'' hole@(Term (Hole h) d1) typ = do
   showHole hole (Just typ)
   return (m, typ)
 checkTerm'' t@(Term (Meta _) _) typ = error $ "Found metavar during checking: " ++ show t ++ " : " ++ show typ
-checkTerm'' t typ = checkByInfer t typ
+checkTerm'' t typ = do
+  -- Try to normalise the type and try again
+  c <- gets (\s -> s.ctx)
+  sig <- gets (\s -> s.signature)
+  let typ' = normaliseTerm c sig typ
+  case typ' of
+    Nothing -> checkByInfer t typ
+    Just typ'' -> checkTerm t typ''
 
 checkByInfer :: Term -> Type -> Tc (Term, Type)
 checkByInfer t typ = do

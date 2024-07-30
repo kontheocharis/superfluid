@@ -1,0 +1,23 @@
+
+
+data Vec : Type -> Nat -> Type {
+  vnil : [A : Type] -> Vec A z,
+  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
+}
+
+data Sigma : (A : Type) -> (A -> Type) -> Type {
+  sigma : [A : Type] -> [B : A -> Type] -> (x : A) -> B x -> Sigma A B
+}
+
+data ListWithLength : Type -> Nat -> Type {
+  mk-list-with-length : [A : Type] -> [n : Nat] -> (l : List A) -> Equal n (length l) -> ListWithLength A n
+}
+
+repr data Vec A n as (l : List A) * Equal n (length l) {
+  vnil as (nil, refl),
+  vcons x xs as ?h1,
+  case xs {
+    vnil => n,
+    vcons => c
+  } as ?h3
+}

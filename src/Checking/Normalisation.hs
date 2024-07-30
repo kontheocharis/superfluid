@@ -42,6 +42,8 @@ import Lang
     mapTermM,
   )
 import Lang as DI (DeclItem (..), appToList)
+import Debug.Trace (traceM)
+import Interface.Pretty (printVal)
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program

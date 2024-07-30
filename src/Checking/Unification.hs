@@ -47,8 +47,8 @@ unifyTerms a' b' = do
   b <- resolveShallow b'
   case (classifyApp a, classifyApp b) of
     (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> unifyTerms' a b
-    (Just (Flex h1 ts1), _) -> solveOr h1 ts1 b (unifyTerms' a b)
-    (_, Just (Flex h2 ts2)) -> solveOr h2 ts2 a (unifyTerms' a b)
+    (Just (Flex h1 ts1), _) -> solve h1 ts1 b
+    (_, Just (Flex h2 ts2)) -> solve h2 ts2 a
     _ -> unifyTerms' a b
   where
     -- \| Unify a variable with a term. Returns True if successful.
@@ -167,7 +167,7 @@ validateProb hole spine rhs = do
   where
     validateRhs :: [Var] -> Term -> Tc Term
     validateRhs vs r = do
-      r' <- resolveInCtx r
+      r' <- resolveShallow r >>= resolveInCtx
       case r'.value of
         Meta m | m == hole -> throwError $ CannotSolveProblem hole spine rhs
         V v | v `notElem` vs -> throwError $ VariableEscapesMeta hole spine rhs v
@@ -208,7 +208,3 @@ solve hole spine rhs = do
   (vars, rhs') <- validateProb hole spine rhs
   let solution = normaliseTermFully mempty mempty $ lams (map (Explicit,) vars) rhs'
   solveMeta hole solution
-
--- | Solve a pattern unification problem, or try another action if it fails.
-solveOr :: Var -> [Term] -> Term -> Tc () -> Tc ()
-solveOr hole spine rhs action = solve hole spine rhs `catchError` (\e -> action `catchError` (\_ -> throwError e))
