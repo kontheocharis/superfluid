@@ -30,8 +30,8 @@ import Lang
     Var (..),
     lams,
   )
-import Debug.Trace (traceM)
 import Interface.Pretty (Print(printVal))
+import Debug.Trace (traceM)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -110,6 +110,7 @@ unifyTerms a' b' = do
     unifyTerms' a@(Term (App m1 l1 l2) _) b@(Term (App m2 r1 r2) _)
       | m1 == m2 = -- @@Fixme : This is wrong! Inconsistent for non-injective l1/r1
           do
+
             unifyTerms l1 r1
             unifyTerms l2 r2
             `catchError` (\_ -> normaliseAndUnifyTerms a b)

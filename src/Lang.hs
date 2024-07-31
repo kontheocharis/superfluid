@@ -77,7 +77,14 @@ data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Generic, Data, Ty
 data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | A literal
-data Lit = StringLit String | CharLit Char | NatLit Natural | FinLit Natural Term deriving (Eq, Generic, Data, Typeable, Show)
+data Lit = StringLit String | CharLit Char | NatLit Natural | FinLit Natural Term deriving (Generic, Data, Typeable, Show)
+
+instance Eq Lit where
+  (StringLit s1) == (StringLit s2) = s1 == s2
+  (CharLit c1) == (CharLit c2) = c1 == c2
+  (NatLit n1) == (NatLit n2) = n1 == n2
+  (FinLit n1 _) == (FinLit n2 _) = n1 == n2
+  _ == _ = False
 
 -- | A term
 data TermValue

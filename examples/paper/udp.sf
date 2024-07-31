@@ -183,6 +183,28 @@ def rec make-bv : [n : Nat] -> ByteVecRecipe n -> ByteVec n {
   ?apply-byte-vec-mod
 }
 
+def IsValidUdp : [l : Nat] -> ByteVec (add 8 l) -> Type {
+  \[l] b => Equal (add 8 l) (fin-to-nat (bv-read-word 4n b))
+}
+
+def is-valid-udp : [l : Nat] -> (b : ByteVec (add 8 l)) -> Dec (IsValidUdp b) {
+  \[l] b => nat-eq (add 8 l) (fin-to-nat (bv-read-word 4n b))
+}
+
+def UdpByteVec : Type {
+  (l : Nat) * (b : ByteVec (add 8 l)) * IsValidUdp b
+}
+
+def to-udp-byte-vec : [l : Nat] -> (b : ByteVec (add 8 l)) -> Maybe UdpByteVec {
+  \[l] b => case is-valid-udp b {
+    yes p => {
+      let bv : UdpByteVec = (l, (b, p));
+      just bv
+    },
+    no _ => nothing
+  }
+}
+
 data UdpParseError : Type {
   invalid-length : UdpParseError,
 }
