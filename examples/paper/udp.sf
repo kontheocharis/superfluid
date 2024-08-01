@@ -1,41 +1,47 @@
-def Word : Type {
-  Fin 65536
+
+def byte-to-char : Byte -> Char {
+  ?byte-to-char
 }
 
-def Byte : Type {
-  Fin 256
+data TZ : Type {
+  tz-gmt : TZ,
+  tz-est : TZ,
+  tz-cest : TZ,
 }
 
-data ByteVec : (n : Nat) -> Type {
-  bnil : ByteVec z,
-  bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
-}
-
-data UdpPacket : Type {
-  mk-udp-packet : (
-    src-port : Word,
-    dst-port : Word,
-    len : Word,
-    checksum : Word,
-    contents : ByteVec (fin-to-nat len),
-  ) -> UdpPacket
-}
-
-def handle-packet : Nat -> UdpPacket -> Maybe UdpPacket {
-  \seq p => case p {
-    mk-udp-packet src-port dst-port len checksum contents => {
-      -- The rule is, if the source port is even, forward the packet
-      -- to the destination port, setting the source port to be our own.
-      -- Otherwise, drop it.
-      let own-port : Word = case is-even seq {
-        true => 42n,
-        false => 24n,
-      };
-
-      let new-p = mk-udp-packet own-port dst-port len checksum contents;
-      just new-p
-    }
+def tz-from-string : String -> Maybe TZ {
+  \s => case s {
+    "GMT" => just tz-gmt,
+    "EST" => just tz-est,
+    "CEST" => just tz-cest,
+    _ => nothing
   }
+}
+
+repr String as JS {
+  ...
+
+  case s {
+    ...cases
+  } as {
+
+  }
+}
+
+def tz-to-offset : TZ -> Word {
+  \tz => case tz {
+    tz-gmt => 0n,
+    tz-est => 18000n,
+    tz-cest => 7200n,
+  }
+}
+
+def current-time : IO Word {
+  ?current-time
+}
+
+def fin-add-saturating : [n : Nat, m : Nat] -> Fin n -> Fin m -> Fin n {
+  ?fin-add-saturating
 }
 
 def rec repeat : (n : Nat) -> Byte -> ByteVec n {
@@ -60,32 +66,6 @@ def rec count-to : Nat -> List Nat {
     z => nil,
     s n' => cons n' (count-to n')
   }
-}
-
-def main : IO Unit {
-  let packet-size : Word = 20000n;
-
-  let contents = repeat (fin-to-nat packet-size) 42n;
-
-  let test-packet = mk-udp-packet
-    2n
-    3n
-    packet-size
-    5n
-    contents;
-
-  io-mapM_ (\i => {
-    io-bind (debug-print i) (\_ => {
-      let result = handle-packet i test-packet;
-
-      case result {
-        just r => debug-print r,
-        nothing => {
-          debug-print "No UDP packet!"
-        }
-      }
-    })
-  }) (count-to 2000)
 }
 
 
@@ -199,15 +179,147 @@ def to-udp-byte-vec : [l : Nat] -> (b : ByteVec (add 8 l)) -> Maybe UdpByteVec {
   \[l] b => case is-valid-udp b {
     yes p => {
       let bv : UdpByteVec = (l, (b, p));
-      just bv
+      ?hu
+      -- just bv
     },
     no _ => nothing
   }
 }
 
-data UdpParseError : Type {
-  invalid-length : UdpParseError,
+-- data UdpParseError : Type {
+--   invalid-length : UdpParseError,
+-- }
+
+-- def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
+--   \u => case u {
+--     mk-udp-packet src-port dst-port len checksum contents => {
+--       let len' = fin-to-nat len;
+--       let total-len = add 8 len';
+--       let recipe : ByteVecRecipe total-len = {
+--         bv-chain (bv-write-word src-port 0n)
+--         (bv-chain (bv-write-word dst-port 2n)
+--         (bv-chain (bv-write-word len 4n)
+--         (bv-chain (bv-write-word checksum 6n)
+--         (bv-chain (bv-write contents 8n) (bv-zeroed total-len)))))
+--       };
+--       let b = make-bv recipe;
+--       (len', b)
+--     }
+--   }
+-- }
+
+-- def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> Either UdpParseError UdpPacket {
+--   \[l] xs => {
+--     let src-port = bv-read-word 0n xs;
+--     let dst-port = bv-read-word 2n xs;
+--     let len = bv-read-word 4n xs;
+--     let checksum = bv-read-word 6n xs;
+--     let contents = bv-read 8n l xs;
+--     case (nat-eq l (fin-to-nat len)) {
+--       yes p => right (
+--         mk-udp-packet
+--           src-port
+--           dst-port
+--           len
+--           checksum
+--           (subst (\n => ByteVec n) p contents)
+--       ),
+--       no _ => left invalid-length
+--     }
+--   }
+-- }
+
+
+-- def handle-packet : Nat -> UdpPacket -> IO (Maybe UdpPacket) {
+--   \seq p => case p {
+--     mk-udp-packet src-port dst-port len checksum contents => {
+--       case contents {  -- The contents are expected to be three bytes forming a timezone
+--         bcons byte-a (bcons byte-b (bcons byte-c bnil)) => {
+--           let tz = tz-from-string (scons (byte-to-char byte-a) (scons (byte-to-char byte-b) (scons (byte-to-char byte-c) snil)));
+--           case tz {
+--             just tz' => {
+--               let offset-ms = tz-to-offset tz';
+--               let current-time = io-bind current-time (\t => io-return (fin-add-saturating t offset-ms));
+
+--               io-bind current-time (\ct => {
+--                 let res-contents = bv-chain (bv-write-word ct 0n) (bv-zeroed 3n);
+--                 let res-checksum = 0n; -- TODO
+--                 let res = mk-udp-packet dst-port src-port _ res-checksum ?res-contents;
+--                 just res
+--               })
+--             },
+--             nothing => nothing
+--           }
+--         },
+--         _ => io-return nothing
+--       }
+--     }
+--   }
+-- }
+
+-- def main : IO Unit {
+--   let packet-size : Word = 20000n;
+
+--   let contents = repeat (fin-to-nat packet-size) 42n;
+
+--   let test-packet = mk-udp-packet
+--     2n
+--     3n
+--     packet-size
+--     5n
+--     contents;
+
+--   io-mapM_ (\i => {
+--     io-bind (debug-print i) (\_ => {
+--       io-bind (handle-packet i test-packet) (\result =>
+--         case result {
+--           just r => debug-print r,
+--           nothing => {
+--             debug-print "No UDP packet!"
+--           }
+--         }
+--       )
+--     })
+--   }) (count-to 2000)
+-- }
+
+
+def Word : Type {
+  Fin 65536
 }
+
+def Byte : Type {
+  Fin 256
+}
+
+data ByteVec : (n : Nat) -> Type {
+  bnil : ByteVec z,
+  bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
+}
+
+
+data UdpPacket : Type {
+  mk-udp-packet : (
+    src-port : Word,
+    dst-port : Word,
+    len : Word,
+    checksum : Word,
+    contents : ByteVec (fin-to-nat len),
+  ) -> UdpPacket
+}
+
+def IsValidUdp : [l : Nat] -> (b : ByteVec (add 8 l)) -> Type {
+  \[l] b => Equal (add 8 l) (fin-to-nat (bv-read-word 4n b))
+}
+
+repr UdpPacket as (l : Nat) * (b : ByteVec (add 8 l)) * IsValidUdp b {
+  mk-udp-packet src-port udp-packet dst-port len checksum contents as
+    udp-packet-to-buffer (mk-udp-packet src-port udp-packet dst-port len checksum contents),
+  case s {
+    mk-udp-packet => mk,
+  } as buffer-to-udp-packet s mk
+}
+
 
 def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
   \u => case u {
@@ -227,8 +339,8 @@ def udp-packet-to-buffer : UdpPacket -> (l : Nat) * ByteVec (add 8 l) {
   }
 }
 
-def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> Either UdpParseError UdpPacket {
-  \[l] xs => {
+def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> (...) -> Either UdpParseError UdpPacket {
+  \[l] xs mk => {
     let src-port = bv-read-word 0n xs;
     let dst-port = bv-read-word 2n xs;
     let len = bv-read-word 4n xs;
@@ -236,7 +348,7 @@ def buffer-to-udp-packet : [l : Nat] -> ByteVec (add 8 l) -> Either UdpParseErro
     let contents = bv-read 8n l xs;
     case (nat-eq l (fin-to-nat len)) {
       yes p => right (
-        mk-udp-packet
+        mk
           src-port
           dst-port
           len

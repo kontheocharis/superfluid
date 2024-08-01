@@ -429,7 +429,8 @@ inferTerm' t@(Term (V v) _) = do
   vTyp <- inCtx (lookupType v)
   case vTyp of
     Nothing -> throwError $ VariableNotFound v
-    Just vTyp' -> return (t, vTyp')
+    Just vTyp' -> do
+      return (t, vTyp')
 inferTerm' (Term (Let var ty tm ret) d1) = do
   ((ty'', tm', ret'), typ') <- inferOrCheckLet inferTerm var ty tm ret
   return (locatedAt d1 (Let var ty'' tm' ret'), typ')
@@ -497,14 +498,14 @@ inferOrCheckLet f var ty tm ret = do
 
 inferOrCheckCase :: (Term -> Tc (Term, Type)) -> Term -> [(Pat, Maybe Term)] -> Tc ((Term, [(Pat, Maybe Term)]), [Type])
 inferOrCheckCase f s cs = do
-  let unifyWithSubject pt' s' = case s' of
-        -- If the subject is a variable,
-        -- then we can unify with the pattern for dependent
-        -- pattern matching.
-        Term (V _) _ -> unifyTerms pt' s' `catchError` (\_ -> return ())
-        _ -> return ()
-
   (s', sTy) <- inferAtomicTerm s
+  -- let unifyWithSubject pt = case s' of
+  --       -- If the subject is a variable,
+  --       -- then we can unify with the pattern for dependent
+  --       -- pattern matching.
+  --       Term (V _) _ -> unifyTerms pt s'
+  --       _ -> return ()
+
   (cs', tys) <-
     mapAndUnzipM
       ( \(p, t) -> enterCtx $ do
@@ -513,16 +514,16 @@ inferOrCheckCase f s cs = do
               -- Ensure that checking the pattern is impossible
               pt' <- tryError . enterPat $ do
                 pt <- checkTerm p sTy
-                unifyWithSubject pt s'
+                unifyTerms pt s'
               case pt' of
-                Left _ -> do
+                Left (Mismatch _ _) -> do
                   m <- freshMeta
                   return ((p, Nothing), m)
-                Right _ -> throwError $ PatternNotImpossible p
+                _ -> throwError $ PatternNotImpossible p
             Just t' -> do
               pt' <- enterPat $ do
                 pt <- checkTerm p sTy
-                unifyWithSubject pt s'
+                unifyTerms pt s'
                 return pt
               (t'', ty) <- f t'
               return ((pt', Just t''), ty)
@@ -575,10 +576,8 @@ checkTerm :: Term -> Type -> Tc Term
 checkTerm v t = do
   tResolved <- resolveShallow t
   v' <- checkTerm' v tResolved
-  c <- gets (\s -> s.ctx)
   t' <- resolveDeep t
-  let t'' = normaliseTermFully c mempty t'
-  setType v' t''
+  setType v' t'
 
 -- | Check the type of a term.
 -- mempty

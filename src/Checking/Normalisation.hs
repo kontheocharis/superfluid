@@ -11,19 +11,23 @@ module Checking.Normalisation
 where
 
 import Checking.Context
-  ( FlexApp (..),
+  ( Ctx,
+    FlexApp (..),
     Signature (Signature),
     Tc,
     TcState (..),
     classifyApp,
     findReprForGlobal',
-    lookupItemOrCtor, Ctx, lookupSubst,
+    lookupItemOrCtor,
+    lookupSubst,
   )
 import Checking.Vars (Sub (..), Subst (..), noSub, subVar)
 import Control.Applicative ((<|>))
 import Control.Monad.State (gets)
 import Data.Map (lookup, (!?))
+import Debug.Trace (traceM, trace)
 import GHC.Natural (Natural)
+import Interface.Pretty (printVal)
 import Lang
   ( HasLoc (..),
     Item (..),
@@ -42,8 +46,6 @@ import Lang
     mapTermM,
   )
 import Lang as DI (DeclItem (..), appToList)
-import Debug.Trace (traceM)
-import Interface.Pretty (printVal)
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program
@@ -102,31 +104,35 @@ tryExpandRep c sig t = case expandRep sig t of
 -- | Reduce a term to normal form (one step).
 -- If this is not possible, return Nothing.
 normaliseTerm :: Ctx -> Signature -> Term -> Maybe Term
-normaliseTerm _ _ (Term (App m (Term (Lam m' v t1) _) t2) _)
-  | m == m' =
-      return $ subVar v t2 t1
-normaliseTerm c sig (Term (App m t1 t2) d1) = do
-  t1' <- normaliseTerm c sig t1
-  return (Term (App m t1' t2) d1)
-normaliseTerm c sig (Term (Case e s cs) d1) =
-  foldr
-    ( \(p, t) acc ->
-        case t of
-          Just c' -> acc <|> do
-            sb <- tryCaseMatch c sig s p
-            return (sub sb c')
-          Nothing -> acc
-    )
-    Nothing
-    cs
-    <|> ( case normaliseTerm c sig s of
-            Just s' -> Just (Term (Case e s' cs) d1)
-            Nothing -> Nothing
+normaliseTerm c s t = normaliseTerm' c s t
+  where
+    normaliseTerm' :: Ctx -> Signature -> Term -> Maybe Term
+    normaliseTerm' _ _ (Term (App m (Term (Lam m' v t1) _) t2) _)
+      | m == m' =
+          return $ subVar v t2 t1
+    normaliseTerm' c sig (Term (App m t1 t2) d1) = do
+      t1' <- normaliseTerm' c sig t1
+      return (Term (App m t1' t2) d1)
+    normaliseTerm' c sig (Term (Case e s cs) d1) =
+      foldr
+        ( \(p, t) acc ->
+            case t of
+              Just c' ->
+                acc <|> do
+                  sb <- tryCaseMatch c sig s p
+                  return (sub sb c')
+              Nothing -> acc
         )
-normaliseTerm c _ (Term (V v) _) | Just t <- lookupSubst v c = Just t
-normaliseTerm _ sig (Term (Global g) _) = maybeExpand sig g
-normaliseTerm c sig (Term (Rep r) _) = tryExpandRep c sig r
-normaliseTerm _ _ _ = Nothing -- @@Todo: normalise declarations
+        Nothing
+        cs
+        <|> ( case normaliseTerm' c sig s of
+                Just s' -> Just (Term (Case e s' cs) d1)
+                Nothing -> Nothing
+            )
+    normaliseTerm' c _ (Term (V v) _) | Just t <- lookupSubst v c = Just t
+    normaliseTerm' _ sig (Term (Global g) _) = maybeExpand sig g
+    normaliseTerm' c sig (Term (Rep r) _) = tryExpandRep c sig r
+    normaliseTerm' _ _ _ = Nothing -- @@Todo: normalise declarations
 
 expandLit :: Lit -> Term
 expandLit (StringLit s) = expandStringToTermOnce s

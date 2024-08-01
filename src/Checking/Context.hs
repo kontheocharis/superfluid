@@ -195,8 +195,8 @@ getType t = return t.dat.annotTy
 -- | Set the type of a term.
 setType :: Term -> Type -> Tc Term
 setType t ty = do
-  ty' <- resolveInCtx ty
-  return $ t {dat = t.dat {annotTy = Just ty'}}
+  -- ty' <- resolveInCtx ty
+  return $ t {dat = t.dat {annotTy = Just ty}}
 
 -- | Enter a pattern by setting the inPat flag to True.
 enterPat :: Tc a -> Tc a

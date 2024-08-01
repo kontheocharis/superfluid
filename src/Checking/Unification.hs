@@ -21,8 +21,11 @@ import Checking.Context
 import Checking.Errors (TcError (..))
 import Checking.Normalisation (expandLit, normaliseTerm, normaliseTermFully, resolveDeep, resolveShallow)
 import Checking.Vars (alphaRename)
+import Control.Monad (when)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State (gets)
+import Debug.Trace (traceM)
+import Interface.Pretty (Print (printVal))
 import Lang
   ( PiMode (..),
     Term (..),
@@ -30,8 +33,6 @@ import Lang
     Var (..),
     lams,
   )
-import Interface.Pretty (Print(printVal))
-import Debug.Trace (traceM)
 
 -- | Unify the list of terms together into a meta.
 unifyAllTerms :: [Term] -> Tc Term
@@ -40,6 +41,41 @@ unifyAllTerms ts = do
   mapM_ (unifyTerms m) ts
   return m
 
+onlyPotential :: Tc () -> Tc ()
+onlyPotential f =
+  f
+    `catchError` ( \e -> case e of
+                     PotentialMismatch _ _ -> return ()
+                     Many es -> do
+                       let es' =
+                             filter
+                               ( \case
+                                   PotentialMismatch _ _ -> True
+                                   _ -> False
+                               )
+                               es
+                       when (null es') $ throwError e
+                     _ -> throwError e
+                 )
+
+definite :: Tc () -> Tc ()
+definite f =
+  f
+    `catchError` ( \e -> case e of
+                     PotentialMismatch l r -> throwError $ Mismatch l r
+                     Many es ->
+                       throwError $
+                         Many
+                           ( map
+                               ( \e' -> case e' of
+                                   PotentialMismatch l r -> Mismatch l r
+                                   _ -> e'
+                               )
+                               es
+                           )
+                     _ -> throwError e
+                 )
+
 -- \| Unify two terms.
 -- This might produce a substitution.
 -- Unification is symmetric.
@@ -47,11 +83,15 @@ unifyTerms :: Term -> Term -> Tc ()
 unifyTerms a' b' = do
   a <- resolveShallow a'
   b <- resolveShallow b'
+
+  pt <- gets (\s -> s.inPat)
+  let process = if pt then onlyPotential else definite
+
   case (classifyApp a, classifyApp b) of
-    (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> unifyTerms' a b
+    (Just (Flex v1 _), Just (Flex v2 _)) | v1 == v2 -> process $ unifyTerms' a b
     (Just (Flex h1 ts1), _) -> solve h1 ts1 b
     (_, Just (Flex h2 ts2)) -> solve h2 ts2 a
-    _ -> unifyTerms' a b
+    _ -> process $ unifyTerms' a b
   where
     -- \| Unify a variable with a term. Returns True if successful.
     unifyVarWithTerm :: Term -> Var -> Term -> Tc ()
@@ -88,14 +128,13 @@ unifyTerms a' b' = do
     unifyTerms' (Term (Lit l1) _) b = unifyTerms (expandLit l1) b
     unifyTerms' a (Term (Lit l2) _) = unifyTerms a (expandLit l2)
     unifyTerms' (Term (V l) _) (Term (V r) _) | l == r = return ()
-    unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = do
-      unifyVarWithTerm a l b `catchError` (\_ -> unifyVarWithTerm b r a)
-    unifyTerms' a@(Term (V l) _) b = unifyVarWithTerm a l b `catchError` (\_ -> normaliseAndUnifyTerms a b)
-    unifyTerms' a b@(Term (V r) _) = unifyVarWithTerm b r a `catchError` (\_ -> normaliseAndUnifyTerms a b)
+    unifyTerms' a@(Term (V l) _) b@(Term (V r) _) = unifyVarWithTerm a l b `catchError` (\e -> unifyVarWithTerm b r a `catchError` (\e' -> throwError (e <> e')))
+    unifyTerms' a@(Term (V l) _) b = unifyVarWithTerm a l b `catchError` (\e -> normaliseAndUnifyTerms a b (PotentialMismatch a b <> e))
+    unifyTerms' a b@(Term (V r) _) = unifyVarWithTerm b r a `catchError` (\e -> normaliseAndUnifyTerms a b (PotentialMismatch a b <> e))
     unifyTerms' a@(Term (Global l) _) b@(Term (Global r) _) =
       if l == r
         then return ()
-        else normaliseAndUnifyTerms a b
+        else normaliseAndUnifyTerms a b (Mismatch a b)
     unifyTerms' a@(Term (Case _ su1 cs1) _) b@(Term (Case _ su2 cs2) _) = do
       unifyTerms su1 su2
       mapM_
@@ -107,14 +146,15 @@ unifyTerms a' b' = do
               _ -> throwError $ Mismatch a b
         )
         (zip cs1 cs2)
+    -- unifyTerms' a@(Term (Case ))
     unifyTerms' a@(Term (App m1 l1 l2) _) b@(Term (App m2 r1 r2) _)
-      | m1 == m2 = -- @@Fixme : This is wrong! Inconsistent for non-injective l1/r1
+      | m1 == m2 -- @@Fixme : This is wrong! Inconsistent for non-injective l1/r1
+        =
           do
-
             unifyTerms l1 r1
             unifyTerms l2 r2
-            `catchError` (\_ -> normaliseAndUnifyTerms a b)
-    unifyTerms' l r = normaliseAndUnifyTerms l r
+            `catchError` (\e -> normaliseAndUnifyTerms a b (PotentialMismatch a b <> e))
+    unifyTerms' l r = normaliseAndUnifyTerms l r (PotentialMismatch l r)
 
 -- | Introduce a substitution for a variable.
 introSubst :: Var -> Term -> Tc ()
@@ -123,12 +163,13 @@ introSubst v t = do
   case s of
     Nothing -> modifyCtx (addSubst v t)
     Just t' -> unifyTerms t t'
-      -- @@Fixme: if they dont unify because we *don't know if they are equal* we should just remove the previous substitution??
-      -- unifyTerms t t' `catchError` (\_ -> return ()) -- If the terms don't unify, just ignore the substitution.
+
+-- @@Fixme: if they dont unify because we *don't know if they are equal* we should just remove the previous substitution??
+-- unifyTerms t t' `catchError` (\_ -> return ()) -- If the terms don't unify, just ignore the substitution.
 
 -- | Unify two terms, normalising them first.
-normaliseAndUnifyTerms :: Term -> Term -> Tc ()
-normaliseAndUnifyTerms l r = do
+normaliseAndUnifyTerms :: Term -> Term -> TcError -> Tc ()
+normaliseAndUnifyTerms l r err = do
   c <- gets (\s -> s.ctx)
   sig <- gets (\s -> s.signature)
   l' <- resolveDeep l
@@ -139,7 +180,7 @@ normaliseAndUnifyTerms l r = do
       let r'' = normaliseTerm c sig r'
       case r'' of
         Nothing -> do
-          throwError $ Mismatch l' r'
+          throwError err
         Just r''' -> do
           unifyTerms l r'''
     Just l''' -> do
