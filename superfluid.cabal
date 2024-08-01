@@ -57,6 +57,7 @@ library
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , extra ==1.7.*
     , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*
@@ -92,6 +93,7 @@ executable superfluid-exe
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , extra ==1.7.*
     , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*
@@ -129,6 +131,7 @@ test-suite superfluid-test
     , containers ==0.6.*
     , criterion ==1.6.*
     , deepseq ==1.4.*
+    , extra ==1.7.*
     , file-embed ==0.0.*
     , haskeline ==0.8.*
     , language-c ==0.9.*

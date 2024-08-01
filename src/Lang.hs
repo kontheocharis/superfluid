@@ -1,5 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE KindSignatures #-}
 
 module Lang
   ( Type,
@@ -35,7 +38,7 @@ module Lang
     listToPiType,
     listToApp,
     itemName,
-    ItemId(..),
+    ItemId (..),
     itemId,
     isValidPat,
     termLoc,
@@ -54,11 +57,23 @@ module Lang
   )
 where
 
+import Control.Applicative ((<|>))
+import Control.Monad (foldM, join)
+import Control.Monad.Extra (firstJustM)
 import Control.Monad.Identity (runIdentity)
+import Data.Bifunctor (Bifunctor)
 import Data.Generics (Data)
+import Data.List.Extra (firstJust)
+import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import GHC.Natural (Natural)
+import GHC.TypeNats (Nat)
+import Data.Map (Map)
+import qualified Data.IntMap as IM
+import Data.IntMap (IntMap)
+import Data.Sequence (Seq (..), (><), ViewR (..), ViewL (..))
+import qualified Data.Sequence as S
 
 -- | Type alias for terms that are expected to be types (just for documentation purposes).
 type Type = Term
@@ -85,6 +100,178 @@ instance Eq Lit where
   (NatLit n1) == (NatLit n2) = n1 == n2
   (FinLit n1 _) == (FinLit n2 _) = n1 == n2
   _ == _ = False
+
+newtype Idx = Idx Int deriving (Eq, Generic, Data, Typeable, Show)
+
+newtype Lvl = Lvl Int deriving (Eq, Generic, Data, Typeable, Show)
+
+lvlToIdx :: Lvl -> Lvl -> Idx
+lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
+
+data Arg t = Arg PiMode t deriving (Eq, Generic, Data, Typeable, Show)
+
+type Spine t = Seq (Arg t) -- IN REVERSE ORDER
+
+data MetaVar = MetaVar Int deriving (Eq, Generic, Data, Typeable, Show)
+
+data SPat = SPWild | SPBind Var | SPApp CtorGlobal (Spine SPat) deriving (Generic, Typeable)
+
+type STy = STm
+
+data Clause p t = Possible p t | Impossible p deriving (Eq, Generic, Data, Typeable, Show, Functor)
+
+data CtorGlobal = CtorGlobal String Int deriving (Eq, Generic, Data, Typeable, Show)
+
+data DataGlobal = DataGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+
+data DefGlobal = DefGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+
+data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal deriving (Eq, Generic, Data, Typeable, Show)
+
+clausePat :: Clause p t -> p
+clausePat (Possible p _) = p
+clausePat (Impossible p) = p
+
+data STm
+  = SPi PiMode Var STm STm
+  | SLam PiMode Var STm
+  | SLet Var STy STm STm
+  | SMeta MetaVar
+  | SApp PiMode STm STm
+  | SCase STm [Clause SPat STm]
+  | SU
+  | SGlobal Glob
+  | SVar Idx
+  | SLit Lit
+  deriving (Generic, Typeable)
+
+type VTy = VTm
+
+type Env v = [v]
+
+data Closure = Closure (Env VTm) STm
+
+data VCase = VCase VNeu [Clause SPat Closure]
+
+data VNeu
+  = VFlex MetaVar (Spine VTm)
+  | VRigid Lvl (Spine VTm)
+  | VGlobal Glob (Spine VTm)
+  | VCaseApp VCase (Spine VTm)
+
+data VTm
+  = VPi PiMode Var VTy Closure
+  | VLam PiMode Var Closure
+  | VU
+  | VLit Lit
+  | VNeu VNeu
+
+infixl 8 $$
+
+($$) :: Closure -> [VTm] -> VTm
+Closure env t $$ us = eval (env ++ us) t
+
+vAppNeu :: VNeu -> Spine VTm -> VTm
+vAppNeu (VFlex m us) u = VNeu (VFlex m (us >< u))
+vAppNeu (VRigid l us) u = VNeu (VRigid l (us >< u))
+vAppNeu (VGlobal g us) u = VNeu (VGlobal g (us >< u))
+vAppNeu (VCaseApp c us) u = VNeu (VCaseApp c (us >< u))
+
+vApp :: VTm -> Spine VTm -> VTm
+vApp (VLam _ _ c) (Arg _ u :<| us) = vApp (c $$ [u]) us
+vApp (VNeu n) u = vAppNeu n u
+vApp _ _ = error "impossible"
+
+vMatch :: SPat -> VTm -> Maybe (Env VTm)
+vMatch SPWild _ = Just []
+vMatch (SPBind x) u = Just [u]
+vMatch (SPApp (CtorGlobal c _) ps) (VNeu (VGlobal (CtorGlob (CtorGlobal c' _)) xs))
+  | c == c' && length ps == length xs =
+      foldM
+        ( \acc (Arg _ p, Arg _ x) -> do
+            env <- vMatch p x
+            return $ env ++ acc
+        )
+        []
+        (S.zip ps xs)
+vMatch _ _ = Nothing
+
+vCase :: VNeu -> [Clause SPat Closure] -> VTm
+vCase v cs =
+  fromMaybe
+    (VNeu (VCaseApp (VCase v cs) Empty))
+    ( firstJust
+        ( \clause -> do
+            case clause of
+              Possible p t -> case vMatch p (VNeu v) of
+                Just env -> Just $ t $$ env
+                Nothing -> Nothing
+              Impossible _ -> Nothing
+        )
+        cs
+    )
+
+evalToNeu :: Env VTm -> STm -> VNeu
+evalToNeu env t = case eval env t of
+  VNeu n -> n
+  _ -> error "impossible"
+
+eval :: Env VTm -> STm -> VTm
+eval env (SPi m v ty1 ty2) = VPi m v (eval env ty1) (Closure env ty2)
+eval env (SLam m v t) = VLam m v (Closure env t)
+eval env (SLet _ _ t1 t2) = eval (eval env t1 : env) t2
+eval env (SApp m t1 t2) = vApp (eval env t1) $ S.singleton (Arg m (eval env t2))
+eval env (SCase t cs) = vCase (evalToNeu env t) (map (fmap (Closure env)) cs)
+eval _ SU = VU
+eval _ (SLit l) = VLit l
+eval _ (SMeta m) = VNeu (VFlex m Empty)
+eval _ (SGlobal g) = VNeu (VGlobal g Empty)
+eval env (SVar (Idx i)) = env !! i
+
+newtype SolvedMetas = SolvedMetas (IntMap VTm)
+
+emptySolvedMetas :: SolvedMetas
+emptySolvedMetas = SolvedMetas IM.empty
+
+class (Monad m) => HasSolvedMetas m where
+  solvedMetas :: m SolvedMetas
+  modifySolvedMetas :: (SolvedMetas -> SolvedMetas) -> m ()
+
+  lookupMeta :: MetaVar -> m (Maybe VTm)
+  lookupMeta (MetaVar m) = do
+    SolvedMetas ms <- solvedMetas
+    return $ IM.lookup m ms
+
+  resetSolvedMetas :: m ()
+  resetSolvedMetas = modifySolvedMetas (const emptySolvedMetas)
+
+force :: (HasSolvedMetas m) => VTm -> m VTm
+force v@(VNeu (VFlex m sp)) = do
+  mt <- lookupMeta m
+  case mt of
+    Just t -> force (vApp t sp)
+    Nothing -> return v
+force v = return v
+
+quoteSpine :: (HasSolvedMetas m) => Lvl -> STm -> Spine VTm -> m STm
+quoteSpine l t Empty = return t
+quoteSpine l t (sp :|> Arg m u) = do
+  t' <- quoteSpine l t sp
+  u' <- quote l u
+  return $ SApp m t' u'
+
+quote :: (HasSolvedMetas m) => Lvl -> VTm -> m STm
+quote l v = do
+  v' <- force v
+  case v' of
+    VNeu (VFlex m sp) -> quoteSpine l (SMeta m) sp
+    VNeu (VRigid l' sp) -> quoteSpine l (SVar (lvlToIdx l l')) sp
+    VNeu (VGlobal g sp) -> quoteSpine l (SGlobal g) sp
+    VNeu (VCaseApp (VCase v cs) sp) -> do
+      v' <- quote l (VNeu v)
+      -- cs' <- mapM (traverse (quote l)) cs
+      -- return $ quoteSpine l (SCase v' cs') sp
+
 
 -- | A term
 data TermValue
