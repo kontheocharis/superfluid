@@ -98,7 +98,7 @@ instance Print TermValue where
   printVal (Rep s) = "repr " ++ printSingleVal s
   printVal (Unrep n s) = "unrepr " ++ n ++ " " ++ printSingleVal s
 
-instance Print Lit where
+instance (Print t) => Print (Lit t) where
   printVal (NatLit i) = show i
   printVal (FinLit i n) = show i ++ "n" ++ printSingleVal n
   printVal (StringLit s) = show s

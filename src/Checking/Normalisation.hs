@@ -134,7 +134,7 @@ normaliseTerm c s t = normaliseTerm' c s t
     normaliseTerm' c sig (Term (Rep r) _) = tryExpandRep c sig r
     normaliseTerm' _ _ _ = Nothing -- @@Todo: normalise declarations
 
-expandLit :: Lit -> Term
+expandLit :: Lit Term -> Term
 expandLit (StringLit s) = expandStringToTermOnce s
 expandLit (CharLit c) = expandCharToTermOnce c
 expandLit (NatLit n) = expandNatToTermOnce n

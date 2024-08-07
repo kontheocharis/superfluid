@@ -76,30 +76,20 @@ import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import GHC.Natural (Natural)
 import GHC.TypeNats (Nat)
-
--- | Type alias for terms that are expected to be types (just for documentation purposes).
-type Type = Term
-
--- | Type alias for terms that are expected to be patterns (just for documentation purposes).
-type Pat = Term
-
--- | A global name is a string.
-type GlobalName = String
-
--- | A variable
--- Represented by a string name and a unique integer identifier (no shadowing).
-data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Generic, Data, Typeable, Show)
-
-dummyVar :: Var
-dummyVar = Var "x" 0
+import Control.Exception (assert)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
 
 -- | A literal
-data Lit = StringLit String | CharLit Char | NatLit Natural | FinLit Natural Term deriving (Generic, Data, Typeable, Show)
+data Lit t
+  = StringLit String
+  | CharLit Char
+  | NatLit Natural
+  | FinLit Natural t
+  deriving (Generic, Data, Typeable, Show, Functor, Traversable, Foldable)
 
-instance Eq Lit where
+instance (Eq t) => Eq (Lit t) where
   (StringLit s1) == (StringLit s2) = s1 == s2
   (CharLit c1) == (CharLit c2) = c1 == c2
   (NatLit n1) == (NatLit n2) = n1 == n2
@@ -138,11 +128,11 @@ type STy = STm
 
 data Clause p t = Possible p t | Impossible p deriving (Eq, Generic, Data, Typeable, Show, Functor, Foldable, Traversable)
 
-data CtorGlobal = CtorGlobal String Int deriving (Eq, Generic, Data, Typeable, Show)
+newtype CtorGlobal = CtorGlobal String deriving (Eq, Generic, Data, Typeable, Show)
 
-data DataGlobal = DataGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+newtype DataGlobal = DataGlobal String deriving (Eq, Generic, Data, Typeable, Show)
 
-data DefGlobal = DefGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+newtype DefGlobal = DefGlobal String deriving (Eq, Generic, Data, Typeable, Show)
 
 data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -150,46 +140,52 @@ clausePat :: Clause p t -> p
 clausePat (Possible p _) = p
 clausePat (Impossible p) = p
 
+data ReprKind
+  = ReprTy DataGlobal -- Represent a data type
+  | ReprInh DataGlobal -- Represent an inhabitant of a data type
+  | ReprDef DefGlobal -- Represent a definition
+  | ReprCase DataGlobal -- Represent a case expression
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data ReprMode = Once | Inf deriving (Eq, Generic, Data, Typeable, Show)
+
 data STm
-  = SPi PiMode Var STm STm
-  | SLam PiMode Var STm
-  | SLet Var STy STm STm
+  = SPi PiMode Name STm STm
+  | SLam PiMode Name STm
+  | SLet Name STy STm STm
   | SMeta MetaVar
   | SApp PiMode STm STm
   | SCase STm [Clause SPat STm]
   | SU
   | SGlobal Glob
   | SVar Idx
-  | SLit Lit
-  | SRepr STm
-  | SUnrepr STm
+  | SLit (Lit ())
+  | SRepr ReprMode ReprKind STm
+  | SUnrepr ReprMode ReprKind STm
   deriving (Generic, Typeable)
 
 type VTy = VTm
 
 type Env v = [v]
 
-data Closure = Closure { env :: (Env VTm), body :: STm }
+data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm}
 
-postCompose :: (STm -> STm) -> Closure -> Closure
-postCompose f (Closure env t) = Closure env (f t)
-
-data VCase = VCase VNeu [Clause SPat Closure]
+data VCase = VCase {subject :: VNeu, branches :: [Clause SPat Closure]}
 
 data VHead = VFlex MetaVar | VRigid Lvl
 
-data VNeu =
-  VApp VHead (Spine VTm)
+data VNeu
+  = VApp VHead (Spine VTm)
   | VGlobal Glob (Spine VTm)
   | VCaseApp VCase (Spine VTm)
-  | VReprApp VNeu (Spine VTm)
-  | VUnreprApp VNeu (Spine VTm)
+  | VReprApp ReprMode ReprKind VNeu (Spine VTm)
+  | VUnreprApp ReprMode ReprKind VNeu (Spine VTm)
 
 data VTm
-  = VPi PiMode Var VTy Closure
-  | VLam PiMode Var Closure
+  = VPi PiMode Name VTy Closure
+  | VLam PiMode Name Closure
   | VU
-  | VLit Lit
+  | VLit (Lit ())
   | VNeu VNeu
 
 infixl 8 $$
@@ -200,14 +196,14 @@ pattern VVar l = VApp (VRigid l) Empty
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
 
-pattern VRepr :: VNeu -> VNeu
-pattern VRepr t = VReprApp t Empty
+pattern VRepr :: ReprMode -> ReprKind -> VNeu -> VNeu
+pattern VRepr m k t = VReprApp m k t Empty
 
-pattern VUnrepr :: VNeu -> VNeu
-pattern VUnrepr t = VUnreprApp t Empty
+pattern VUnrepr :: ReprMode -> ReprKind -> VNeu -> VNeu
+pattern VUnrepr m k t = VUnreprApp m k t Empty
 
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
-Closure env t $$ us = eval (us ++ env) t -- @@Is this right??
+Closure _ env t $$ us = eval (us ++ env) t
 
 vAppNeu :: VNeu -> Spine VTm -> VTm
 vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
@@ -223,7 +219,7 @@ vApp _ _ = error "impossible"
 
 vMatch :: SPat -> VTm -> Maybe (Env VTm)
 vMatch (SPBind x) u = Just [u]
-vMatch (SPApp (CtorGlobal c _) ps) (VNeu (VGlobal (CtorGlob (CtorGlobal c' _)) xs))
+vMatch (SPApp (CtorGlobal c) ps) (VNeu (VGlobal (CtorGlob (CtorGlobal c')) xs))
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -256,69 +252,110 @@ evalToNeu env t = do
     VNeu n -> return n
     _ -> error "impossible"
 
-preCompose :: Closure -> (STm -> STm) -> Closure
-preCompose t f = Closure t.env (SApp Explicit (SLam Explicit dummyVar t.body) (f (SVar (Idx 0))))
+postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
+postCompose f (Closure n env t) = close n env (f t)
 
-reprClosure :: Closure -> Closure
-reprClosure t = preCompose (postCompose SRepr t) SUnrepr
+preCompose :: (Eval m) => Closure -> (STm -> STm) -> m Closure
+preCompose (Closure n env t) f = do
+  v <- uniqueName
+  close n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
 
-unreprClosure :: Closure -> Closure
-unreprClosure t = preCompose (postCompose SUnrepr t) SRepr
+reprClosure :: (Eval m) => ReprMode -> ReprKind -> Closure -> m Closure
+reprClosure m k t = do
+  a <- postCompose (SRepr m k) t
+  preCompose a (SUnrepr m k)
 
-vRepr :: (Eval m) => VTm -> m VTm
-vRepr (VPi m v ty t) = do
-  ty' <- vRepr ty
-  return $ VPi m v ty' (reprClosure t)
-vRepr (VLam m v t) = return $ VLam m v (reprClosure t)
-vRepr VU = return VU
-vRepr (VLit l) = return $ VLit l
-vRepr (VNeu (VApp h sp)) = return $ VNeu (VRepr (VApp h sp))
-vRepr (VNeu (VGlobal g sp)) = return $ VNeu (VRepr (VGlobal g sp))
-vRepr (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr (VCaseApp (VCase v cs) sp))
-vRepr (VNeu (VReprApp v sp)) = return $ VNeu (VRepr (VReprApp v sp))
-vRepr (VNeu (VUnrepr v)) = return $ VNeu v
-vRepr (VNeu (VUnreprApp v sp)) = return $ VNeu (VRepr (VUnreprApp v sp))
+unreprClosure :: (Eval m) => ReprMode -> ReprKind -> Closure -> m Closure
+unreprClosure m k t = do
+  a <- postCompose (SUnrepr m k) t
+  preCompose a (SRepr m k)
 
-vUnrepr :: (Eval m) => VTm -> m VTm
-vUnrepr x = undefined
--- vUnrepr (VPi m v ty t) = VPi m v (vUnrepr env ty) (mapClosure SUnrepr t)
--- vUnrepr (VLam m v t) = VLam m v ( mapClosure SUnrepr t $$ [VNeu (VRepr (VVar (Lvl 0)))])
--- vUnrepr VU = VU
--- vUnrepr (VLit l) = VLit l
--- vUnrepr (VNeu (VApp h sp)) = VNeu (VReprApp (VApp h sp) Empty)
--- vUnrepr (VNeu (VGlobal g sp)) = VNeu (VReprApp (VGlobal g sp) Empty)
--- vUnrepr (VNeu (VCaseApp (VCase v cs) sp)) = VNeu (VReprApp (VCaseApp (VCase v cs) sp) Empty)
--- vUnrepr (VNeu (VReprApp v sp)) = VNeu (VReprApp (VReprApp v sp) Empty)
--- vUnrepr (VNeu (VUnreprApp v Empty)) = VNeu v
--- vUnrepr (VNeu (VUnreprApp v sp)) = VNeu (VReprApp (VUnreprApp v sp) Empty)
+vRepr :: (Eval m) => ReprMode -> ReprKind -> VTm -> m VTm
+vRepr m k (VPi e v ty t) = do
+  ty' <- vRepr m k ty
+  t' <- reprClosure m k t
+  return $ VPi e v ty' t'
+vRepr m k (VLam e v t) = do
+  t' <- reprClosure m k t
+  return $ VLam e v t'
+vRepr _ _ VU = return VU
+vRepr _ _ (VLit l) = return $ VLit l
+vRepr m k (VNeu (VApp h sp)) = return $ VNeu (VRepr m k (VApp h sp))
+vRepr m k (VNeu (VGlobal g sp)) = return $ VNeu (VRepr m k (VGlobal g sp))
+vRepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr m k (VCaseApp (VCase v cs) sp))
+vRepr Inf k (VNeu (VReprApp Once k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
+vRepr Inf k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
+vRepr Once k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
+vRepr m k (VNeu (VReprApp m' k' v sp)) = return $ VNeu (VRepr m k (VReprApp m' k' v sp))
+vRepr Inf k (VNeu (VUnreprApp Once k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
+vRepr m k (VNeu (VUnreprApp m' k' v sp)) | m == m' && k == k' = vApp (VNeu v) sp
+vRepr Once k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
+vRepr m k (VNeu (VUnreprApp m' k' v sp)) = return $ VNeu (VRepr m k (VUnreprApp m' k' v sp))
 
+vUnrepr :: (Eval m) => ReprMode -> ReprKind -> VTm -> m VTm
+vUnrepr m k (VPi e v ty t) = do
+  ty' <- vUnrepr m k ty
+  t' <- unreprClosure m k t
+  return $ VPi e v ty' t'
+vUnrepr m k (VLam e v t) = do
+  t' <- unreprClosure m k t
+  return $ VLam e v t'
+vUnrepr _ _ VU = return VU
+vUnrepr _ _ (VLit l) = return $ VLit l
+vUnrepr m k (VNeu (VApp h sp)) = return $ VNeu (VUnrepr m k (VApp h sp))
+vUnrepr m k (VNeu (VGlobal g sp)) = return $ VNeu (VUnrepr m k (VGlobal g sp))
+vUnrepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VUnrepr m k (VCaseApp (VCase v cs) sp))
+vUnrepr Inf k (VNeu (VUnreprApp Once k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
+vUnrepr Inf k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
+vUnrepr Once k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
+vUnrepr m k (VNeu (VUnreprApp m' k' v sp)) = return $ VNeu (VUnrepr m k (VUnreprApp m' k' v sp))
+vUnrepr Inf k (VNeu (VReprApp Once k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
+vUnrepr m k (VNeu (VReprApp m' k' v sp)) | m == m' && k == k' = vApp (VNeu v) sp
+vUnrepr Once k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
+vUnrepr m k (VNeu (VReprApp m' k' v sp)) = return $ VNeu (VUnrepr m k (VReprApp m' k' v sp))
+
+close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
+close n env t = do
+  b <- reduceUnderBinders
+  if b
+    then do
+      t' <- nf (extendEnvByNVars n env) t
+      return $ Closure n env t'
+    else return $ Closure n env t
+
+extendEnvByNVars :: Int -> Env VTm -> Env VTm
+extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
   ty1' <- eval env ty1
-  return $ VPi m v ty1' (Closure env ty2)
-eval env (SLam m v t) = return $ VLam m v (Closure env t)
+  c <- close 1 env ty2
+  return $ VPi m v ty1' c
+eval env (SLam m v t) = do
+  c <- close 1 env t
+  return $ VLam m v c
 eval env (SLet _ _ t1 t2) = do
   t1' <- eval env t1
   eval (t1' : env) t2
 eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
-  return $ vApp t1' (S.singleton (Arg m t2'))
+  vApp t1' (S.singleton (Arg m t2'))
 eval env (SCase t cs) = do
   t' <- evalToNeu env t
-  return $ vCase t' (map (fmap (Closure env)) cs)
+  cs' <- mapM (\p -> traverse (close (numBinds (clausePat p)) env) p) cs
+  vCase t' cs'
 eval _ SU = return VU
-eval _ (SLit l) = return $ VLit l
+eval env (SLit l) = return $ VLit l
 eval _ (SMeta m) = return $ VNeu (VMeta m)
 eval _ (SGlobal g) = return $ VNeu (VGlobal g Empty)
 eval env (SVar (Idx i)) = return $ env !! i
-eval env (SRepr t) = do
+eval env (SRepr m k t) = do
   t' <- eval env t
-  vRepr t'
-eval env (SUnrepr t) = do
+  vRepr m k t'
+eval env (SUnrepr m k t) = do
   t' <- eval env t
-  vUnrepr t'
+  vUnrepr m k t'
 
 newtype SolvedMetas = SolvedMetas (IntMap VTm)
 
@@ -338,12 +375,21 @@ class (Monad m) => HasSolvedMetas m where
   resetSolvedMetas = modifySolvedMetas (const emptySolvedMetas)
 
 class (HasSolvedMetas m) => Eval m where
+  reduceUnderBinders :: m Bool
+  setReduceUnderBinders :: Bool -> m ()
+
+  reduceUnfoldDefs :: m Bool
+  setReduceUnfoldDefs :: Bool -> m ()
+
+  uniqueName :: m Name
 
 force :: (Eval m) => VTm -> m VTm
 force v@(VNeu (VApp (VFlex m) sp)) = do
   mt <- lookupMeta m
   case mt of
-    Just t -> force (vApp t sp)
+    Just t -> do
+      t' <- vApp t sp
+      force t'
     Nothing -> return v
 force v = return v
 
@@ -359,24 +405,33 @@ quote l vt = do
   vt' <- force vt
   case vt' of
     VLam m x t -> do
-      t' <- quote (nextLvl l) (t $$ [VNeu (VVar l)])
+      a <- t $$ [VNeu (VVar l)]
+      t' <- quote (nextLvl l) a
       return $ SLam m x t'
     VPi m x ty t -> do
       ty' <- quote l ty
-      t' <- quote (nextLvl l) (t $$ [VNeu (VVar l)])
+      a <- t $$ [VNeu (VVar l)]
+      t' <- quote (nextLvl l) a
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> return $ SLit lit
     VNeu (VApp (VFlex m) sp) -> quoteSpine l (SMeta m) sp
     VNeu (VApp (VRigid l') sp) -> quoteSpine l (SVar (lvlToIdx l l')) sp
     VNeu (VGlobal g sp) -> quoteSpine l (SGlobal g) sp
+    VNeu (VReprApp m k v sp) -> do
+      v' <- quote l (VNeu v)
+      quoteSpine l (SRepr m k v') sp
+    VNeu (VUnreprApp m k v sp) -> do
+      v' <- quote l (VNeu v)
+      quoteSpine l (SUnrepr m k v') sp
     VNeu (VCaseApp (VCase v cs) sp) -> do
       v' <- quote l (VNeu v)
       cs' <-
         mapM
           ( \case
               Possible p t -> do
-                t' <- quote (nextLvls l (numBinds p)) (t $$ map (VNeu . VVar . nextLvls l) [0 .. numBinds p - 1])
+                a <- t $$ extendEnvByNVars (numBinds p) []
+                t' <- quote (nextLvls l (numBinds p)) a
                 return (Possible p t')
               Impossible p -> return (Impossible p)
           )
@@ -387,6 +442,177 @@ nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do
   t' <- eval env t
   quote (Lvl (length env)) t'
+
+newtype Name = Name String deriving (Eq, Generic, Data, Typeable, Show)
+
+type PTy = PTm
+
+type PPat = PTm
+
+data PDef = MkPDef
+  { name :: Name,
+    ty :: PTy,
+    tm :: PTm,
+    unfold :: Bool,
+    recursive :: Bool
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PCtor = MkPCtor
+  { name :: Name,
+    ty :: PTy
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PData = MkPData
+  { name :: Name,
+    ty :: PTy,
+    ctors :: [PCtor]
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PCtorRep = MkPCtorRep
+  { src :: PPat,
+    target :: PTm
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PCaseRep = MkPCaseRep
+  { srcSubject :: PPat,
+    srcBranches :: [Clause Name PPat],
+    target :: PTm
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PDataRep = MkPRep
+  { src :: PPat,
+    target :: PTy,
+    ctors :: [PCtorRep],
+    caseExpr :: PCaseRep
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PDefRep = MkPDefRep
+  { src :: PPat,
+    target :: PTm
+  }
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PItem
+  = PDef PDef
+  | PData PData
+  | PDataRep PDataRep
+  | PDefRep PDefRep
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+data PTm
+  = PPi PiMode Name PTy PTy
+  | PLam PiMode Name PTm
+  | PLet Name PTy PTm PTm
+  | PApp PiMode PTm PTm
+  | PSigma Name PTy PTm
+  | PPair PTm PTm
+  | PCase PTm [Clause PPat PTm]
+  | PU
+  | PName Name
+  | PLit (Lit PTm)
+  | PHole Name
+  | PRepr PTm
+  | PUnrepr PTm
+  | PWild
+  | PLocated Loc PTm
+  deriving (Eq, Generic, Data, Typeable, Show)
+
+newtype Sig = Sig { members :: [Glob] }
+
+class (Eval m) => Unify m
+
+class (Eval m, Unify m) => Elab m
+
+unifySpines :: (Unify m) => (Lvl -> a -> a -> m ()) -> Lvl -> Spine a -> Spine a -> m ()
+unifySpines _ _ Empty Empty = return ()
+unifySpines f l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
+  unifySpines f l sp sp'
+  f l u u'
+unifySpines _ _ _ _ = error "unifySpines: different lengths"
+
+unifyPats :: (Unify m) => Lvl -> SPat -> SPat -> m ()
+unifyPats l (SPBind _) (SPBind _) = return ()
+unifyPats l (SPApp (CtorGlobal c) sp) (SPApp (CtorGlobal c') sp') | c == c' = unifySpines unifyPats l sp sp'
+unifyPats _ _ _ = error "unifyPats"
+
+unifyCase :: (Unify m) => Lvl -> VCase -> VCase -> m ()
+unifyCase l (VCase s bs) (VCase s' bs') = do
+  unify l (VNeu s) (VNeu s')
+  unifyClauses bs bs'
+  where
+    unifyClauses :: (Unify m) => [Clause SPat Closure] -> [Clause SPat Closure] -> m ()
+    unifyClauses [] [] = return ()
+    unifyClauses (c : cs) (c' : cs') = do
+      unifyClause c c'
+      unifyClauses cs cs'
+    unifyClauses _ _ = error "unifyClauses: different lengths"
+
+    unifyClause :: (Unify m) => Clause SPat Closure -> Clause SPat Closure -> m ()
+    unifyClause (Possible p t) (Possible p' t') = do
+      unifyPats l p p'
+      let n = numBinds p
+      let n' = numBinds p'
+      assert (n == n') (return ())
+      x <- t $$ extendEnvByNVars n []
+      x' <- t' $$ extendEnvByNVars n []
+      unify (nextLvls l n) x x'
+    unifyClause (Impossible p) (Impossible p') = unifyPats l p p'
+    unifyClause _ _ = error "unifyClause"
+
+solve :: (Unify m) => l -> MetaVar -> Spine VTm -> VTm -> m ()
+solve = undefined
+
+unify :: (Unify m) => Lvl -> VTm -> VTm -> m ()
+unify l t1 t2 = do
+  t1' <- force t1
+  t2' <- force t2
+  case (t1', t2') of
+    (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
+      unify l t t'
+      x <- c $$ [VNeu (VVar l)]
+      x' <- c' $$ [VNeu (VVar l)]
+      unify (nextLvl l) x x'
+    (VLam m _ c, VLam m' _ c') | m == m' -> do
+      x <- c $$ [VNeu (VVar l)]
+      x' <- c' $$ [VNeu (VVar l)]
+      unify (nextLvl l) x x'
+    (t, VLam m' _ c') -> do
+      x <- vApp t (S.singleton (Arg m' (VNeu (VVar l))))
+      x' <- c' $$ [VNeu (VVar l)]
+      unify (nextLvl l) x x'
+    (VLam m _ c, t) -> do
+      x <- c $$ [VNeu (VVar l)]
+      x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
+      unify (nextLvl l) x x'
+    (VU, VU) -> return ()
+    (VLit a, VLit a') | a == a' -> return ()
+    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> unifySpines unify l sp sp'
+    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> unifySpines unify l sp sp'
+    (VNeu (VGlobal g sp), VNeu (VGlobal g' sp')) | g == g' -> unifySpines unify l sp sp'
+    (VNeu (VCaseApp c sp), VNeu (VCaseApp c' sp')) -> do
+      unifyCase l c c'
+      unifySpines unify l sp sp'
+    (VNeu (VReprApp m k v sp), VNeu (VReprApp m' k' v' sp')) | m == m' && k == k' -> do
+      unify l (VNeu v) (VNeu v')
+      unifySpines unify l sp sp'
+    (VNeu (VUnreprApp m k v sp), VNeu (VUnreprApp m' k' v' sp')) | m == m' && k == k' -> do
+      unify l (VNeu v) (VNeu v')
+      unifySpines unify l sp sp'
+    (VNeu (VApp (VFlex x) sp), t') -> solve l x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
+    _ -> error "unify"
+
+infer :: (Elab m) => PTm -> m (STm, VTy)
+infer = undefined
+
+check :: (Elab m) => PTm -> VTm -> m STy
+check = undefined
 
 -- | A term
 data TermValue
@@ -409,7 +635,7 @@ data TermValue
   | -- | Hole identified by an integer
     Hole Var
   | -- | A literal
-    Lit Lit
+    Lit (Lit Term)
   | -- | Metavar identified by an integer
     Meta Var
   | -- | Represent a term
@@ -770,3 +996,16 @@ isValidPat (Term (V _) _) = True
 isValidPat (Term Wild _) = True
 isValidPat (Term (Pair p1 p2) _) = isValidPat p1 && isValidPat p2
 isValidPat _ = False
+
+-- | Type alias for terms that are expected to be types (just for documentation purposes).
+type Type = Term
+
+-- | Type alias for terms that are expected to be patterns (just for documentation purposes).
+type Pat = Term
+
+-- | A global name is a string.
+type GlobalName = String
+
+-- | A variable
+-- Represented by a string name and a unique integer identifier (no shadowing).
+data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Generic, Data, Typeable, Show)
