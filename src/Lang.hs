@@ -176,7 +176,6 @@ data VHead = VFlex MetaVar | VRigid Lvl
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VGlobal Glob (Spine VTm)
   | VCaseApp VCase (Spine VTm)
   | VReprApp ReprMode ReprKind VNeu (Spine VTm)
   | VUnreprApp ReprMode ReprKind VNeu (Spine VTm)
@@ -185,6 +184,7 @@ data VTm
   = VPi PiMode Name VTy Closure
   | VLam PiMode Name Closure
   | VU
+  | VGlobal Glob (Spine VTm)
   | VLit (Lit ())
   | VNeu VNeu
 
@@ -207,19 +207,19 @@ Closure _ env t $$ us = eval (us ++ env) t
 
 vAppNeu :: VNeu -> Spine VTm -> VTm
 vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
-vAppNeu (VGlobal g us) u = VNeu (VGlobal g (us >< u))
 vAppNeu (VCaseApp c us) u = VNeu (VCaseApp c (us >< u))
 
 vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
 vApp (VLam _ _ c) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
+vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
 vApp (VNeu n) u = return $ vAppNeu n u
 vApp _ _ = error "impossible"
 
 vMatch :: SPat -> VTm -> Maybe (Env VTm)
 vMatch (SPBind x) u = Just [u]
-vMatch (SPApp (CtorGlobal c) ps) (VNeu (VGlobal (CtorGlob (CtorGlobal c')) xs))
+vMatch (SPApp (CtorGlobal c) ps) (VGlobal (CtorGlob (CtorGlobal c')) xs)
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -280,8 +280,8 @@ vRepr m k (VLam e v t) = do
   return $ VLam e v t'
 vRepr _ _ VU = return VU
 vRepr _ _ (VLit l) = return $ VLit l
+vRepr m k (VGlobal g sp) = return undefined -- @@TODO
 vRepr m k (VNeu (VApp h sp)) = return $ VNeu (VRepr m k (VApp h sp))
-vRepr m k (VNeu (VGlobal g sp)) = return $ VNeu (VRepr m k (VGlobal g sp))
 vRepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr m k (VCaseApp (VCase v cs) sp))
 vRepr Inf k (VNeu (VReprApp Once k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
 vRepr Inf k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
@@ -302,8 +302,8 @@ vUnrepr m k (VLam e v t) = do
   return $ VLam e v t'
 vUnrepr _ _ VU = return VU
 vUnrepr _ _ (VLit l) = return $ VLit l
+vUnrepr m k (VGlobal g sp) = return undefined -- @@TODO
 vUnrepr m k (VNeu (VApp h sp)) = return $ VNeu (VUnrepr m k (VApp h sp))
-vUnrepr m k (VNeu (VGlobal g sp)) = return $ VNeu (VUnrepr m k (VGlobal g sp))
 vUnrepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VUnrepr m k (VCaseApp (VCase v cs) sp))
 vUnrepr Inf k (VNeu (VUnreprApp Once k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
 vUnrepr Inf k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
@@ -348,7 +348,7 @@ eval env (SCase t cs) = do
 eval _ SU = return VU
 eval env (SLit l) = return $ VLit l
 eval _ (SMeta m) = return $ VNeu (VMeta m)
-eval _ (SGlobal g) = return $ VNeu (VGlobal g Empty)
+eval _ (SGlobal g) = return $ VGlobal g Empty
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m k t) = do
   t' <- eval env t
@@ -415,9 +415,9 @@ quote l vt = do
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> return $ SLit lit
+    VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp (VFlex m) sp) -> quoteSpine l (SMeta m) sp
     VNeu (VApp (VRigid l') sp) -> quoteSpine l (SVar (lvlToIdx l l')) sp
-    VNeu (VGlobal g sp) -> quoteSpine l (SGlobal g) sp
     VNeu (VReprApp m k v sp) -> do
       v' <- quote l (VNeu v)
       quoteSpine l (SRepr m k v') sp
@@ -592,9 +592,9 @@ unify l t1 t2 = do
       unify (nextLvl l) x x'
     (VU, VU) -> return ()
     (VLit a, VLit a') | a == a' -> return ()
+    (VGlobal g sp, VGlobal g' sp') | g == g' -> unifySpines unify l sp sp'
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> unifySpines unify l sp sp'
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> unifySpines unify l sp sp'
-    (VNeu (VGlobal g sp), VNeu (VGlobal g' sp')) | g == g' -> unifySpines unify l sp sp'
     (VNeu (VCaseApp c sp), VNeu (VCaseApp c' sp')) -> do
       unifyCase l c c'
       unifySpines unify l sp sp'
@@ -622,13 +622,17 @@ define x t ty (Ctx env l tys) = Ctx (t : env) (nextLvl l) (ty : tys)
 freshUserMeta :: (Elab m) => Maybe Name -> Maybe VTy -> Ctx -> m STy
 freshUserMeta = undefined
 
-infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
-infer = undefined
-
 insert :: (Elab m) => Ctx -> (STm, VTy) -> m (STm, VTy)
 insert = undefined
 
-check :: (Elab m) => Ctx -> PTm -> VTm -> m STy
+infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
+infer ctx term = case term of
+  PRepr x -> do
+    -- Infer x to t, then find repr of t in context, and the rhs is the type
+    undefined
+  _ -> undefined
+
+check :: (Elab m) => Ctx -> PTm -> VTm -> m STm
 check ctx term typ = do
   typ' <- force typ
   case (term, typ') of
@@ -645,6 +649,9 @@ check ctx term typ = do
       vt <- eval ctx.env t'
       u' <- check (define x vt va ctx) u ty
       return (SLet x a' t' u')
+    (PUnrepr x, VGlobal c sp) -> do
+      -- Find repr of c in context, then check x against the rhs of the repr
+      undefined
     (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
     (PWild, ty) -> freshUserMeta Nothing (Just ty) ctx
     (te, ty) -> do
