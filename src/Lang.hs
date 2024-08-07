@@ -60,6 +60,7 @@ module Lang
 where
 
 import Control.Applicative ((<|>))
+import Control.Exception (assert)
 import Control.Monad (foldM, join)
 import Control.Monad.Extra (firstJustM)
 import Control.Monad.Identity (runIdentity)
@@ -76,7 +77,6 @@ import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import GHC.Natural (Natural)
 import GHC.TypeNats (Nat)
-import Control.Exception (assert)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
@@ -523,7 +523,7 @@ data PTm
   | PLocated Loc PTm
   deriving (Eq, Generic, Data, Typeable, Show)
 
-newtype Sig = Sig { members :: [Glob] }
+newtype Sig = Sig {members :: [Glob]}
 
 class (Eval m) => Unify m
 
@@ -608,11 +608,49 @@ unify l t1 t2 = do
     (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
     _ -> error "unify"
 
-infer :: (Elab m) => PTm -> m (STm, VTy)
+data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy]}
+
+bind :: Name -> VTy -> Ctx -> Ctx
+bind x ty (Ctx env l tys) = Ctx (VNeu (VVar l) : env) (nextLvl l) (ty : tys)
+
+insertedBind :: Name -> VTy -> Ctx -> Ctx
+insertedBind x ty (Ctx env l tys) = Ctx (VNeu (VVar l) : env) (nextLvl l) (ty : tys)
+
+define :: Name -> VTm -> VTy -> Ctx -> Ctx
+define x t ty (Ctx env l tys) = Ctx (t : env) (nextLvl l) (ty : tys)
+
+freshUserMeta :: (Elab m) => Maybe Name -> Maybe VTy -> Ctx -> m STy
+freshUserMeta = undefined
+
+infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
 infer = undefined
 
-check :: (Elab m) => PTm -> VTm -> m STy
-check = undefined
+insert :: (Elab m) => Ctx -> (STm, VTy) -> m (STm, VTy)
+insert = undefined
+
+check :: (Elab m) => Ctx -> PTm -> VTm -> m STy
+check ctx term typ = do
+  typ' <- force typ
+  case (term, typ') of
+    (PLam m x t, VPi m' _ a b) | m == m' -> do
+      vb <- b $$ [VNeu (VVar ctx.lvl)]
+      SLam m x <$> check (bind x a ctx) t vb
+    (t, VPi Implicit x' a b) -> do
+      vb <- b $$ [VNeu (VVar ctx.lvl)]
+      SLam Implicit x' <$> check (insertedBind x' a ctx) t vb
+    (PLet x a t u, ty) -> do
+      a' <- check ctx a VU
+      va <- eval ctx.env a'
+      t' <- check ctx t va
+      vt <- eval ctx.env t'
+      u' <- check (define x vt va ctx) u ty
+      return (SLet x a' t' u')
+    (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
+    (PWild, ty) -> freshUserMeta Nothing (Just ty) ctx
+    (te, ty) -> do
+      (te', ty') <- infer ctx te >>= insert ctx
+      unify ctx.lvl ty ty'
+      return te'
 
 -- | A term
 data TermValue
