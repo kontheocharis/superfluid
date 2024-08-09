@@ -109,12 +109,18 @@ nextLvls (Lvl l) n = Lvl (l + n)
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
 
-data Arg t = Arg PiMode t deriving (Eq, Generic, Data, Typeable, Show)
+data Arg t = Arg PiMode t deriving (Eq, Generic, Data, Typeable, Show, Functor, Traversable, Foldable)
 
 argVal :: Arg t -> t
 argVal (Arg _ t) = t
 
 type Spine t = Seq (Arg t) -- IN REVERSE ORDER
+
+mapSpine :: (t -> t') -> Spine t -> Spine t'
+mapSpine f = fmap (fmap f)
+
+mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
+mapSpineM f = traverse (traverse f)
 
 data MetaVar = MetaVar Int deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -147,8 +153,6 @@ data ReprTarget
   | ReprCase DataGlobal -- Represent a case expression
   deriving (Eq, Generic, Data, Typeable, Show)
 
-data ReprMode = Once | Inf deriving (Eq, Generic, Data, Typeable, Show)
-
 data STm
   = SPi PiMode Name STm STm
   | SLam PiMode Name STm
@@ -160,8 +164,7 @@ data STm
   | SGlobal Glob
   | SVar Idx
   | SLit (Lit ())
-  | SRepr ReprMode STm
-  | SUnrepr ReprMode STm
+  | SRepr Times STm
   deriving (Generic, Typeable)
 
 type VTy = VTm
@@ -174,13 +177,52 @@ data VCase = VCase {subject :: VNeu, branches :: [Clause SPat Closure]}
 
 data VHead = VFlex MetaVar | VRigid Lvl
 
-data VReprTarget = VReprNeu VNeu | VReprKnown ReprTarget
+data Times = Finite Int | NegInf | PosInf deriving (Eq, Generic, Data, Typeable, Show)
+
+inc :: Times -> Times
+inc (Finite n) = Finite (n + 1)
+inc NegInf = NegInf
+inc PosInf = PosInf
+
+dec :: Times -> Times
+dec (Finite n) = Finite (n - 1)
+dec NegInf = NegInf
+dec PosInf = PosInf
+
+inv :: Times -> Times
+inv (Finite n) = Finite (-n)
+inv NegInf = PosInf
+inv PosInf = NegInf
+
+instance Semigroup Times where
+  Finite n <> Finite m = Finite (n + m)
+  NegInf <> PosInf = Finite 0
+  PosInf <> NegInf = Finite 0
+  PosInf <> _ = PosInf
+  _ <> PosInf = PosInf
+  NegInf <> _ = NegInf
+  _ <> NegInf = NegInf
+
+instance Monoid Times where
+  mempty = Finite 0
+
+instance Bounded Times where
+  minBound = NegInf
+  maxBound = PosInf
+
+instance Ord Times where
+  compare (Finite n) (Finite m) = compare n m
+  compare NegInf NegInf = EQ
+  compare PosInf PosInf = EQ
+  compare NegInf _ = LT
+  compare _ NegInf = GT
+  compare PosInf _ = GT
+  compare _ PosInf = LT
 
 data VNeu
   = VApp VHead (Spine VTm)
   | VCaseApp VCase (Spine VTm)
-  | VReprApp ReprMode VNeu (Spine VTm)
-  | VUnreprApp ReprMode VNeu (Spine VTm)
+  | VReprApp Times VHead (Spine VTm)
 
 data VTm
   = VPi PiMode Name VTy Closure
@@ -198,11 +240,8 @@ pattern VVar l = VApp (VRigid l) Empty
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
 
-pattern VRepr :: ReprMode -> VNeu -> VNeu
+pattern VRepr :: Times -> VHead -> VNeu
 pattern VRepr m t = VReprApp m t Empty
-
-pattern VUnrepr :: ReprMode -> VNeu -> VNeu
-pattern VUnrepr m t = VUnreprApp m t Empty
 
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (us ++ env) t
@@ -262,17 +301,13 @@ preCompose (Closure n env t) f = do
   v <- uniqueName
   close n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
 
-reprClosure :: (Eval m) => ReprMode -> Closure -> m Closure
+reprClosure :: (Eval m) => Times -> Closure -> m Closure
 reprClosure m t = do
   a <- postCompose (SRepr m) t
-  preCompose a (SUnrepr m)
+  preCompose a (SRepr (inv m))
 
-unreprClosure :: (Eval m) => ReprMode -> Closure -> m Closure
-unreprClosure m t = do
-  a <- postCompose (SUnrepr m) t
-  preCompose a (SRepr m)
-
-vRepr :: (Eval m) => ReprMode -> VTm -> m VTm
+vRepr :: (Eval m) => Times -> VTm -> m VTm
+vRepr (Finite 0) t = return t
 vRepr m (VPi e v ty t) = do
   ty' <- vRepr m ty
   t' <- reprClosure m t
@@ -283,38 +318,18 @@ vRepr m (VLam e v t) = do
 vRepr _ VU = return VU
 vRepr _ (VLit l) = return $ VLit l
 vRepr m (VGlobal g sp) = return undefined -- @@TODO
-vRepr m (VNeu (VApp h sp)) = return $ VNeu (VRepr m (VApp h sp))
-vRepr m (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr m (VCaseApp (VCase v cs) sp))
-vRepr Inf (VNeu (VReprApp Once v sp)) = return $ VNeu (VReprApp Inf v sp)
-vRepr Inf (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
-vRepr Once (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
-vRepr m (VNeu (VReprApp m' v sp)) = return $ VNeu (VRepr m (VReprApp m' v sp))
-vRepr Inf (VNeu (VUnreprApp Once v sp)) = return $ VNeu (VReprApp Inf v sp)
-vRepr Once (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
-vRepr Inf (VNeu (VUnreprApp Inf v sp)) = vApp (VNeu v) sp
-vRepr Once (VNeu (VUnreprApp Once v sp)) = vApp (VNeu v) sp
-
-vUnrepr :: (Eval m) => ReprMode -> VTm -> m VTm
-vUnrepr m (VPi e v ty t) = do
-  ty' <- vUnrepr m ty
-  t' <- unreprClosure m t
-  return $ VPi e v ty' t'
-vUnrepr m (VLam e v t) = do
-  t' <- unreprClosure m t
-  return $ VLam e v t'
-vUnrepr _ VU = return VU
-vUnrepr _ (VLit l) = return $ VLit l
-vUnrepr m (VGlobal g sp) = return undefined -- @@TODO
-vUnrepr m (VNeu (VApp h sp)) = return $ VNeu (VUnrepr m (VApp h sp))
-vUnrepr m (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VUnrepr m (VCaseApp (VCase v cs) sp))
-vUnrepr Inf (VNeu (VUnreprApp Once v sp)) = return $ VNeu (VUnreprApp Inf v sp)
-vUnrepr Inf (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
-vUnrepr Once (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
-vUnrepr m (VNeu (VUnreprApp m' v sp)) = return $ VNeu (VUnrepr m (VUnreprApp m' v sp))
-vUnrepr Inf (VNeu (VReprApp Once v sp)) = return $ VNeu (VUnreprApp Inf v sp)
-vUnrepr Once (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
-vUnrepr Inf (VNeu (VReprApp Inf v sp)) = vApp (VNeu v) sp
-vUnrepr Once (VNeu (VReprApp Once v sp)) = vApp (VNeu v) sp
+vRepr m (VNeu (VCaseApp (VCase v cs) sp)) = return undefined -- @@TODO
+vRepr m (VNeu (VApp h sp)) = do
+  sp' <- mapSpineM (vRepr m) sp
+  return $ VNeu (VReprApp m h sp')
+vRepr m (VNeu (VReprApp m' v sp)) = do
+  sp' <- mapSpineM (vRepr m) sp
+  let mm' = m <> m'
+  if mm' == mempty
+    then
+      return $ VNeu (VApp v sp')
+    else
+      return $ VNeu (VReprApp mm' v sp')
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = do
@@ -355,9 +370,6 @@ eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
   vRepr m t'
-eval env (SUnrepr m t) = do
-  t' <- eval env t
-  vUnrepr m t'
 
 newtype SolvedMetas = SolvedMetas (IntMap VTm)
 
@@ -402,6 +414,10 @@ quoteSpine l t (sp :|> Arg m u) = do
   u' <- quote l u
   return $ SApp m t' u'
 
+quoteHead :: Lvl -> VHead -> STm
+quoteHead _ (VFlex m) = SMeta m
+quoteHead l (VRigid l') = SVar (lvlToIdx l l')
+
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
   vt' <- force vt
@@ -418,14 +434,8 @@ quote l vt = do
     VU -> return SU
     VLit lit -> return $ SLit lit
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
-    VNeu (VApp (VFlex m) sp) -> quoteSpine l (SMeta m) sp
-    VNeu (VApp (VRigid l') sp) -> quoteSpine l (SVar (lvlToIdx l l')) sp
-    VNeu (VReprApp m v sp) -> do
-      v' <- quote l (VNeu v)
-      quoteSpine l (SRepr m v') sp
-    VNeu (VUnreprApp m v sp) -> do
-      v' <- quote l (VNeu v)
-      quoteSpine l (SUnrepr m v') sp
+    VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
+    VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
     VNeu (VCaseApp (VCase v cs) sp) -> do
       v' <- quote l (VNeu v)
       cs' <-
@@ -519,8 +529,7 @@ data PTm
   | PName Name
   | PLit (Lit PTm)
   | PHole Name
-  | PRepr ReprMode PTm
-  | PUnrepr ReprMode PTm
+  | PRepr Times PTm
   | PWild
   | PLocated Loc PTm
   deriving (Eq, Generic, Data, Typeable, Show)
@@ -601,10 +610,7 @@ unify l t1 t2 = do
       unifyCase l c c'
       unifySpines unify l sp sp'
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
-      unify l (VNeu v) (VNeu v')
-      unifySpines unify l sp sp'
-    (VNeu (VUnreprApp m v sp), VNeu (VUnreprApp m' v' sp')) | m == m' -> do
-      unify l (VNeu v) (VNeu v')
+      unify l (VNeu (VApp v Empty)) (VNeu (VApp v' Empty))
       unifySpines unify l sp sp'
     (VNeu (VApp (VFlex x) sp), t') -> solve l x sp t'
     (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
@@ -651,9 +657,6 @@ check ctx term typ = do
       vt <- eval ctx.env t'
       u' <- check (define x vt va ctx) u ty
       return (SLet x a' t' u')
-    (PUnrepr m x, VGlobal c sp) -> do
-      -- Find repr of c in context, then check x against the rhs of the repr
-      undefined
     (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
     (PWild, ty) -> freshUserMeta Nothing (Just ty) ctx
     (te, ty) -> do
