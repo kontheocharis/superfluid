@@ -70,6 +70,7 @@ import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List.Extra (firstJust)
 import Data.Map (Map)
+import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), ViewL (..), ViewR (..), (><))
 import qualified Data.Sequence as S
@@ -96,9 +97,9 @@ instance (Eq t) => Eq (Lit t) where
   (FinLit n1 _) == (FinLit n2 _) = n1 == n2
   _ == _ = False
 
-newtype Idx = Idx Int deriving (Eq, Generic, Data, Typeable, Show)
+newtype Idx = Idx {unIdx :: Int} deriving (Eq, Generic, Data, Typeable, Show)
 
-newtype Lvl = Lvl Int deriving (Eq, Generic, Data, Typeable, Show)
+newtype Lvl = Lvl {unLvl :: Int} deriving (Eq, Generic, Data, Typeable, Show)
 
 nextLvl :: Lvl -> Lvl
 nextLvl (Lvl l) = Lvl (l + 1)
@@ -458,7 +459,7 @@ nf env t = do
   t' <- eval env t
   quote (Lvl (length env)) t'
 
-newtype Name = Name String deriving (Eq, Generic, Data, Typeable, Show)
+newtype Name = Name String deriving (Eq, Generic, Data, Typeable, Show, Ord)
 
 type PTy = PTm
 
@@ -619,16 +620,30 @@ unify l t1 t2 = do
     (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
     _ -> error "unify"
 
-data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy]}
+data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy], names :: Map Name Lvl, currentLoc :: Maybe Loc}
 
 bind :: Name -> VTy -> Ctx -> Ctx
-bind x ty (Ctx env l tys) = Ctx (VNeu (VVar l) : env) (nextLvl l) (ty : tys)
+bind x ty ctx = define x (VNeu (VVar ctx.lvl)) ty ctx
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
-insertedBind x ty (Ctx env l tys) = Ctx (VNeu (VVar l) : env) (nextLvl l) (ty : tys)
+insertedBind = bind
 
 define :: Name -> VTm -> VTy -> Ctx -> Ctx
-define x t ty (Ctx env l tys) = Ctx (t : env) (nextLvl l) (ty : tys)
+define x t ty ctx =
+  ctx
+    { env = t : ctx.env,
+      lvl = nextLvl ctx.lvl,
+      types = ty : ctx.types,
+      names = M.insert x ctx.lvl ctx.names
+    }
+
+lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
+lookupName n ctx = case M.lookup n ctx.names of
+  Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
+  Nothing -> Nothing
+
+located :: Loc -> Ctx -> Ctx
+located l ctx = ctx {currentLoc = Just l}
 
 freshUserMeta :: (Elab m) => Maybe Name -> Maybe VTy -> Ctx -> m STy
 freshUserMeta = undefined
@@ -638,6 +653,10 @@ insert = undefined
 
 infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
 infer ctx term = case term of
+  PLocated l t -> infer (located l ctx) t
+  PName x -> case lookupName x ctx of
+    Just (i, t) -> return (SVar i, t)
+    Nothing -> error "undefined variable"
   PRepr m x -> do
     -- Infer x to t, then find repr of t in context, and the rhs is the type
     undefined
@@ -647,6 +666,7 @@ check :: (Elab m) => Ctx -> PTm -> VTy -> m STm
 check ctx term typ = do
   typ' <- force typ
   case (term, typ') of
+    (PLocated l t, ty) -> check (located l ctx) t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
       vb <- b $$ [VNeu (VVar ctx.lvl)]
       SLam m x <$> check (bind x a ctx) t vb
@@ -661,8 +681,8 @@ check ctx term typ = do
       u' <- check (define x vt va ctx) u ty
       return (SLet x a' t' u')
     (PRepr m t, VNeu (VRepr m' t')) | m == m' -> do
-       tc <- check ctx t (VNeu (VHead t'))
-       return $ SRepr m tc
+      tc <- check ctx t (VNeu (VHead t'))
+      return $ SRepr m tc
     (PRepr m t, ty) | m < mempty -> do
       (t', ty') <- infer ctx t >>= insert ctx
       reprTy <- vRepr (inv m) ty
