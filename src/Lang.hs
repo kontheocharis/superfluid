@@ -240,6 +240,9 @@ pattern VVar l = VApp (VRigid l) Empty
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
 
+pattern VHead :: VHead -> VNeu
+pattern VHead m = VApp m Empty
+
 pattern VRepr :: Times -> VHead -> VNeu
 pattern VRepr m t = VReprApp m t Empty
 
@@ -640,7 +643,7 @@ infer ctx term = case term of
     undefined
   _ -> undefined
 
-check :: (Elab m) => Ctx -> PTm -> VTm -> m STy
+check :: (Elab m) => Ctx -> PTm -> VTy -> m STm
 check ctx term typ = do
   typ' <- force typ
   case (term, typ') of
@@ -657,6 +660,14 @@ check ctx term typ = do
       vt <- eval ctx.env t'
       u' <- check (define x vt va ctx) u ty
       return (SLet x a' t' u')
+    (PRepr m t, VNeu (VRepr m' t')) | m == m' -> do
+       tc <- check ctx t (VNeu (VHead t'))
+       return $ SRepr m tc
+    (PRepr m t, ty) | m < mempty -> do
+      (t', ty') <- infer ctx t >>= insert ctx
+      reprTy <- vRepr (inv m) ty
+      unify ctx.lvl reprTy ty'
+      return $ SRepr m t'
     (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
     (PWild, ty) -> freshUserMeta Nothing (Just ty) ctx
     (te, ty) -> do
