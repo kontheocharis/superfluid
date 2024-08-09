@@ -140,7 +140,7 @@ clausePat :: Clause p t -> p
 clausePat (Possible p _) = p
 clausePat (Impossible p) = p
 
-data ReprKind
+data ReprTarget
   = ReprTy DataGlobal -- Represent a data type
   | ReprInh DataGlobal -- Represent an inhabitant of a data type
   | ReprDef DefGlobal -- Represent a definition
@@ -160,8 +160,8 @@ data STm
   | SGlobal Glob
   | SVar Idx
   | SLit (Lit ())
-  | SRepr ReprMode ReprKind STm
-  | SUnrepr ReprMode ReprKind STm
+  | SRepr ReprMode STm
+  | SUnrepr ReprMode STm
   deriving (Generic, Typeable)
 
 type VTy = VTm
@@ -174,11 +174,13 @@ data VCase = VCase {subject :: VNeu, branches :: [Clause SPat Closure]}
 
 data VHead = VFlex MetaVar | VRigid Lvl
 
+data VReprTarget = VReprNeu VNeu | VReprKnown ReprTarget
+
 data VNeu
   = VApp VHead (Spine VTm)
   | VCaseApp VCase (Spine VTm)
-  | VReprApp ReprMode ReprKind VNeu (Spine VTm)
-  | VUnreprApp ReprMode ReprKind VNeu (Spine VTm)
+  | VReprApp ReprMode VNeu (Spine VTm)
+  | VUnreprApp ReprMode VNeu (Spine VTm)
 
 data VTm
   = VPi PiMode Name VTy Closure
@@ -196,11 +198,11 @@ pattern VVar l = VApp (VRigid l) Empty
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
 
-pattern VRepr :: ReprMode -> ReprKind -> VNeu -> VNeu
-pattern VRepr m k t = VReprApp m k t Empty
+pattern VRepr :: ReprMode -> VNeu -> VNeu
+pattern VRepr m t = VReprApp m t Empty
 
-pattern VUnrepr :: ReprMode -> ReprKind -> VNeu -> VNeu
-pattern VUnrepr m k t = VUnreprApp m k t Empty
+pattern VUnrepr :: ReprMode -> VNeu -> VNeu
+pattern VUnrepr m t = VUnreprApp m t Empty
 
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (us ++ env) t
@@ -260,59 +262,59 @@ preCompose (Closure n env t) f = do
   v <- uniqueName
   close n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
 
-reprClosure :: (Eval m) => ReprMode -> ReprKind -> Closure -> m Closure
-reprClosure m k t = do
-  a <- postCompose (SRepr m k) t
-  preCompose a (SUnrepr m k)
+reprClosure :: (Eval m) => ReprMode -> Closure -> m Closure
+reprClosure m t = do
+  a <- postCompose (SRepr m) t
+  preCompose a (SUnrepr m)
 
-unreprClosure :: (Eval m) => ReprMode -> ReprKind -> Closure -> m Closure
-unreprClosure m k t = do
-  a <- postCompose (SUnrepr m k) t
-  preCompose a (SRepr m k)
+unreprClosure :: (Eval m) => ReprMode -> Closure -> m Closure
+unreprClosure m t = do
+  a <- postCompose (SUnrepr m) t
+  preCompose a (SRepr m)
 
-vRepr :: (Eval m) => ReprMode -> ReprKind -> VTm -> m VTm
-vRepr m k (VPi e v ty t) = do
-  ty' <- vRepr m k ty
-  t' <- reprClosure m k t
+vRepr :: (Eval m) => ReprMode -> VTm -> m VTm
+vRepr m (VPi e v ty t) = do
+  ty' <- vRepr m ty
+  t' <- reprClosure m t
   return $ VPi e v ty' t'
-vRepr m k (VLam e v t) = do
-  t' <- reprClosure m k t
+vRepr m (VLam e v t) = do
+  t' <- reprClosure m t
   return $ VLam e v t'
-vRepr _ _ VU = return VU
-vRepr _ _ (VLit l) = return $ VLit l
-vRepr m k (VGlobal g sp) = return undefined -- @@TODO
-vRepr m k (VNeu (VApp h sp)) = return $ VNeu (VRepr m k (VApp h sp))
-vRepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr m k (VCaseApp (VCase v cs) sp))
-vRepr Inf k (VNeu (VReprApp Once k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
-vRepr Inf k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
-vRepr Once k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
-vRepr m k (VNeu (VReprApp m' k' v sp)) = return $ VNeu (VRepr m k (VReprApp m' k' v sp))
-vRepr Inf k (VNeu (VUnreprApp Once k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
-vRepr m k (VNeu (VUnreprApp m' k' v sp)) | m == m' && k == k' = vApp (VNeu v) sp
-vRepr Once k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
-vRepr m k (VNeu (VUnreprApp m' k' v sp)) = return $ VNeu (VRepr m k (VUnreprApp m' k' v sp))
+vRepr _ VU = return VU
+vRepr _ (VLit l) = return $ VLit l
+vRepr m (VGlobal g sp) = return undefined -- @@TODO
+vRepr m (VNeu (VApp h sp)) = return $ VNeu (VRepr m (VApp h sp))
+vRepr m (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VRepr m (VCaseApp (VCase v cs) sp))
+vRepr Inf (VNeu (VReprApp Once v sp)) = return $ VNeu (VReprApp Inf v sp)
+vRepr Inf (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
+vRepr Once (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
+vRepr m (VNeu (VReprApp m' v sp)) = return $ VNeu (VRepr m (VReprApp m' v sp))
+vRepr Inf (VNeu (VUnreprApp Once v sp)) = return $ VNeu (VReprApp Inf v sp)
+vRepr Once (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
+vRepr Inf (VNeu (VUnreprApp Inf v sp)) = vApp (VNeu v) sp
+vRepr Once (VNeu (VUnreprApp Once v sp)) = vApp (VNeu v) sp
 
-vUnrepr :: (Eval m) => ReprMode -> ReprKind -> VTm -> m VTm
-vUnrepr m k (VPi e v ty t) = do
-  ty' <- vUnrepr m k ty
-  t' <- unreprClosure m k t
+vUnrepr :: (Eval m) => ReprMode -> VTm -> m VTm
+vUnrepr m (VPi e v ty t) = do
+  ty' <- vUnrepr m ty
+  t' <- unreprClosure m t
   return $ VPi e v ty' t'
-vUnrepr m k (VLam e v t) = do
-  t' <- unreprClosure m k t
+vUnrepr m (VLam e v t) = do
+  t' <- unreprClosure m t
   return $ VLam e v t'
-vUnrepr _ _ VU = return VU
-vUnrepr _ _ (VLit l) = return $ VLit l
-vUnrepr m k (VGlobal g sp) = return undefined -- @@TODO
-vUnrepr m k (VNeu (VApp h sp)) = return $ VNeu (VUnrepr m k (VApp h sp))
-vUnrepr m k (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VUnrepr m k (VCaseApp (VCase v cs) sp))
-vUnrepr Inf k (VNeu (VUnreprApp Once k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
-vUnrepr Inf k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
-vUnrepr Once k (VNeu (VUnreprApp Inf k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
-vUnrepr m k (VNeu (VUnreprApp m' k' v sp)) = return $ VNeu (VUnrepr m k (VUnreprApp m' k' v sp))
-vUnrepr Inf k (VNeu (VReprApp Once k' v sp)) | k == k' = return $ VNeu (VUnreprApp Inf k v sp)
-vUnrepr m k (VNeu (VReprApp m' k' v sp)) | m == m' && k == k' = vApp (VNeu v) sp
-vUnrepr Once k (VNeu (VReprApp Inf k' v sp)) | k == k' = return $ VNeu (VReprApp Inf k v sp)
-vUnrepr m k (VNeu (VReprApp m' k' v sp)) = return $ VNeu (VUnrepr m k (VReprApp m' k' v sp))
+vUnrepr _ VU = return VU
+vUnrepr _ (VLit l) = return $ VLit l
+vUnrepr m (VGlobal g sp) = return undefined -- @@TODO
+vUnrepr m (VNeu (VApp h sp)) = return $ VNeu (VUnrepr m (VApp h sp))
+vUnrepr m (VNeu (VCaseApp (VCase v cs) sp)) = return $ VNeu (VUnrepr m (VCaseApp (VCase v cs) sp))
+vUnrepr Inf (VNeu (VUnreprApp Once v sp)) = return $ VNeu (VUnreprApp Inf v sp)
+vUnrepr Inf (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
+vUnrepr Once (VNeu (VUnreprApp Inf v sp)) = return $ VNeu (VUnreprApp Inf v sp)
+vUnrepr m (VNeu (VUnreprApp m' v sp)) = return $ VNeu (VUnrepr m (VUnreprApp m' v sp))
+vUnrepr Inf (VNeu (VReprApp Once v sp)) = return $ VNeu (VUnreprApp Inf v sp)
+vUnrepr Once (VNeu (VReprApp Inf v sp)) = return $ VNeu (VReprApp Inf v sp)
+vUnrepr Inf (VNeu (VReprApp Inf v sp)) = vApp (VNeu v) sp
+vUnrepr Once (VNeu (VReprApp Once v sp)) = vApp (VNeu v) sp
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = do
@@ -346,16 +348,16 @@ eval env (SCase t cs) = do
   cs' <- mapM (\p -> traverse (close (numBinds (clausePat p)) env) p) cs
   vCase t' cs'
 eval _ SU = return VU
-eval env (SLit l) = return $ VLit l
+eval _ (SLit l) = return $ VLit l
 eval _ (SMeta m) = return $ VNeu (VMeta m)
 eval _ (SGlobal g) = return $ VGlobal g Empty
 eval env (SVar (Idx i)) = return $ env !! i
-eval env (SRepr m k t) = do
+eval env (SRepr m t) = do
   t' <- eval env t
-  vRepr m k t'
-eval env (SUnrepr m k t) = do
+  vRepr m t'
+eval env (SUnrepr m t) = do
   t' <- eval env t
-  vUnrepr m k t'
+  vUnrepr m t'
 
 newtype SolvedMetas = SolvedMetas (IntMap VTm)
 
@@ -418,12 +420,12 @@ quote l vt = do
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp (VFlex m) sp) -> quoteSpine l (SMeta m) sp
     VNeu (VApp (VRigid l') sp) -> quoteSpine l (SVar (lvlToIdx l l')) sp
-    VNeu (VReprApp m k v sp) -> do
+    VNeu (VReprApp m v sp) -> do
       v' <- quote l (VNeu v)
-      quoteSpine l (SRepr m k v') sp
-    VNeu (VUnreprApp m k v sp) -> do
+      quoteSpine l (SRepr m v') sp
+    VNeu (VUnreprApp m v sp) -> do
       v' <- quote l (VNeu v)
-      quoteSpine l (SUnrepr m k v') sp
+      quoteSpine l (SUnrepr m v') sp
     VNeu (VCaseApp (VCase v cs) sp) -> do
       v' <- quote l (VNeu v)
       cs' <-
@@ -517,8 +519,8 @@ data PTm
   | PName Name
   | PLit (Lit PTm)
   | PHole Name
-  | PRepr PTm
-  | PUnrepr PTm
+  | PRepr ReprMode PTm
+  | PUnrepr ReprMode PTm
   | PWild
   | PLocated Loc PTm
   deriving (Eq, Generic, Data, Typeable, Show)
@@ -598,10 +600,10 @@ unify l t1 t2 = do
     (VNeu (VCaseApp c sp), VNeu (VCaseApp c' sp')) -> do
       unifyCase l c c'
       unifySpines unify l sp sp'
-    (VNeu (VReprApp m k v sp), VNeu (VReprApp m' k' v' sp')) | m == m' && k == k' -> do
+    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
       unify l (VNeu v) (VNeu v')
       unifySpines unify l sp sp'
-    (VNeu (VUnreprApp m k v sp), VNeu (VUnreprApp m' k' v' sp')) | m == m' && k == k' -> do
+    (VNeu (VUnreprApp m v sp), VNeu (VUnreprApp m' v' sp')) | m == m' -> do
       unify l (VNeu v) (VNeu v')
       unifySpines unify l sp sp'
     (VNeu (VApp (VFlex x) sp), t') -> solve l x sp t'
@@ -627,12 +629,12 @@ insert = undefined
 
 infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
 infer ctx term = case term of
-  PRepr x -> do
+  PRepr m x -> do
     -- Infer x to t, then find repr of t in context, and the rhs is the type
     undefined
   _ -> undefined
 
-check :: (Elab m) => Ctx -> PTm -> VTm -> m STm
+check :: (Elab m) => Ctx -> PTm -> VTm -> m STy
 check ctx term typ = do
   typ' <- force typ
   case (term, typ') of
@@ -649,7 +651,7 @@ check ctx term typ = do
       vt <- eval ctx.env t'
       u' <- check (define x vt va ctx) u ty
       return (SLet x a' t' u')
-    (PUnrepr x, VGlobal c sp) -> do
+    (PUnrepr m x, VGlobal c sp) -> do
       -- Find repr of c in context, then check x against the rhs of the repr
       undefined
     (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
