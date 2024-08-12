@@ -3,8 +3,10 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Lang
   ( Type,
@@ -62,9 +64,12 @@ where
 import Control.Applicative ((<|>))
 import Control.Exception (assert)
 import Control.Monad (foldM, join)
+import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.Extra (firstJustM)
 import Control.Monad.Identity (runIdentity)
-import Data.Bifunctor (Bifunctor)
+import Data.Bifoldable (Bifoldable (..))
+import Data.Bifunctor (Bifunctor (..))
+import Data.Bitraversable (Bitraversable (..))
 import Data.Generics (Data)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -81,6 +86,8 @@ import GHC.TypeNats (Nat)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
+
+data ElabError = Mismatch PTm PTm | UnresolvedVariable Name | ImplicitMismatch PiMode PiMode | InvalidPattern PTm
 
 -- | A literal
 data Lit t
@@ -125,15 +132,32 @@ mapSpineM f = traverse (traverse f)
 
 data MetaVar = MetaVar Int deriving (Eq, Generic, Data, Typeable, Show)
 
-data SPat = SPBind Var | SPApp CtorGlobal (Spine SPat) deriving (Generic, Typeable)
+type VPat = VTm
+
+type SPat = STm
 
 numBinds :: SPat -> Int
-numBinds (SPBind _) = 1
-numBinds (SPApp _ sp) = sum $ fmap (numBinds . argVal) sp
+numBinds (SVar _) = 1
+numBinds (SGlobal _) = 0
+numBinds (SLit _) = 0
+numBinds (SApp _ t u) = numBinds t + numBinds u
+numBinds _ = error "impossible"
 
 type STy = STm
 
 data Clause p t = Possible p t | Impossible p deriving (Eq, Generic, Data, Typeable, Show, Functor, Foldable, Traversable)
+
+instance Bifunctor Clause where
+  bimap f g (Possible p t) = Possible (f p) (g t)
+  bimap f _ (Impossible p) = Impossible (f p)
+
+instance Bifoldable Clause where
+  bifoldMap f g (Possible p t) = f p <> g t
+  bifoldMap f _ (Impossible p) = f p
+
+instance Bitraversable Clause where
+  bitraverse f g (Possible p t) = Possible <$> f p <*> g t
+  bitraverse f _ (Impossible p) = Impossible <$> f p
 
 newtype CtorGlobal = CtorGlobal String deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -146,6 +170,8 @@ data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal derivi
 clausePat :: Clause p t -> p
 clausePat (Possible p _) = p
 clausePat (Impossible p) = p
+
+data VPatB = VPatB {pat :: VPat, numBinds :: Int}
 
 data ReprTarget
   = ReprTy DataGlobal -- Represent a data type
@@ -174,7 +200,7 @@ type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm}
 
-data VCase = VCase {subject :: VNeu, branches :: [Clause SPat Closure]}
+data VCase = VCase {subject :: VNeu, branches :: [Clause VPatB Closure]}
 
 data VHead = VFlex MetaVar | VRigid Lvl
 
@@ -262,9 +288,9 @@ vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
 vApp (VNeu n) u = return $ vAppNeu n u
 vApp _ _ = error "impossible"
 
-vMatch :: SPat -> VTm -> Maybe (Env VTm)
-vMatch (SPBind x) u = Just [u]
-vMatch (SPApp (CtorGlobal c) ps) (VGlobal (CtorGlob (CtorGlobal c')) xs)
+vMatch :: VPat -> VTm -> Maybe (Env VTm)
+vMatch (VNeu (VVar _)) u = Just [u]
+vMatch (VGlobal (CtorGlob (CtorGlobal c)) ps) (VGlobal (CtorGlob (CtorGlobal c')) xs)
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -275,14 +301,14 @@ vMatch (SPApp (CtorGlobal c) ps) (VGlobal (CtorGlob (CtorGlobal c')) xs)
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => VNeu -> [Clause SPat Closure] -> m VTm
+vCase :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m VTm
 vCase v cs =
   fromMaybe
     (return $ VNeu (VCaseApp (VCase v cs) Empty))
     ( firstJust
         ( \clause -> do
             case clause of
-              Possible p t -> case vMatch p (VNeu v) of
+              Possible p t -> case vMatch p.pat (VNeu v) of
                 Just env -> Just $ t $$ env
                 Nothing -> Nothing
               Impossible _ -> Nothing
@@ -344,6 +370,11 @@ close n env t = do
       return $ Closure n env t'
     else return $ Closure n env t
 
+closeIn :: (Eval m) => Int -> Ctx -> VTm -> m Closure
+closeIn n ctx t = do
+  t' <- quote (nextLvls ctx.lvl n) t
+  close n ctx.env t'
+
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
 extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
 
@@ -364,7 +395,15 @@ eval env (SApp m t1 t2) = do
   vApp t1' (S.singleton (Arg m t2'))
 eval env (SCase t cs) = do
   t' <- evalToNeu env t
-  cs' <- mapM (\p -> traverse (close (numBinds (clausePat p)) env) p) cs
+  cs' <-
+    mapM
+      ( \p -> do
+          let pat = clausePat p
+          let n = numBinds pat
+          pat' <- eval (extendEnvByNVars n env) pat
+          bitraverse (const $ return (VPatB pat' n)) (close n env) p
+      )
+      cs
   vCase t' cs'
 eval _ SU = return VU
 eval _ (SLit l) = return $ VLit l
@@ -444,12 +483,22 @@ quote l vt = do
       v' <- quote l (VNeu v)
       cs' <-
         mapM
-          ( \case
-              Possible p t -> do
-                a <- t $$ extendEnvByNVars (numBinds p) []
-                t' <- quote (nextLvls l (numBinds p)) a
-                return (Possible p t')
-              Impossible p -> return (Impossible p)
+          ( \pt -> do
+              let n = (clausePat pt).numBinds
+              bitraverse
+                (\p -> quote (nextLvls l n) p.pat)
+                ( \t -> do
+                    a <- t $$ extendEnvByNVars n []
+                    quote (nextLvls l n) a
+                )
+                pt
+                --  \case
+                --   Possible (p, n) t -> do
+                --     p' <- quote (nextLvls l n) p
+                --     a <- t $$ extendEnvByNVars n []
+                --     t' <- quote (nextLvls l n) a
+                --     return (Possible p t')
+                --   Impossible p -> return (Impossible p)
           )
           cs
       quoteSpine l (SCase v' cs') sp
@@ -526,8 +575,6 @@ data PTm
   | PLam PiMode Name PTm
   | PLet Name PTy PTm PTm
   | PApp PiMode PTm PTm
-  | PSigma Name PTy PTm
-  | PPair PTm PTm
   | PCase PTm [Clause PPat PTm]
   | PU
   | PName Name
@@ -540,9 +587,25 @@ data PTm
 
 newtype Sig = Sig {members :: [Glob]}
 
-class (Eval m) => Unify m
+class (Eval m) => Unify m where
+  inPat :: m Bool
+  setInPat :: Bool -> m ()
 
-class (Eval m, Unify m) => Elab m
+  enterPat :: m a -> m a
+  enterPat a = do
+    b <- inPat
+    setInPat True
+    a' <- a
+    setInPat b
+    return a'
+
+  ifInPat :: m a -> m a -> m a
+  ifInPat a b = do
+    b' <- inPat
+    if b' then a else b
+
+
+class (Eval m, Unify m, MonadError ElabError m) => Elab m
 
 unifySpines :: (Unify m) => (Lvl -> a -> a -> m ()) -> Lvl -> Spine a -> Spine a -> m ()
 unifySpines _ _ Empty Empty = return ()
@@ -551,33 +614,32 @@ unifySpines f l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
   f l u u'
 unifySpines _ _ _ _ = error "unifySpines: different lengths"
 
-unifyPats :: (Unify m) => Lvl -> SPat -> SPat -> m ()
-unifyPats l (SPBind _) (SPBind _) = return ()
-unifyPats l (SPApp (CtorGlobal c) sp) (SPApp (CtorGlobal c') sp') | c == c' = unifySpines unifyPats l sp sp'
-unifyPats _ _ _ = error "unifyPats"
-
 unifyCase :: (Unify m) => Lvl -> VCase -> VCase -> m ()
 unifyCase l (VCase s bs) (VCase s' bs') = do
   unify l (VNeu s) (VNeu s')
   unifyClauses bs bs'
   where
-    unifyClauses :: (Unify m) => [Clause SPat Closure] -> [Clause SPat Closure] -> m ()
+    unifyClauses :: (Unify m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m ()
     unifyClauses [] [] = return ()
     unifyClauses (c : cs) (c' : cs') = do
       unifyClause c c'
       unifyClauses cs cs'
     unifyClauses _ _ = error "unifyClauses: different lengths"
 
-    unifyClause :: (Unify m) => Clause SPat Closure -> Clause SPat Closure -> m ()
+    unifyClause :: (Unify m) => Clause VPatB Closure -> Clause VPatB Closure -> m ()
     unifyClause (Possible p t) (Possible p' t') = do
-      unifyPats l p p'
-      let n = numBinds p
-      let n' = numBinds p'
+      let n = p.numBinds
+      let n' = p'.numBinds
       assert (n == n') (return ())
+      unify (nextLvls l n) p.pat p'.pat
       x <- t $$ extendEnvByNVars n []
       x' <- t' $$ extendEnvByNVars n []
       unify (nextLvls l n) x x'
-    unifyClause (Impossible p) (Impossible p') = unifyPats l p p'
+    unifyClause (Impossible p) (Impossible p') = do
+      let n = p.numBinds
+      let n' = p'.numBinds
+      assert (n == n') (return ())
+      unify (nextLvls l n) p.pat p'.pat
     unifyClause _ _ = error "unifyClause"
 
 solve :: (Unify m) => l -> MetaVar -> Spine VTm -> VTm -> m ()
@@ -648,19 +710,167 @@ located l ctx = ctx {currentLoc = Just l}
 freshUserMeta :: (Elab m) => Maybe Name -> Maybe VTy -> Ctx -> m STy
 freshUserMeta = undefined
 
+freshMeta :: (Elab m) => Ctx -> m STy
+freshMeta = undefined
+
 insert :: (Elab m) => Ctx -> (STm, VTy) -> m (STm, VTy)
 insert = undefined
+
+insertPat :: (Elab m) => Ctx -> (SPat, VTy) -> m (SPat, VTy, Ctx)
+insertPat = undefined
+
+asPSpine :: PTm -> (PTm, Spine PTm)
+asPSpine (PApp m t u) = let (t', sp) = asPSpine t in (t', sp :|> Arg m u)
+asPSpine t = (t, Empty)
+
+forcePiType :: (Elab m) => Ctx -> PiMode -> VTy -> m (VTy, Closure)
+forcePiType ctx m ty = do
+  ty' <- force ty
+  case ty' of
+    VPi m' x a b -> do
+      if m == m'
+        then return (a, b)
+        else throwError $ ImplicitMismatch m m'
+    _ -> do
+      a <- freshMeta ctx >>= eval ctx.env
+      v <- uniqueName
+      b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
+      unify ctx.lvl ty (VPi m v a b)
+      return (a, b)
+
+inferSpine :: (Elab m) => Ctx -> (STm, VTy) -> Spine PTm -> m (STm, VTy)
+inferSpine _ (t, ty) Empty = return (t, ty)
+inferSpine ctx (t, ty) (Arg m u :<| sp) = do
+  (t', ty') <- case m of
+    Implicit -> return (t, ty)
+    Explicit -> insert ctx (t, ty)
+    Instance -> error "unimplemented"
+  (a, b) <- forcePiType ctx m ty'
+  u' <- check ctx u a
+  uv <- eval ctx.env u'
+  b' <- b $$ [uv]
+  inferSpine ctx (SApp m t' u', b') sp
+
+-- ty' <- force ty
+-- case ty' of
+--   VPi m' _ a b -> do
+--     if m == m'
+--       then do
+--         u' <- check ctx u a
+--         b' <- b $$ [u']
+--         inferSpine (insertedBind (Name "x") a ctx) (PLam m (Name "x") t) sp
+--       else throwError $ ImplicitMismatch m m'
+--   _ -> throwError $ Mismatch t' t
+
+-- checkPat :: (Elab m) => Ctx -> PTm -> VTy -> m (SPat, Ctx)
+-- checkPat ctx pat ty = do
+--   ty' <- force ty
+--   case (pat, ty') of
+--     (PLocated l t, ty) -> checkPat (located l ctx) pat ty
+--     (PName x, ty) -> return (SPBind x, bind x ty ctx)
+--     (PWild, ty) -> do
+--       x <- uniqueName
+--       return (SPBind x, bind x ty ctx)
+--     (PApp m t u, ty) -> do
+--       (m', t', tty) <- case m of
+--         Implicit -> do
+--           (t', tty) <- infer ctx t
+--           pure (Implicit, t', tty)
+--         Explicit -> do
+--           (t', tty) <- infer ctx t >>= insert ctx
+--           pure (Explicit, t', tty)
+--         Instance -> error "unimplemented"
+
+--       tty' <- force tty
+--       (a, b) <- case tty' of
+--         VPi m'' _ a b ->
+--           if m' /= m''
+--             then throwError $ ImplicitMismatch m' m''
+--             else return (a, b)
+--         _ -> do
+--           a <- freshMeta ctx >>= eval ctx.env
+--           v <- uniqueName
+--           b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
+--           unify ctx.lvl tty (VPi m' v a b)
+--           return (a, b)
+
+--       (u', ctx') <- checkPat ctx u a
+--       -- uv <- eval ctx.env u'
+--       -- b' <- b $$ [uv]
+--       pure undefined
+--     _ -> throwError $ InvalidPattern pat
 
 infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
 infer ctx term = case term of
   PLocated l t -> infer (located l ctx) t
-  PName x -> case lookupName x ctx of
-    Just (i, t) -> return (SVar i, t)
-    Nothing -> error "undefined variable"
+  PName x ->
+    ifInPat (undefined) (
+    case lookupName x ctx of
+      Just (i, t) -> return (SVar i, t)
+      Nothing -> throwError $ UnresolvedVariable x
+    )
+  PLam m x t -> do
+    a <- freshMeta ctx >>= eval ctx.env
+    let ctx' = bind x a ctx
+    (t', b) <- infer ctx' t >>= insert ctx'
+    b' <- closeIn 1 ctx b
+    return (SLam m x t', VPi m x a b')
+  PApp m t u -> do
+    (m', t', tty) <- case m of
+      Implicit -> do
+        (t', tty) <- infer ctx t
+        pure (Implicit, t', tty)
+      Explicit -> do
+        (t', tty) <- infer ctx t >>= insert ctx
+        pure (Explicit, t', tty)
+      Instance -> error "unimplemented"
+
+    tty' <- force tty
+    (a, b) <- case tty' of
+      VPi m'' _ a b ->
+        if m' /= m''
+          then throwError $ ImplicitMismatch m' m''
+          else return (a, b)
+      _ -> do
+        a <- freshMeta ctx >>= eval ctx.env
+        v <- uniqueName
+        b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
+        unify ctx.lvl tty (VPi m' v a b)
+        return (a, b)
+
+    u' <- check ctx u a
+    uv <- eval ctx.env u'
+    b' <- b $$ [uv]
+    pure (SApp m' t' u', b')
+  PU -> return (SU, VU)
+  PPi m x a b -> do
+    a' <- check ctx a VU
+    av <- eval ctx.env a'
+    b' <- check (bind x av ctx) b VU
+    return (SPi m x a' b', VU)
+  PLet x a t u -> do
+    a' <- check ctx a VU
+    va <- eval ctx.env a'
+    t' <- check ctx t va
+    vt <- eval ctx.env t'
+    (u', b) <- infer (define x vt va ctx) u
+    pure (SLet x a' t' u', b)
   PRepr m x -> do
-    -- Infer x to t, then find repr of t in context, and the rhs is the type
-    undefined
-  _ -> undefined
+    (x', ty) <- infer ctx x
+    reprTy <- vRepr m ty
+    return (SRepr m x', reprTy)
+  PHole n -> do
+    ty <- freshMeta ctx >>= eval ctx.env
+    t <- freshUserMeta (Just n) (Just ty) ctx
+    return (t, ty)
+  PCase s cs -> do
+    (s', sTy) <- infer ctx s
+    return undefined
+  PLit l -> return undefined
+  PWild -> do
+    ty <- freshMeta ctx >>= eval ctx.env
+    t <- freshUserMeta Nothing (Just ty) ctx
+    return (t, ty)
 
 check :: (Elab m) => Ctx -> PTm -> VTy -> m STm
 check ctx term typ = do
