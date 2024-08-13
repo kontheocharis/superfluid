@@ -681,8 +681,8 @@ unifyClause l (Impossible p) (Impossible p') = do
   unify (nextLvls l n) p.pat p'.pat
 unifyClause _ _ _ = return No
 
-solveMeta :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-solveMeta = undefined
+unifyMeta :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
+unifyMeta = undefined
 
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid = undefined
@@ -717,10 +717,6 @@ unify l t1 t2 = do
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes
     (VLit a, VLit a') | a == a' -> return Yes
-    (VNeu (VCase s bs), VNeu (VCase s' bs')) -> do
-      a <- unify l (VNeu s) (VNeu s')
-      b <- unifyClauses l bs bs'
-      return $ (a /\ b) \/ Maybe mempty
     (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') -> if c == c' then unifySpines l sp sp' else return No
     (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') -> if d == d' then unifySpines l sp sp' else return No
     (VGlobal (DefGlob f) sp, VGlobal (DefGlob f') sp') ->
@@ -732,6 +728,10 @@ unify l t1 t2 = do
         else unfoldAndUnify l f sp t2'
     (VGlobal (DefGlob f) sp, t') -> unfoldAndUnify l f sp t'
     (t, VGlobal (DefGlob f') sp') -> unfoldAndUnify l f' sp' t
+    (VNeu (VCase s bs), VNeu (VCase s' bs')) -> do
+      a <- unify l (VNeu s) (VNeu s')
+      b <- unifyClauses l bs bs'
+      return $ (a /\ b) \/ Maybe mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
@@ -741,12 +741,14 @@ unify l t1 t2 = do
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
-    (VNeu (VApp (VFlex x) sp), t') -> solveMeta l x sp t'
-    (t, VNeu (VApp (VFlex x') sp')) -> solveMeta l x' sp' t
+    (VNeu (VApp (VFlex x) sp), t') -> unifyMeta l x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> unifyMeta l x' sp' t
     (VNeu (VApp (VRigid x) sp), t') -> unifyRigid l x sp t'
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
     (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'
     (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
+    (VNeu (VCase _ _), _) -> return $ Maybe mempty
+    (_, VNeu (VCase _ _)) -> return $ Maybe mempty
     _ -> return No
 
 data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy], names :: Map Name Lvl, currentLoc :: Maybe Loc}
