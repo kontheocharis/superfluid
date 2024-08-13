@@ -34,12 +34,20 @@ library
       Checking.Utils
       Checking.Vars
       Codegen.Generate
+      Common
+      Elaboration
+      Evaluation
       Interface.Cli
       Interface.Pretty
       Lang
+      Meta
       Parsing.Parser
       Parsing.Resolution
+      Presyntax
       Resources.Prelude
+      Syntax
+      Unification
+      Value
   other-modules:
       Paths_superfluid
   hs-source-dirs:
@@ -50,6 +58,7 @@ library
       OverloadedRecordDot
       DuplicateRecordFields
       NoFieldSelectors
+      PatternSynonyms
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       array ==0.5.*
@@ -87,6 +96,7 @@ executable superfluid-exe
       OverloadedRecordDot
       DuplicateRecordFields
       NoFieldSelectors
+      PatternSynonyms
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -O3
   build-depends:
       array ==0.5.*
@@ -126,6 +136,7 @@ test-suite superfluid-test
       OverloadedRecordDot
       DuplicateRecordFields
       NoFieldSelectors
+      PatternSynonyms
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       array ==0.5.*

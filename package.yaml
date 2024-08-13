@@ -62,6 +62,7 @@ default-extensions:
   - OverloadedRecordDot
   - DuplicateRecordFields
   - NoFieldSelectors
+  - PatternSynonyms
 
 executables:
   superfluid-exe:
