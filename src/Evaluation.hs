@@ -8,7 +8,9 @@ module Evaluation
     eval,
     ($$),
     vApp,
+    vRepr,
     evalInOwnCtx,
+    close,
   )
 where
 
@@ -105,7 +107,7 @@ vCase v cs =
     ( firstJust
         ( \clause -> do
             case clause of
-              Possible p t -> case vMatch p.pat (VNeu v) of
+              Possible p t -> case vMatch p.vPat (VNeu v) of
                 Just env -> Just $ t $$ env
                 Nothing -> Nothing
               Impossible _ -> Nothing
@@ -257,7 +259,7 @@ quote l vt = do
           ( \pt -> do
               let n = pt.pat.numBinds
               bitraverse
-                (\p -> quote (nextLvls l n) p.pat)
+                (\p -> quote (nextLvls l n) p.vPat)
                 ( \t -> do
                     a <- t $$ extendEnvByNVars n []
                     quote (nextLvls l n) a

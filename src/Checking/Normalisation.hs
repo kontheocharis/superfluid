@@ -46,6 +46,7 @@ import Lang
     mapTermM,
   )
 import Lang as DI (DeclItem (..), appToList)
+import Common (PiMode(..))
 
 -- | Normalise a program fully.
 normaliseProgram :: Program -> Program

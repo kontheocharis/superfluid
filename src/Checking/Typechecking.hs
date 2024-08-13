@@ -80,6 +80,7 @@ import Lang
     termDataAt,
   )
 import Lang as DI (DeclItem (..), ItemId (ReprDataId))
+import Common (PiMode(..))
 
 -- | Check the program
 checkProgram :: Program -> Tc Program

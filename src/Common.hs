@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Common
   ( Name (..),
@@ -38,6 +39,7 @@ import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
 import Data.Sequence (Seq)
 import Numeric.Natural (Natural)
+import Data.Generics (Data, Typeable)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -80,7 +82,7 @@ data Lit t
   | CharLit Char
   | NatLit Natural
   | FinLit Natural t
-  deriving (Eq, Show, Functor, Traversable, Foldable)
+  deriving (Eq, Data, Typeable, Show, Functor, Traversable, Foldable)
 
 -- | An amount of times to do something, which might be infinite.
 data Times = Finite Int | NegInf | PosInf deriving (Eq, Show)

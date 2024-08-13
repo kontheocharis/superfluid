@@ -39,6 +39,7 @@ import Lang
     listToApp,
     mapTermM,
   )
+import Common (PiMode(..))
 
 -- | Represent a checked program
 representProgram :: Program -> Tc Program

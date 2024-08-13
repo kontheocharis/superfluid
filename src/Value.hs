@@ -33,7 +33,7 @@ instance Monoid Sub where
 
 type VPat = VTm
 
-data VPatB = VPatB {pat :: VPat, numBinds :: Int}
+data VPatB = VPatB {vPat :: VPat, numBinds :: Int}
 
 type VTy = VTm
 

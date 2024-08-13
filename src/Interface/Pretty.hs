@@ -2,6 +2,7 @@ module Interface.Pretty (Print (..), indented, indentedFst) where
 
 import Data.List (intercalate)
 import Lang
+import Common (PiMode(..), Pos (..))
 
 -- | Typeclass like Show but for syntax.
 class Print a where

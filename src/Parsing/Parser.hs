@@ -23,7 +23,6 @@ import Lang
     MapResult (..),
     Pat,
     PiMode (..),
-    Pos (..),
     PrimItem (PrimItem),
     Program (..),
     ReprDataCaseItem (ReprDataCaseItem),
@@ -49,6 +48,7 @@ import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import Common (Pos (..), PiMode (..))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState

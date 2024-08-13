@@ -8,6 +8,7 @@ import Control.Monad.State (StateT, gets, modify, runStateT)
 import Data.List (intercalate)
 import Interface.Pretty (Print (printVal), indentedFst)
 import Lang (CtorItem (..), DeclItem, Item (..), Lit (..), PiMode (..), PrimItem (..), Program (Program), Term (..), TermValue (..), Var (..), appToList, genTerm, lams, letToList, listToApp, name, value)
+import Common (PiMode(..))
 
 data GenState = GenState
   { decls :: [JsStat],

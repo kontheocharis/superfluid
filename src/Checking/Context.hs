@@ -71,7 +71,6 @@ import Lang
     Loc (..),
     MapResult (..),
     Pat,
-    PiMode (Explicit),
     Program (..),
     ReprDataCaseItem (..),
     ReprDataCtorItem (..),
@@ -91,6 +90,7 @@ import Lang
     locatedAt,
     mapTermM, ItemId (..), itemId,
   )
+import Common (PiMode(..))
 
 -- | A typing judgement.
 data Judgement = Typing Var Type | Subst Var Term

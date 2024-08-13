@@ -1,4 +1,4 @@
-module Unification () where
+module Unification (Unify (..), unify, CanUnify (..)) where
 
 import Algebra.Lattice (Lattice (..))
 import Common
@@ -24,7 +24,7 @@ import Value
     Sub,
     VHead (..),
     VNeu (..),
-    VPatB,
+    VPatB (..),
     VTm (..),
     numBinds,
     pattern VVar,
@@ -81,7 +81,7 @@ unifyClause l (Possible p t) (Possible p' t') = do
   let n = p.numBinds
   let n' = p'.numBinds
   assert (n == n') (return ())
-  a <- unify (nextLvls l n) p.pat p'.pat
+  a <- unify (nextLvls l n) p.vPat p'.vPat
   x <- evalInOwnCtx t
   x' <- evalInOwnCtx t'
   (a /\) <$> unify (nextLvls l n) x x'
@@ -89,7 +89,7 @@ unifyClause l (Impossible p) (Impossible p') = do
   let n = p.numBinds
   let n' = p'.numBinds
   assert (n == n') (return ())
-  unify (nextLvls l n) p.pat p'.pat
+  unify (nextLvls l n) p.vPat p'.vPat
 unifyClause _ _ _ = return No
 
 unifyMeta :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
