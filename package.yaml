@@ -40,6 +40,7 @@ dependencies:
   - language-c >= 0.9 && < 0.10
   - language-javascript >= 0.7 && < 0.8
   - file-embed >= 0.0 && < 0.1
+  - lattices >= 2.2 && < 2.3
 
 ghc-options:
   - -Wall

@@ -61,6 +61,7 @@ module Lang
   )
 where
 
+import Algebra.Lattice (Lattice (..))
 import Control.Applicative ((<|>))
 import Control.Exception (assert)
 import Control.Monad (foldM, join)
@@ -79,6 +80,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), ViewL (..), ViewR (..), (><))
 import qualified Data.Sequence as S
+import Data.Traversable (for)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import GHC.Natural (Natural)
@@ -87,7 +89,27 @@ import GHC.TypeNats (Nat)
 -- | Whether a pi type is implicit or explicit.
 data PiMode = Implicit | Explicit | Instance deriving (Eq, Generic, Data, Typeable, Show)
 
-data ElabError = Mismatch PTm PTm | UnresolvedVariable Name | ImplicitMismatch PiMode PiMode | InvalidPattern PTm
+data ElabError
+  = Mismatch PTm PTm
+  | UnresolvedVariable Name
+  | ImplicitMismatch PiMode PiMode
+  | InvalidPattern PTm
+  | InvalidCaseSubject PTm
+
+data CanUnify = Yes | No | Maybe
+
+instance Lattice CanUnify where
+  Yes \/ _ = Yes
+  _ \/ Yes = Yes
+  No \/ a = a
+  a \/ No = a
+  Maybe \/ Maybe = Maybe
+
+  Yes /\ a = a
+  a /\ Yes = a
+  No /\ _ = No
+  _ /\ No = No
+  Maybe /\ Maybe = Maybe
 
 -- | A literal
 data Lit t
@@ -159,11 +181,11 @@ instance Bitraversable Clause where
   bitraverse f g (Possible p t) = Possible <$> f p <*> g t
   bitraverse f _ (Impossible p) = Impossible <$> f p
 
-newtype CtorGlobal = CtorGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+newtype CtorGlobal = CtorGlobal Name deriving (Eq, Generic, Data, Typeable, Show)
 
-newtype DataGlobal = DataGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+newtype DataGlobal = DataGlobal Name deriving (Eq, Generic, Data, Typeable, Show)
 
-newtype DefGlobal = DefGlobal String deriving (Eq, Generic, Data, Typeable, Show)
+newtype DefGlobal = DefGlobal Name deriving (Eq, Generic, Data, Typeable, Show)
 
 data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -248,7 +270,7 @@ instance Ord Times where
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCaseApp VCase (Spine VTm)
+  | VCaseApp VCase (Spine VTm) -- Maybe spine is not needed here?
   | VReprApp Times VHead (Spine VTm)
 
 data VTm
@@ -370,13 +392,8 @@ close n env t = do
       return $ Closure n env t'
     else return $ Closure n env t
 
-closeIn :: (Eval m) => Int -> Ctx -> VTm -> m Closure
-closeIn n ctx t = do
-  t' <- quote (nextLvls ctx.lvl n) t
-  close n ctx.env t'
-
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
-extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
+extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) [0 .. n - 1] ++ env
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
@@ -492,13 +509,6 @@ quote l vt = do
                     quote (nextLvls l n) a
                 )
                 pt
-                --  \case
-                --   Possible (p, n) t -> do
-                --     p' <- quote (nextLvls l n) p
-                --     a <- t $$ extendEnvByNVars n []
-                --     t' <- quote (nextLvls l n) a
-                --     return (Possible p t')
-                --   Impossible p -> return (Impossible p)
           )
           cs
       quoteSpine l (SCase v' cs') sp
@@ -604,57 +614,74 @@ class (Eval m) => Unify m where
     b' <- inPat
     if b' then a else b
 
+class (Eval m, Unify m, MonadError ElabError m) => Elab m where
+  getCtx :: m Ctx
+  setCtx :: Ctx -> m ()
 
-class (Eval m, Unify m, MonadError ElabError m) => Elab m
+  accessCtx :: (Ctx -> a) -> m a
+  accessCtx f = f <$> getCtx
 
-unifySpines :: (Unify m) => (Lvl -> a -> a -> m ()) -> Lvl -> Spine a -> Spine a -> m ()
-unifySpines _ _ Empty Empty = return ()
-unifySpines f l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
-  unifySpines f l sp sp'
-  f l u u'
-unifySpines _ _ _ _ = error "unifySpines: different lengths"
+  modifyCtx :: (Ctx -> Ctx) -> m ()
+  modifyCtx f = do
+    ctx <- getCtx
+    setCtx (f ctx)
 
-unifyCase :: (Unify m) => Lvl -> VCase -> VCase -> m ()
+  enterCtx :: (Ctx -> Ctx) -> m a -> m a
+  enterCtx f a = do
+    ctx <- getCtx
+    setCtx (f ctx)
+    a' <- a
+    setCtx ctx
+    return a'
+
+unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
+unifySpines _ Empty Empty = return Yes
+unifySpines l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
+  x <- unifySpines l sp sp'
+  (x /\) <$> unify l u u'
+unifySpines _ _ _ = return No
+
+unifyCase :: (Unify m) => Lvl -> VCase -> VCase -> m CanUnify
 unifyCase l (VCase s bs) (VCase s' bs') = do
-  unify l (VNeu s) (VNeu s')
-  unifyClauses bs bs'
+  a <- unify l (VNeu s) (VNeu s')
+  (a /\) <$> unifyClauses bs bs'
   where
-    unifyClauses :: (Unify m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m ()
-    unifyClauses [] [] = return ()
+    unifyClauses :: (Unify m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
+    unifyClauses [] [] = return Yes
     unifyClauses (c : cs) (c' : cs') = do
-      unifyClause c c'
-      unifyClauses cs cs'
-    unifyClauses _ _ = error "unifyClauses: different lengths"
+      a <- unifyClause c c'
+      (a /\) <$> unifyClauses cs cs'
+    unifyClauses _ _ = return No
 
-    unifyClause :: (Unify m) => Clause VPatB Closure -> Clause VPatB Closure -> m ()
+    unifyClause :: (Unify m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
     unifyClause (Possible p t) (Possible p' t') = do
       let n = p.numBinds
       let n' = p'.numBinds
       assert (n == n') (return ())
-      unify (nextLvls l n) p.pat p'.pat
+      a <- unify (nextLvls l n) p.pat p'.pat
       x <- t $$ extendEnvByNVars n []
       x' <- t' $$ extendEnvByNVars n []
-      unify (nextLvls l n) x x'
+      (a /\) <$> unify (nextLvls l n) x x'
     unifyClause (Impossible p) (Impossible p') = do
       let n = p.numBinds
       let n' = p'.numBinds
       assert (n == n') (return ())
       unify (nextLvls l n) p.pat p'.pat
-    unifyClause _ _ = error "unifyClause"
+    unifyClause _ _ = return No
 
 solve :: (Unify m) => l -> MetaVar -> Spine VTm -> VTm -> m ()
 solve = undefined
 
-unify :: (Unify m) => Lvl -> VTm -> VTm -> m ()
+unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
   t1' <- force t1
   t2' <- force t2
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
-      unify l t t'
+      a <- unify l t t'
       x <- c $$ [VNeu (VVar l)]
       x' <- c' $$ [VNeu (VVar l)]
-      unify (nextLvl l) x x'
+      (a /\) <$> unify (nextLvl l) x x'
     (VLam m _ c, VLam m' _ c') | m == m' -> do
       x <- c $$ [VNeu (VVar l)]
       x' <- c' $$ [VNeu (VVar l)]
@@ -667,17 +694,20 @@ unify l t1 t2 = do
       x <- c $$ [VNeu (VVar l)]
       x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
       unify (nextLvl l) x x'
-    (VU, VU) -> return ()
-    (VLit a, VLit a') | a == a' -> return ()
-    (VGlobal g sp, VGlobal g' sp') | g == g' -> unifySpines unify l sp sp'
-    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> unifySpines unify l sp sp'
-    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> unifySpines unify l sp sp'
+    (VU, VU) -> return Yes
+    (VLit a, VLit a') | a == a' -> return Yes
+    (VGlobal g sp, VGlobal g' sp') -> if g == g' then unifySpines l sp sp' else return Maybe -- @@Todo: unfold
+    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) -> if x == x' then unifySpines l sp sp' else return Maybe
+    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> unifySpines l sp sp'
     (VNeu (VCaseApp c sp), VNeu (VCaseApp c' sp')) -> do
-      unifyCase l c c'
-      unifySpines unify l sp sp'
+      a <- unifyCase l c c'
+      b <- unifySpines l sp sp'
+      case a of
+        Yes -> return b
+        _ -> return Maybe
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
       unify l (VNeu (VApp v Empty)) (VNeu (VApp v' Empty))
-      unifySpines unify l sp sp'
+      unifySpines l sp sp'
     (VNeu (VApp (VFlex x) sp), t') -> solve l x sp t'
     (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
     _ -> error "unify"
@@ -704,205 +734,201 @@ lookupName n ctx = case M.lookup n ctx.names of
   Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
   Nothing -> Nothing
 
+definedValue :: Idx -> Ctx -> VTm
+definedValue i ctx = ctx.env !! i.unIdx
+
 located :: Loc -> Ctx -> Ctx
 located l ctx = ctx {currentLoc = Just l}
 
-freshUserMeta :: (Elab m) => Maybe Name -> Maybe VTy -> Ctx -> m STy
-freshUserMeta = undefined
+freshUserMeta :: (Elab m) => Maybe Name -> m (STm, VTy)
+freshUserMeta n = do
+  m <- freshMeta >>= evalHere
+  return undefined
 
-freshMeta :: (Elab m) => Ctx -> m STy
+freshMeta :: (Elab m) => m STy
 freshMeta = undefined
 
-insert :: (Elab m) => Ctx -> (STm, VTy) -> m (STm, VTy)
+insert :: (Elab m) => (STm, VTy) -> m (STm, VTy)
 insert = undefined
 
-insertPat :: (Elab m) => Ctx -> (SPat, VTy) -> m (SPat, VTy, Ctx)
-insertPat = undefined
+evalHere :: (Elab m) => STm -> m VTm
+evalHere t = do
+  e <- accessCtx (\c -> c.env)
+  eval e t
 
-asPSpine :: PTm -> (PTm, Spine PTm)
-asPSpine (PApp m t u) = let (t', sp) = asPSpine t in (t', sp :|> Arg m u)
-asPSpine t = (t, Empty)
+unifyHere :: (Elab m) => VTm -> VTm -> m ()
+unifyHere t1 t2 = do
+  l <- accessCtx (\c -> c.lvl)
+  unify l t1 t2
 
-forcePiType :: (Elab m) => Ctx -> PiMode -> VTy -> m (VTy, Closure)
-forcePiType ctx m ty = do
+closeValHere :: (Elab m) => Int -> VTm -> m Closure
+closeValHere n t = do
+  (l, e) <- accessCtx (\c -> (c.lvl, c.env))
+  t' <- quote (nextLvls l n) t
+  close n e t'
+
+closeHere :: (Elab m) => Int -> STm -> m Closure
+closeHere n t = do
+  e <- accessCtx (\c -> c.env)
+  close n e t
+
+forcePiType :: (Elab m) => PiMode -> VTy -> m (VTy, Closure)
+forcePiType m ty = do
   ty' <- force ty
   case ty' of
-    VPi m' x a b -> do
+    VPi m' _ a b -> do
       if m == m'
         then return (a, b)
         else throwError $ ImplicitMismatch m m'
     _ -> do
-      a <- freshMeta ctx >>= eval ctx.env
+      a <- freshMeta >>= evalHere
       v <- uniqueName
-      b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
-      unify ctx.lvl ty (VPi m v a b)
+      b <- closeHere 1 =<< enterCtx (bind v a) freshMeta
+      unifyHere ty (VPi m v a b)
       return (a, b)
 
-inferSpine :: (Elab m) => Ctx -> (STm, VTy) -> Spine PTm -> m (STm, VTy)
-inferSpine _ (t, ty) Empty = return (t, ty)
-inferSpine ctx (t, ty) (Arg m u :<| sp) = do
+toPSpine :: PTm -> (PTm, Spine PTm)
+toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
+toPSpine t = (t, Empty)
+
+inferSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
+inferSpine (t, ty) Empty = return (t, ty)
+inferSpine (t, ty) (Arg m u :<| sp) = do
   (t', ty') <- case m of
     Implicit -> return (t, ty)
-    Explicit -> insert ctx (t, ty)
+    Explicit -> insert (t, ty)
     Instance -> error "unimplemented"
-  (a, b) <- forcePiType ctx m ty'
-  u' <- check ctx u a
-  uv <- eval ctx.env u'
+  (a, b) <- forcePiType m ty'
+  u' <- check u a
+  uv <- evalHere u'
   b' <- b $$ [uv]
-  inferSpine ctx (SApp m t' u', b') sp
+  inferSpine (SApp m t' u', b') sp
 
--- ty' <- force ty
--- case ty' of
---   VPi m' _ a b -> do
---     if m == m'
---       then do
---         u' <- check ctx u a
---         b' <- b $$ [u']
---         inferSpine (insertedBind (Name "x") a ctx) (PLam m (Name "x") t) sp
---       else throwError $ ImplicitMismatch m m'
---   _ -> throwError $ Mismatch t' t
+lastIdx :: STm
+lastIdx = SVar (Idx 0)
 
--- checkPat :: (Elab m) => Ctx -> PTm -> VTy -> m (SPat, Ctx)
--- checkPat ctx pat ty = do
---   ty' <- force ty
---   case (pat, ty') of
---     (PLocated l t, ty) -> checkPat (located l ctx) pat ty
---     (PName x, ty) -> return (SPBind x, bind x ty ctx)
---     (PWild, ty) -> do
---       x <- uniqueName
---       return (SPBind x, bind x ty ctx)
---     (PApp m t u, ty) -> do
---       (m', t', tty) <- case m of
---         Implicit -> do
---           (t', tty) <- infer ctx t
---           pure (Implicit, t', tty)
---         Explicit -> do
---           (t', tty) <- infer ctx t >>= insert ctx
---           pure (Explicit, t', tty)
---         Instance -> error "unimplemented"
+symbolicArgsForClosure :: Lvl -> Closure -> [VTm]
+symbolicArgsForClosure l (Closure n _ t) = map (VNeu . VVar . Lvl . (+ l.unLvl)) [0 .. n - 1]
 
---       tty' <- force tty
---       (a, b) <- case tty' of
---         VPi m'' _ a b ->
---           if m' /= m''
---             then throwError $ ImplicitMismatch m' m''
---             else return (a, b)
---         _ -> do
---           a <- freshMeta ctx >>= eval ctx.env
---           v <- uniqueName
---           b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
---           unify ctx.lvl tty (VPi m' v a b)
---           return (a, b)
+evalInOwnCtx :: (Elab m) => Closure -> m VTm
+evalInOwnCtx cl = do
+  l <- accessCtx (\c -> c.lvl)
+  let vars = symbolicArgsForClosure l cl
+  cl $$ vars
 
---       (u', ctx') <- checkPat ctx u a
---       -- uv <- eval ctx.env u'
---       -- b' <- b $$ [uv]
---       pure undefined
---     _ -> throwError $ InvalidPattern pat
+forbidPat :: (Elab m) => PTm -> m ()
+forbidPat p = ifInPat (throwError $ InvalidPattern p) (return ())
 
-infer :: (Elab m) => Ctx -> PTm -> m (STm, VTy)
-infer ctx term = case term of
-  PLocated l t -> infer (located l ctx) t
-  PName x ->
-    ifInPat (undefined) (
-    case lookupName x ctx of
-      Just (i, t) -> return (SVar i, t)
-      Nothing -> throwError $ UnresolvedVariable x
-    )
+newPatBind :: (Elab m) => Name -> m (STm, VTy)
+newPatBind x = do
+  ty <- evalHere =<< freshMeta
+  modifyCtx (bind x ty)
+  return (lastIdx, ty)
+
+ifIsCtorName :: (Elab m) => Idx -> Name -> (CtorGlobal -> m a) -> m a -> m a
+ifIsCtorName i n a b = do
+  v <- accessCtx (definedValue i) >>= force
+  case v of
+    VGlobal (CtorGlob g@(CtorGlobal s)) Empty | s == n -> a g
+    _ -> b
+
+ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
+ifIsData v a b = do
+  v' <- force v
+  case v' of
+    VGlobal (DataGlob g@(DataGlobal s)) _ -> a g
+    _ -> b
+
+infer :: (Elab m) => PTm -> m (STm, VTy)
+infer term = case term of
+  PLocated l t -> enterCtx (located l) $ infer t
+  PName x -> do
+    n <- accessCtx (lookupName x)
+    case n of
+      Just (i, t) ->
+        ifInPat
+          (ifIsCtorName i x (\g -> return (SGlobal (CtorGlob g), t)) (newPatBind x))
+          (return (SVar i, t))
+      Nothing -> ifInPat (newPatBind x) (throwError $ UnresolvedVariable x)
   PLam m x t -> do
-    a <- freshMeta ctx >>= eval ctx.env
-    let ctx' = bind x a ctx
-    (t', b) <- infer ctx' t >>= insert ctx'
-    b' <- closeIn 1 ctx b
+    forbidPat term
+    a <- freshMeta >>= evalHere
+    (t', b) <- enterCtx (bind x a) $ infer t >>= insert
+    b' <- closeValHere 1 b
     return (SLam m x t', VPi m x a b')
-  PApp m t u -> do
-    (m', t', tty) <- case m of
-      Implicit -> do
-        (t', tty) <- infer ctx t
-        pure (Implicit, t', tty)
-      Explicit -> do
-        (t', tty) <- infer ctx t >>= insert ctx
-        pure (Explicit, t', tty)
-      Instance -> error "unimplemented"
-
-    tty' <- force tty
-    (a, b) <- case tty' of
-      VPi m'' _ a b ->
-        if m' /= m''
-          then throwError $ ImplicitMismatch m' m''
-          else return (a, b)
-      _ -> do
-        a <- freshMeta ctx >>= eval ctx.env
-        v <- uniqueName
-        b <- Closure 1 ctx.env <$> freshMeta (bind v a ctx)
-        unify ctx.lvl tty (VPi m' v a b)
-        return (a, b)
-
-    u' <- check ctx u a
-    uv <- eval ctx.env u'
-    b' <- b $$ [uv]
-    pure (SApp m' t' u', b')
-  PU -> return (SU, VU)
+  PApp {} -> do
+    let (subject, sp) = toPSpine term
+    (s, sTy) <- infer subject
+    inferSpine (s, sTy) sp
+  PU -> forbidPat term >> return (SU, VU)
   PPi m x a b -> do
-    a' <- check ctx a VU
-    av <- eval ctx.env a'
-    b' <- check (bind x av ctx) b VU
+    forbidPat term
+    a' <- check a VU
+    av <- evalHere a'
+    b' <- enterCtx (bind x av) $ check b VU
     return (SPi m x a' b', VU)
   PLet x a t u -> do
-    a' <- check ctx a VU
-    va <- eval ctx.env a'
-    t' <- check ctx t va
-    vt <- eval ctx.env t'
-    (u', b) <- infer (define x vt va ctx) u
+    forbidPat term
+    a' <- check a VU
+    va <- evalHere a'
+    t' <- check t va
+    vt <- evalHere t'
+    (u', b) <- enterCtx (define x vt va) $ infer u
     pure (SLet x a' t' u', b)
   PRepr m x -> do
-    (x', ty) <- infer ctx x
+    forbidPat term
+    (x', ty) <- infer x
     reprTy <- vRepr m ty
     return (SRepr m x', reprTy)
   PHole n -> do
-    ty <- freshMeta ctx >>= eval ctx.env
-    t <- freshUserMeta (Just n) (Just ty) ctx
-    return (t, ty)
+    forbidPat term
+    freshUserMeta (Just n)
+  PWild ->
+    ifInPat
+      (uniqueName >>= newPatBind)
+      (freshUserMeta Nothing)
   PCase s cs -> do
-    (s', sTy) <- infer ctx s
+    forbidPat term
+    (s', sTy) <- infer s
+    vs <- evalHere s'
+    d <- ifIsData sTy return (throwError $ InvalidCaseSubject s)
+
     return undefined
   PLit l -> return undefined
-  PWild -> do
-    ty <- freshMeta ctx >>= eval ctx.env
-    t <- freshUserMeta Nothing (Just ty) ctx
-    return (t, ty)
 
-check :: (Elab m) => Ctx -> PTm -> VTy -> m STm
-check ctx term typ = do
+check :: (Elab m) => PTm -> VTy -> m STm
+check term typ = do
   typ' <- force typ
   case (term, typ') of
-    (PLocated l t, ty) -> check (located l ctx) t ty
+    (PLocated l t, ty) -> enterCtx (located l) $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
-      vb <- b $$ [VNeu (VVar ctx.lvl)]
-      SLam m x <$> check (bind x a ctx) t vb
+      forbidPat term
+      vb <- evalInOwnCtx b
+      SLam m x <$> enterCtx (bind x a) (check t vb)
     (t, VPi Implicit x' a b) -> do
-      vb <- b $$ [VNeu (VVar ctx.lvl)]
-      SLam Implicit x' <$> check (insertedBind x' a ctx) t vb
+      vb <- evalInOwnCtx b
+      SLam Implicit x' <$> enterCtx (insertedBind x' a) (check t vb)
     (PLet x a t u, ty) -> do
-      a' <- check ctx a VU
-      va <- eval ctx.env a'
-      t' <- check ctx t va
-      vt <- eval ctx.env t'
-      u' <- check (define x vt va ctx) u ty
+      forbidPat term
+      a' <- check a VU
+      va <- evalHere a'
+      t' <- check t va
+      vt <- evalHere t'
+      u' <- enterCtx (define x vt va) $ check u ty
       return (SLet x a' t' u')
     (PRepr m t, VNeu (VRepr m' t')) | m == m' -> do
-      tc <- check ctx t (VNeu (VHead t'))
+      forbidPat term
+      tc <- check t (VNeu (VHead t'))
       return $ SRepr m tc
     (PRepr m t, ty) | m < mempty -> do
-      (t', ty') <- infer ctx t >>= insert ctx
+      forbidPat term
+      (t', ty') <- infer t >>= insert
       reprTy <- vRepr (inv m) ty
-      unify ctx.lvl reprTy ty'
+      unifyHere reprTy ty'
       return $ SRepr m t'
-    (PHole n, ty) -> freshUserMeta (Just n) (Just ty) ctx
-    (PWild, ty) -> freshUserMeta Nothing (Just ty) ctx
     (te, ty) -> do
-      (te', ty') <- infer ctx te >>= insert ctx
-      unify ctx.lvl ty ty'
+      (te', ty') <- infer te >>= insert
+      unifyHere ty ty'
       return te'
 
 -- | A term

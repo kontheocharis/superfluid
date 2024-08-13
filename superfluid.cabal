@@ -62,6 +62,7 @@ library
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*
+    , lattices ==2.2.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*
@@ -98,6 +99,7 @@ executable superfluid-exe
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*
+    , lattices ==2.2.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*
@@ -136,6 +138,7 @@ test-suite superfluid-test
     , haskeline ==0.8.*
     , language-c ==0.9.*
     , language-javascript ==0.7.*
+    , lattices ==2.2.*
     , mtl ==2.3.*
     , optparse-applicative ==0.18.*
     , parsec ==3.1.*
