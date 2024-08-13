@@ -96,20 +96,28 @@ data ElabError
   | InvalidPattern PTm
   | InvalidCaseSubject PTm
 
-data CanUnify = Yes | No | Maybe
+data Sub = Sub {vars :: IntMap VTm}
+
+instance Semigroup Sub where
+  Sub v1 <> Sub v2 = Sub (IM.union v1 v2)
+
+instance Monoid Sub where
+  mempty = Sub IM.empty
+
+data CanUnify = Yes | No | Maybe Sub
 
 instance Lattice CanUnify where
   Yes \/ _ = Yes
   _ \/ Yes = Yes
   No \/ a = a
   a \/ No = a
-  Maybe \/ Maybe = Maybe
+  Maybe x \/ Maybe _ = Maybe x
 
   Yes /\ a = a
   a /\ Yes = a
   No /\ _ = No
   _ /\ No = No
-  Maybe /\ Maybe = Maybe
+  Maybe x /\ Maybe y = Maybe (x <> y)
 
 -- | A literal
 data Lit t
@@ -222,9 +230,7 @@ type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm}
 
-data VCase = VCase {subject :: VNeu, branches :: [Clause VPatB Closure]}
-
-data VHead = VFlex MetaVar | VRigid Lvl
+data VHead = VFlex MetaVar | VRigid Lvl deriving (Eq)
 
 data Times = Finite Int | NegInf | PosInf deriving (Eq, Generic, Data, Typeable, Show)
 
@@ -270,7 +276,7 @@ instance Ord Times where
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCaseApp VCase (Spine VTm) -- Maybe spine is not needed here?
+  | VCase VNeu [Clause VPatB Closure]
   | VReprApp Times VHead (Spine VTm)
 
 data VTm
@@ -298,17 +304,25 @@ pattern VRepr m t = VReprApp m t Empty
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (us ++ env) t
 
-vAppNeu :: VNeu -> Spine VTm -> VTm
-vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
-vAppNeu (VCaseApp c us) u = VNeu (VCaseApp c (us >< u))
+vAppNeu :: (Eval m) => Lvl -> VNeu -> Spine VTm -> m VTm
+vAppNeu _ (VApp h us) u = return $ VNeu (VApp h (us >< u))
+vAppNeu _ (VReprApp m h us) u = return $ VNeu (VReprApp m h (us >< u))
+vAppNeu l (VCase c cls) u =
+  (VNeu . VCase c)
+    <$> mapM
+      ( \cl -> do
+          u' <- traverse (traverse (quote (nextLvls l (clausePat cl).numBinds))) u
+          bitraverse return (postCompose (`sAppSpine` u')) cl
+      )
+      cls
 
-vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
-vApp (VLam _ _ c) (Arg _ u :<| us) = do
+vApp :: (Eval m) => Lvl -> VTm -> Spine VTm -> m VTm
+vApp l (VLam _ _ c) (Arg _ u :<| us) = do
   c' <- c $$ [u]
-  vApp c' us
-vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
-vApp (VNeu n) u = return $ vAppNeu n u
-vApp _ _ = error "impossible"
+  vApp l c' us
+vApp _ (VGlobal g us) u = return $ VGlobal g (us >< u)
+vApp l (VNeu n) u = vAppNeu l n u
+vApp _ _ _ = error "impossible"
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
@@ -326,7 +340,7 @@ vMatch _ _ = Nothing
 vCase :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m VTm
 vCase v cs =
   fromMaybe
-    (return $ VNeu (VCaseApp (VCase v cs) Empty))
+    (return $ VNeu (VCase v cs))
     ( firstJust
         ( \clause -> do
             case clause of
@@ -346,12 +360,12 @@ evalToNeu env t = do
     _ -> error "impossible"
 
 postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
-postCompose f (Closure n env t) = close n env (f t)
+postCompose f (Closure n env t) = return $ Closure n env (f t)
 
 preCompose :: (Eval m) => Closure -> (STm -> STm) -> m Closure
 preCompose (Closure n env t) f = do
   v <- uniqueName
-  close n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
+  return $ Closure n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
 
 reprClosure :: (Eval m) => Times -> Closure -> m Closure
 reprClosure m t = do
@@ -370,7 +384,7 @@ vRepr m (VLam e v t) = do
 vRepr _ VU = return VU
 vRepr _ (VLit l) = return $ VLit l
 vRepr m (VGlobal g sp) = return undefined -- @@TODO
-vRepr m (VNeu (VCaseApp (VCase v cs) sp)) = return undefined -- @@TODO
+vRepr m (VNeu (VCase (VCase v cs) sp)) = return undefined -- @@TODO
 vRepr m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr m) sp
   return $ VNeu (VReprApp m h sp')
@@ -409,7 +423,7 @@ eval env (SLet _ _ t1 t2) = do
 eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
-  vApp t1' (S.singleton (Arg m t2'))
+  vApp (envQuoteLvl env) t1' (S.singleton (Arg m t2'))
 eval env (SCase t cs) = do
   t' <- evalToNeu env t
   cs' <-
@@ -457,15 +471,15 @@ class (HasSolvedMetas m) => Eval m where
 
   uniqueName :: m Name
 
-force :: (Eval m) => VTm -> m VTm
-force v@(VNeu (VApp (VFlex m) sp)) = do
+force :: (Eval m) => Lvl -> VTm -> m VTm
+force l v@(VNeu (VApp (VFlex m) sp)) = do
   mt <- lookupMeta m
   case mt of
     Just t -> do
-      t' <- vApp t sp
-      force t'
+      t' <- vApp l t sp
+      force l t'
     Nothing -> return v
-force v = return v
+force _ v = return v
 
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
 quoteSpine l t Empty = return t
@@ -480,7 +494,7 @@ quoteHead l (VRigid l') = SVar (lvlToIdx l l')
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
-  vt' <- force vt
+  vt' <- force l vt
   case vt' of
     VLam m x t -> do
       a <- t $$ [VNeu (VVar l)]
@@ -496,7 +510,7 @@ quote l vt = do
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
-    VNeu (VCaseApp (VCase v cs) sp) -> do
+    VNeu (VCase v cs) -> do
       v' <- quote l (VNeu v)
       cs' <-
         mapM
@@ -511,12 +525,15 @@ quote l vt = do
                 pt
           )
           cs
-      quoteSpine l (SCase v' cs') sp
+      return $ (SCase v' cs')
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do
   t' <- eval env t
-  quote (Lvl (length env)) t'
+  quote (envQuoteLvl env) t'
+
+envQuoteLvl :: Env VTm -> Lvl
+envQuoteLvl env = Lvl (length env)
 
 newtype Name = Name String deriving (Eq, Generic, Data, Typeable, Show, Ord)
 
@@ -641,41 +658,45 @@ unifySpines l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
   (x /\) <$> unify l u u'
 unifySpines _ _ _ = return No
 
-unifyCase :: (Unify m) => Lvl -> VCase -> VCase -> m CanUnify
-unifyCase l (VCase s bs) (VCase s' bs') = do
-  a <- unify l (VNeu s) (VNeu s')
-  (a /\) <$> unifyClauses bs bs'
-  where
-    unifyClauses :: (Unify m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
-    unifyClauses [] [] = return Yes
-    unifyClauses (c : cs) (c' : cs') = do
-      a <- unifyClause c c'
-      (a /\) <$> unifyClauses cs cs'
-    unifyClauses _ _ = return No
+unifyClauses :: (Unify m) => Lvl -> [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
+unifyClauses l [] [] = return Yes
+unifyClauses l (c : cs) (c' : cs') = do
+  a <- unifyClause l c c'
+  (a /\) <$> unifyClauses l cs cs'
+unifyClauses _ _ _ = return No
 
-    unifyClause :: (Unify m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
-    unifyClause (Possible p t) (Possible p' t') = do
-      let n = p.numBinds
-      let n' = p'.numBinds
-      assert (n == n') (return ())
-      a <- unify (nextLvls l n) p.pat p'.pat
-      x <- t $$ extendEnvByNVars n []
-      x' <- t' $$ extendEnvByNVars n []
-      (a /\) <$> unify (nextLvls l n) x x'
-    unifyClause (Impossible p) (Impossible p') = do
-      let n = p.numBinds
-      let n' = p'.numBinds
-      assert (n == n') (return ())
-      unify (nextLvls l n) p.pat p'.pat
-    unifyClause _ _ = return No
+unifyClause :: (Unify m) => Lvl -> Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
+unifyClause l (Possible p t) (Possible p' t') = do
+  let n = p.numBinds
+  let n' = p'.numBinds
+  assert (n == n') (return ())
+  a <- unify (nextLvls l n) p.pat p'.pat
+  x <- t $$ extendEnvByNVars n []
+  x' <- t' $$ extendEnvByNVars n []
+  (a /\) <$> unify (nextLvls l n) x x'
+unifyClause l (Impossible p) (Impossible p') = do
+  let n = p.numBinds
+  let n' = p'.numBinds
+  assert (n == n') (return ())
+  unify (nextLvls l n) p.pat p'.pat
+unifyClause _ _ _ = return No
 
-solve :: (Unify m) => l -> MetaVar -> Spine VTm -> VTm -> m ()
-solve = undefined
+solveMeta :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
+solveMeta = undefined
+
+unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
+unifyRigid = undefined
+
+unifyReprApp :: (Unify m) => Lvl -> Times -> VHead -> Spine VTm -> VTm -> m CanUnify
+unifyReprApp = undefined
+
+unfoldAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
+unfoldAndUnify = undefined
 
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
-  t1' <- force t1
-  t2' <- force t2
+  t1' <- force l t1
+  t2' <- force l t2
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
       a <- unify l t t'
@@ -687,30 +708,46 @@ unify l t1 t2 = do
       x' <- c' $$ [VNeu (VVar l)]
       unify (nextLvl l) x x'
     (t, VLam m' _ c') -> do
-      x <- vApp t (S.singleton (Arg m' (VNeu (VVar l))))
+      x <- vApp l t (S.singleton (Arg m' (VNeu (VVar l))))
       x' <- c' $$ [VNeu (VVar l)]
       unify (nextLvl l) x x'
     (VLam m _ c, t) -> do
       x <- c $$ [VNeu (VVar l)]
-      x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
+      x' <- vApp l t (S.singleton (Arg m (VNeu (VVar l))))
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes
     (VLit a, VLit a') | a == a' -> return Yes
-    (VGlobal g sp, VGlobal g' sp') -> if g == g' then unifySpines l sp sp' else return Maybe -- @@Todo: unfold
-    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) -> if x == x' then unifySpines l sp sp' else return Maybe
-    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> unifySpines l sp sp'
-    (VNeu (VCaseApp c sp), VNeu (VCaseApp c' sp')) -> do
-      a <- unifyCase l c c'
-      b <- unifySpines l sp sp'
-      case a of
-        Yes -> return b
-        _ -> return Maybe
-    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
-      unify l (VNeu (VApp v Empty)) (VNeu (VApp v' Empty))
-      unifySpines l sp sp'
-    (VNeu (VApp (VFlex x) sp), t') -> solve l x sp t'
-    (t, VNeu (VApp (VFlex x') sp')) -> solve l x' sp' t
-    _ -> error "unify"
+    (VNeu (VCase s bs), VNeu (VCase s' bs')) -> do
+      a <- unify l (VNeu s) (VNeu s')
+      b <- unifyClauses l bs bs'
+      return $ (a /\ b) \/ Maybe mempty
+    (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') -> if c == c' then unifySpines l sp sp' else return No
+    (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') -> if d == d' then unifySpines l sp sp' else return No
+    (VGlobal (DefGlob f) sp, VGlobal (DefGlob f') sp') ->
+      if f == f'
+        then do
+          a <- unifySpines l sp sp'
+          b <- unfoldAndUnify l f sp t2'
+          return $ a \/ b
+        else unfoldAndUnify l f sp t2'
+    (VGlobal (DefGlob f) sp, t') -> unfoldAndUnify l f sp t'
+    (t, VGlobal (DefGlob f') sp') -> unfoldAndUnify l f' sp' t
+    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
+      a <- unifySpines l sp sp'
+      return $ a \/ Maybe mempty
+    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
+      a <- unifySpines l sp sp'
+      return $ a \/ Maybe mempty
+    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
+      a <- unifySpines l sp sp'
+      return $ a \/ Maybe mempty
+    (VNeu (VApp (VFlex x) sp), t') -> solveMeta l x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> solveMeta l x' sp' t
+    (VNeu (VApp (VRigid x) sp), t') -> unifyRigid l x sp t'
+    (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
+    (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'
+    (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
+    _ -> return No
 
 data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy], names :: Map Name Lvl, currentLoc :: Maybe Loc}
 
@@ -759,7 +796,8 @@ evalHere t = do
 unifyHere :: (Elab m) => VTm -> VTm -> m ()
 unifyHere t1 t2 = do
   l <- accessCtx (\c -> c.lvl)
-  unify l t1 t2
+  _ <- unify l t1 t2
+  return ()
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
 closeValHere n t = do
@@ -772,9 +810,14 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
+forceHere :: (Elab m) => VTm -> m VTm
+forceHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  force l t
+
 forcePiType :: (Elab m) => PiMode -> VTy -> m (VTy, Closure)
 forcePiType m ty = do
-  ty' <- force ty
+  ty' <- forceHere ty
   case ty' of
     VPi m' _ a b -> do
       if m == m'
@@ -790,6 +833,10 @@ forcePiType m ty = do
 toPSpine :: PTm -> (PTm, Spine PTm)
 toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
 toPSpine t = (t, Empty)
+
+sAppSpine :: STm -> Spine STm -> STm
+sAppSpine t Empty = t
+sAppSpine t (Arg m u :<| sp) = sAppSpine (SApp m t u) sp
 
 inferSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
 inferSpine (t, ty) Empty = return (t, ty)
@@ -812,8 +859,7 @@ symbolicArgsForClosure l (Closure n _ t) = map (VNeu . VVar . Lvl . (+ l.unLvl))
 
 evalInOwnCtx :: (Elab m) => Closure -> m VTm
 evalInOwnCtx cl = do
-  l <- accessCtx (\c -> c.lvl)
-  let vars = symbolicArgsForClosure l cl
+  let vars = extendEnvByNVars cl.numVars []
   cl $$ vars
 
 forbidPat :: (Elab m) => PTm -> m ()
@@ -827,14 +873,14 @@ newPatBind x = do
 
 ifIsCtorName :: (Elab m) => Idx -> Name -> (CtorGlobal -> m a) -> m a -> m a
 ifIsCtorName i n a b = do
-  v <- accessCtx (definedValue i) >>= force
+  v <- accessCtx (definedValue i) >>= forceHere
   case v of
     VGlobal (CtorGlob g@(CtorGlobal s)) Empty | s == n -> a g
     _ -> b
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
-  v' <- force v
+  v' <- forceHere v
   case v' of
     VGlobal (DataGlob g@(DataGlobal s)) _ -> a g
     _ -> b
@@ -898,7 +944,7 @@ infer term = case term of
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
-  typ' <- force typ
+  typ' <- forceHere typ
   case (term, typ') of
     (PLocated l t, ty) -> enterCtx (located l) $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
