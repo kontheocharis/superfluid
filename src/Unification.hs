@@ -4,8 +4,6 @@ import Algebra.Lattice (Lattice (..))
 import Common
   ( Arg (..),
     Clause,
-    DefGlobal,
-    Glob (..),
     Lvl,
     MetaVar,
     Spine,
@@ -19,6 +17,10 @@ import Control.Exception (assert)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval, evalInOwnCtx, force, vApp)
+import Globals
+  ( DefGlobal,
+    Glob (..),
+  )
 import Value
   ( Closure,
     Sub,

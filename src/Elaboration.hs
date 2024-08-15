@@ -5,15 +5,33 @@ module Elaboration
   )
 where
 
-import Common (Arg (..), CtorGlobal (..), DataGlobal (..), Glob (..), Idx (..), Lvl (..), Name, PiMode (..), Spine, inv, lvlToIdx, nextLvl, nextLvls, Pos)
+import Common
+  ( Arg (..),
+    Idx (..),
+    Lvl (..),
+    Name,
+    PiMode (..),
+    Pos,
+    Spine,
+    inv,
+    lvlToIdx,
+    nextLvl,
+    nextLvls,
+    pat,
+  )
+import Globals (
+    CtorGlobal (..),
+    DataGlobal (..),
+    Glob (..),
+  )
 import Control.Monad.Except (MonadError (throwError))
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
-import Evaluation (Eval (..), evalInOwnCtx, vRepr, ($$), eval, force, close, quote)
+import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vRepr, ($$))
 import Presyntax (PTm (..))
 import Syntax (STm (..), STy, toPSpine)
-import Unification (Unify (ifInPat), unify)
+import Unification (Unify (ifInPat), enterPat, unify)
 import Value
   ( Closure (..),
     Env,
@@ -98,7 +116,7 @@ evalHere t = do
 unifyHere :: (Elab m) => VTm -> VTm -> m ()
 unifyHere t1 t2 = do
   l <- accessCtx (\c -> c.lvl)
-  _ <- unify l t1 t2
+  _ <- unify l t1 t2 -- @@Todo: check if in pattern
   return ()
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
@@ -227,6 +245,19 @@ infer term = case term of
     (s', sTy) <- infer s
     vs <- evalHere s'
     d <- ifIsData sTy return (throwError $ InvalidCaseSubject s)
+
+    mapM
+      ( \c -> do
+          sPat <- enterPat $ do
+            sPat <- check c.pat sTy
+            vPat <- evalHere sPat
+            unifyHere vPat vs
+            return sPat
+          -- Dependent pattern matching
+
+          return undefined
+      )
+      cs
 
     return undefined
   PLit l -> return undefined

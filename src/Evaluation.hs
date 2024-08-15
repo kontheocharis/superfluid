@@ -17,8 +17,6 @@ where
 import Common
   ( Arg (..),
     Clause (..),
-    CtorGlobal (..),
-    Glob (..),
     Idx (..),
     Lvl (..),
     Name,
@@ -52,6 +50,7 @@ import Value
     pattern VMeta,
     pattern VVar,
   )
+import Globals (CtorGlobal(..), Glob (..))
 
 class (HasSolvedMetas m) => Eval m where
   reduceUnderBinders :: m Bool
@@ -71,7 +70,7 @@ vAppNeu :: (Eval m) => Lvl -> VNeu -> Spine VTm -> m VTm
 vAppNeu _ (VApp h us) u = return $ VNeu (VApp h (us >< u))
 vAppNeu _ (VReprApp m h us) u = return $ VNeu (VReprApp m h (us >< u))
 vAppNeu l (VCase c cls) u =
-  (VNeu . VCase c)
+  VNeu . VCase c
     <$> mapM
       ( \cl -> do
           u' <- traverse (traverse (quote (nextLvls l cl.pat.numBinds))) u

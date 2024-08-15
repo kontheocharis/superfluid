@@ -37,6 +37,7 @@ library
       Common
       Elaboration
       Evaluation
+      Globals
       Interface.Cli
       Interface.Pretty
       Lang

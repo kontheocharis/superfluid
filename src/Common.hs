@@ -27,10 +27,6 @@ module Common
     mapSpine,
     mapSpineM,
     MetaVar (..),
-    CtorGlobal (..),
-    DataGlobal (..),
-    DefGlobal (..),
-    Glob (..),
   )
 where
 
@@ -189,11 +185,3 @@ mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
 newtype MetaVar = MetaVar Int deriving (Eq, Show)
-
-newtype CtorGlobal = CtorGlobal Name deriving (Eq, Show)
-
-newtype DataGlobal = DataGlobal Name deriving (Eq, Show)
-
-newtype DefGlobal = DefGlobal Name deriving (Eq, Show)
-
-data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal deriving (Eq, Show)

@@ -17,11 +17,12 @@ module Value
   )
 where
 
-import Common (Clause, Glob, Lit, Lvl, MetaVar, Name, PiMode, Spine, Times)
+import Common (Clause, Lit, Lvl, MetaVar, Name, PiMode, Spine, Times)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Sequence (Seq (Empty))
 import Syntax (STm)
+import Globals (Glob)
 
 newtype Sub = Sub {vars :: IntMap VTm}
 

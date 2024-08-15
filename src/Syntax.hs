@@ -11,7 +11,6 @@ where
 import Common
   ( Arg (..),
     Clause,
-    Glob,
     Idx,
     Lit,
     MetaVar,
@@ -22,6 +21,7 @@ import Common
   )
 import Data.Sequence (Seq (..))
 import Presyntax (PTm (..))
+import Globals (Glob)
 
 type STy = STm
 
