@@ -2,12 +2,19 @@
 
 module Elaboration
   ( ElabError (..),
+    Ctx,
+    infer,
+    check,
   )
 where
 
 import Common
   ( Arg (..),
+    CtorGlobal (..),
+    DataGlobal (..),
+    Glob (..),
     Idx (..),
+    Loc,
     Lvl (..),
     Name,
     PiMode (..),
@@ -17,12 +24,7 @@ import Common
     lvlToIdx,
     nextLvl,
     nextLvls,
-    pat,
-  )
-import Globals (
-    CtorGlobal (..),
-    DataGlobal (..),
-    Glob (..),
+    pat, Times,
   )
 import Control.Monad.Except (MonadError (throwError))
 import Data.Map (Map)
@@ -69,7 +71,13 @@ class (Eval m, Unify m, MonadError ElabError m) => Elab m where
     setCtx ctx
     return a'
 
-data Ctx = Ctx {env :: Env VTm, lvl :: Lvl, types :: [VTy], names :: Map Name Lvl, currentPos :: Pos}
+data Ctx = Ctx
+  { env :: Env VTm,
+    lvl :: Lvl,
+    types :: [VTy],
+    names :: Map Name Lvl,
+    currentLoc :: Loc
+  }
 
 bind :: Name -> VTy -> Ctx -> Ctx
 bind x ty ctx = define x (VNeu (VVar ctx.lvl)) ty ctx
@@ -94,8 +102,8 @@ lookupName n ctx = case M.lookup n ctx.names of
 definedValue :: Idx -> Ctx -> VTm
 definedValue i ctx = ctx.env !! i.unIdx
 
-positioned :: Pos -> Ctx -> Ctx
-positioned l ctx = ctx {currentPos = l}
+located :: Loc -> Ctx -> Ctx
+located l ctx = ctx {currentLoc = l}
 
 freshUserMeta :: (Elab m) => Maybe Name -> m (STm, VTy)
 freshUserMeta n = do
@@ -192,9 +200,14 @@ ifIsData v a b = do
     VGlobal (DataGlob g@(DataGlobal s)) _ -> a g
     _ -> b
 
+reprHere :: (Elab m) => Times -> VTm -> m VTm
+reprHere m t = do
+  l <- accessCtx (\c -> c.lvl)
+  vRepr l m t
+
 infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of
-  PLocated l t -> enterCtx (positioned l) $ infer t
+  PLocated l t -> enterCtx (located l) $ infer t
   PName x -> do
     n <- accessCtx (lookupName x)
     case n of
@@ -231,7 +244,7 @@ infer term = case term of
   PRepr m x -> do
     forbidPat term
     (x', ty) <- infer x
-    reprTy <- vRepr m ty
+    reprTy <- reprHere m ty
     return (SRepr m x', reprTy)
   PHole n -> do
     forbidPat term
@@ -266,7 +279,7 @@ check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
   typ' <- forceHere typ
   case (term, typ') of
-    (PLocated l t, ty) -> enterCtx (positioned l) $ check t ty
+    (PLocated l t, ty) -> enterCtx (located l) $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
       forbidPat term
       vb <- evalInOwnCtx b
@@ -289,7 +302,7 @@ check term typ = do
     (PRepr m t, ty) | m < mempty -> do
       forbidPat term
       (t', ty') <- infer t >>= insert
-      reprTy <- vRepr (inv m) ty
+      reprTy <- reprHere (inv m) ty
       unifyHere reprTy ty'
       return $ SRepr m t'
     (te, ty) -> do

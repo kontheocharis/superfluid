@@ -1,7 +1,7 @@
 module Meta
   ( SolvedMetas (..),
     emptySolvedMetas,
-    HasSolvedMetas (..),
+    HasMetas (..),
   )
 where
 
@@ -15,7 +15,7 @@ newtype SolvedMetas = SolvedMetas (IntMap VTm)
 emptySolvedMetas :: SolvedMetas
 emptySolvedMetas = SolvedMetas IM.empty
 
-class (Monad m) => HasSolvedMetas m where
+class (Monad m) => HasMetas m where
   solvedMetas :: m SolvedMetas
   modifySolvedMetas :: (SolvedMetas -> SolvedMetas) -> m ()
 

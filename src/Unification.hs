@@ -4,6 +4,8 @@ import Algebra.Lattice (Lattice (..))
 import Common
   ( Arg (..),
     Clause,
+    DefGlobal,
+    Glob (..),
     Lvl,
     MetaVar,
     Spine,
@@ -17,10 +19,7 @@ import Control.Exception (assert)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval, evalInOwnCtx, force, vApp)
-import Globals
-  ( DefGlobal,
-    Glob (..),
-  )
+import Globals (HasSig (accessSig), unfoldDef)
 import Value
   ( Closure,
     Sub,
@@ -104,7 +103,10 @@ unifyReprApp :: (Unify m) => Lvl -> Times -> VHead -> Spine VTm -> VTm -> m CanU
 unifyReprApp = undefined
 
 unfoldAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
-unfoldAndUnify = undefined
+unfoldAndUnify l g sp t' = do
+  gu <- accessSig (unfoldDef g)
+  t <- vApp l gu sp
+  unify l t t'
 
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
@@ -130,8 +132,16 @@ unify l t1 t2 = do
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes
     (VLit a, VLit a') | a == a' -> return Yes
-    (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') -> if c == c' then unifySpines l sp sp' else return No
-    (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') -> if d == d' then unifySpines l sp sp' else return No
+    (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') ->
+      if c == c'
+        then
+          unifySpines l sp sp'
+        else return No
+    (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') ->
+      if d == d'
+        then
+          unifySpines l sp sp'
+        else return No
     (VGlobal (DefGlob f) sp, VGlobal (DefGlob f') sp') ->
       if f == f'
         then do
@@ -141,10 +151,13 @@ unify l t1 t2 = do
         else unfoldAndUnify l f sp t2'
     (VGlobal (DefGlob f) sp, t') -> unfoldAndUnify l f sp t'
     (t, VGlobal (DefGlob f') sp') -> unfoldAndUnify l f' sp' t
-    (VNeu (VCase s bs), VNeu (VCase s' bs')) -> do
-      a <- unify l (VNeu s) (VNeu s')
-      b <- unifyClauses l bs bs'
-      return $ (a /\ b) \/ Maybe mempty
+    (VNeu (VCase a s bs), VNeu (VCase b s' bs')) -> do
+      if a /= b
+        then return No
+        else do
+          a <- unify l (VNeu s) (VNeu s')
+          b <- unifyClauses l bs bs'
+          return $ (a /\ b) \/ Maybe mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
@@ -160,6 +173,6 @@ unify l t1 t2 = do
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
     (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'
     (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
-    (VNeu (VCase _ _), _) -> return $ Maybe mempty
-    (_, VNeu (VCase _ _)) -> return $ Maybe mempty
+    (VNeu (VCase {}), _) -> return $ Maybe mempty
+    (_, VNeu (VCase {})) -> return $ Maybe mempty
     _ -> return No

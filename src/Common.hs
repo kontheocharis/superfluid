@@ -1,6 +1,6 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 
 module Common
   ( Name (..),
@@ -27,15 +27,22 @@ module Common
     mapSpine,
     mapSpineM,
     MetaVar (..),
+    Glob (..),
+    Tag (..),
+    CtorGlobal (..),
+    DataGlobal (..),
+    PrimGlobal (..),
+    DefGlobal (..),
   )
 where
 
+import Criterion.Main.Options (MatchType (Glob))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
+import Data.Generics (Data, Typeable)
 import Data.Sequence (Seq)
 import Numeric.Natural (Natural)
-import Data.Generics (Data, Typeable)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -45,7 +52,7 @@ data PiMode
   deriving (Eq, Show)
 
 -- | An identifier
-newtype Name = Name String deriving (Eq, Show, Ord)
+newtype Name = Name {unName :: String} deriving (Eq, Show, Ord)
 
 -- | A pattern clause, generic over the syntax types
 data Clause p t
@@ -159,10 +166,10 @@ endPos :: Loc -> Maybe Pos
 endPos NoLoc = Nothing
 endPos (Loc _ end) = Just end
 
--- | A type for DeBrujin indices.
+-- De Brujin indices and levels
+
 newtype Idx = Idx {unIdx :: Int} deriving (Eq, Show)
 
--- | A type for DeBrujin levels.
 newtype Lvl = Lvl {unLvl :: Int} deriving (Eq, Show)
 
 nextLvl :: Lvl -> Lvl
@@ -174,6 +181,8 @@ nextLvls (Lvl l) n = Lvl (l + n)
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
 
+-- Spines and arguments
+
 data Arg t = Arg {mode :: PiMode, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
 
 type Spine t = Seq (Arg t)
@@ -184,4 +193,25 @@ mapSpine f = fmap (fmap f)
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
+-- Metas
+
 newtype MetaVar = MetaVar Int deriving (Eq, Show)
+
+-- Globals
+
+newtype CtorGlobal = CtorGlobal {globalName :: Name} deriving (Eq, Show)
+
+newtype DataGlobal = DataGlobal {globalName :: Name} deriving (Eq, Show)
+
+newtype DefGlobal = DefGlobal {globalName :: Name} deriving (Eq, Show)
+
+newtype PrimGlobal = PrimGlobal {globalName :: Name} deriving (Eq, Show)
+
+data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal | PrimGlob PrimGlobal deriving (Eq, Show)
+
+-- Tags
+
+data Tag = UnfoldTag deriving (Eq, Ord, Enum, Bounded)
+
+instance Show Tag where
+  show UnfoldTag = "unfold"

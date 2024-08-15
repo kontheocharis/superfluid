@@ -17,11 +17,10 @@ import Common
     Name,
     PiMode,
     Spine,
-    Times,
+    Times, Glob, DataGlobal,
   )
 import Data.Sequence (Seq (..))
 import Presyntax (PTm (..))
-import Globals (Glob)
 
 type STy = STm
 
@@ -33,7 +32,7 @@ data STm
   | SLet Name STy STm STm
   | SMeta MetaVar
   | SApp PiMode STm STm
-  | SCase STm [Clause SPat STm]
+  | SCase DataGlobal STm [Clause SPat STm]
   | SU
   | SGlobal Glob
   | SVar Idx

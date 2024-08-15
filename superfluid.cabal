@@ -25,27 +25,16 @@ source-repository head
 
 library
   exposed-modules:
-      Checking.Context
-      Checking.Errors
-      Checking.Normalisation
-      Checking.Representation
-      Checking.Typechecking
-      Checking.Unification
-      Checking.Utils
-      Checking.Vars
-      Codegen.Generate
       Common
+      Compiler
       Elaboration
       Evaluation
       Globals
-      Interface.Cli
-      Interface.Pretty
       Lang
       Meta
-      Parsing.Parser
-      Parsing.Resolution
+      Parsing
+      Persistence
       Presyntax
-      Resources.Prelude
       Syntax
       Unification
       Value

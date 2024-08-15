@@ -17,12 +17,11 @@ module Value
   )
 where
 
-import Common (Clause, Lit, Lvl, MetaVar, Name, PiMode, Spine, Times)
+import Common (Clause, Lit, Lvl, MetaVar, Name, PiMode, Spine, Times, Glob, DataGlobal)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Sequence (Seq (Empty))
 import Syntax (STm)
-import Globals (Glob)
 
 newtype Sub = Sub {vars :: IntMap VTm}
 
@@ -46,7 +45,7 @@ data VHead = VFlex MetaVar | VRigid Lvl deriving (Eq)
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCase VNeu [Clause VPatB Closure]
+  | VCase DataGlobal VNeu [Clause VPatB Closure]
   | VReprApp Times VHead (Spine VTm)
 
 data VTm

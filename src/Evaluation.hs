@@ -17,6 +17,8 @@ where
 import Common
   ( Arg (..),
     Clause (..),
+    CtorGlobal (..),
+    Glob (..),
     Idx (..),
     Lvl (..),
     Name,
@@ -29,7 +31,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, DataGlobal,
   )
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -37,7 +39,7 @@ import Data.List.Extra (firstJust)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
-import Meta (HasSolvedMetas (..))
+import Meta (HasMetas (..))
 import Syntax (STm (..), numBinds, sAppSpine)
 import Value
   ( Closure (..),
@@ -50,9 +52,9 @@ import Value
     pattern VMeta,
     pattern VVar,
   )
-import Globals (CtorGlobal(..), Glob (..))
+import Globals (HasSig (accessSig), getGlobalRepr, getCaseRepr)
 
-class (HasSolvedMetas m) => Eval m where
+class (HasMetas m, HasSig m) => Eval m where
   reduceUnderBinders :: m Bool
   setReduceUnderBinders :: Bool -> m ()
 
@@ -69,8 +71,8 @@ Closure _ env t $$ us = eval (us ++ env) t
 vAppNeu :: (Eval m) => Lvl -> VNeu -> Spine VTm -> m VTm
 vAppNeu _ (VApp h us) u = return $ VNeu (VApp h (us >< u))
 vAppNeu _ (VReprApp m h us) u = return $ VNeu (VReprApp m h (us >< u))
-vAppNeu l (VCase c cls) u =
-  VNeu . VCase c
+vAppNeu l (VCase dat c cls) u =
+  VNeu . VCase dat c
     <$> mapM
       ( \cl -> do
           u' <- traverse (traverse (quote (nextLvls l cl.pat.numBinds))) u
@@ -99,10 +101,10 @@ vMatch (VGlobal (CtorGlob (CtorGlobal c)) ps) (VGlobal (CtorGlob (CtorGlobal c')
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m VTm
-vCase v cs =
+vCase :: (Eval m) => DataGlobal -> VNeu -> [Clause VPatB Closure] -> m VTm
+vCase dat v cs =
   fromMaybe
-    (return $ VNeu (VCase v cs))
+    (return $ VNeu (VCase dat v cs))
     ( firstJust
         ( \clause -> do
             case clause of
@@ -134,30 +136,43 @@ reprClosure m t = do
   a <- postCompose (SRepr m) t
   preCompose a (SRepr (inv m))
 
-vRepr :: (Eval m) => Times -> VTm -> m VTm
-vRepr (Finite 0) t = return t
-vRepr m (VPi e v ty t) = do
-  ty' <- vRepr m ty
+caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
+caseToSpine v cs = do
+  return undefined
+
+
+vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
+vRepr l (Finite 0) t = return t
+vRepr l m (VPi e v ty t) = do
+  ty' <- vRepr l m ty
   t' <- reprClosure m t
   return $ VPi e v ty' t'
-vRepr m (VLam e v t) = do
+vRepr l m (VLam e v t) = do
   t' <- reprClosure m t
   return $ VLam e v t'
-vRepr _ VU = return VU
-vRepr _ (VLit l) = return $ VLit l
-vRepr m (VGlobal g sp) = return undefined -- @@TODO
-vRepr m (VNeu (VCase (VCase v cs) sp)) = return undefined -- @@TODO
-vRepr m (VNeu (VApp h sp)) = do
-  sp' <- mapSpineM (vRepr m) sp
+vRepr l _ VU = return VU
+vRepr l _ (VLit i) = return $ VLit i
+vRepr l m (VGlobal g sp) = do
+  g' <- accessSig (getGlobalRepr g)
+  sp' <- mapSpineM (vRepr l m) sp
+  vApp l g' sp'
+vRepr l m (VNeu (VCase dat v cs)) = do
+  f <- accessSig (getCaseRepr dat)
+  sp <- caseToSpine v cs
+  sp' <- mapSpineM (vRepr l m) sp
+  vApp l f sp'
+vRepr l m (VNeu (VApp h sp)) = do
+  sp' <- mapSpineM (vRepr l m) sp
   return $ VNeu (VReprApp m h sp')
-vRepr m (VNeu (VReprApp m' v sp)) = do
-  sp' <- mapSpineM (vRepr m) sp
+vRepr l m (VNeu (VReprApp m' v sp)) = do
+  sp' <- mapSpineM (vRepr l m) sp
   let mm' = m <> m'
   if mm' == mempty
     then
       return $ VNeu (VApp v sp')
     else
       return $ VNeu (VReprApp mm' v sp')
+
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = do
@@ -191,7 +206,7 @@ eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
   vApp (envQuoteLvl env) t1' (S.singleton (Arg m t2'))
-eval env (SCase t cs) = do
+eval env (SCase dat t cs) = do
   t' <- evalToNeu env t
   cs' <-
     mapM
@@ -202,7 +217,7 @@ eval env (SCase t cs) = do
           bitraverse (const $ return (VPatB pat' n)) (close n env) p
       )
       cs
-  vCase t' cs'
+  vCase dat t' cs'
 eval _ SU = return VU
 eval _ (SLit l) = return $ VLit l
 eval _ (SMeta m) = return $ VNeu (VMeta m)
@@ -210,7 +225,7 @@ eval _ (SGlobal g) = return $ VGlobal g Empty
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
-  vRepr m t'
+  vRepr (envQuoteLvl env) m t'
 
 force :: (Eval m) => Lvl -> VTm -> m VTm
 force l v@(VNeu (VApp (VFlex m) sp)) = do
@@ -251,7 +266,7 @@ quote l vt = do
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
-    VNeu (VCase v cs) -> do
+    VNeu (VCase dat v cs) -> do
       v' <- quote l (VNeu v)
       cs' <-
         mapM
@@ -266,7 +281,7 @@ quote l vt = do
                 pt
           )
           cs
-      return $ (SCase v' cs')
+      return $ SCase dat v' cs'
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do

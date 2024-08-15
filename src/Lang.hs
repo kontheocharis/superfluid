@@ -4,10 +4,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE InstanceSigs #-}
 
 module Lang
   ( Type,
@@ -63,8 +63,8 @@ module Lang
   )
 where
 
+import Common (Lit (..), Loc (..), PiMode, Pos, endPos, startPos)
 import Control.Monad.Identity (runIdentity)
-import Common (Loc (..), PiMode, Lit (..), startPos, endPos, Pos)
 
 -- newtype Sig = Sig {members :: [Glob]}
 
@@ -191,7 +191,7 @@ data Item
   | ReprData ReprDataItem
   | ReprDecl ReprDeclItem
   | Prim PrimItem
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | An identifier for an item in a signature.
 data ItemId
@@ -200,7 +200,7 @@ data ItemId
   | ReprDataId String
   | ReprDeclId String
   | PrimId String
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | Get the identifier of an item.
 itemId :: Item -> ItemId
@@ -222,13 +222,13 @@ data ReprDataCaseItem = ReprDataCaseItem
   { binds :: (Pat, Var, [(String, Pat)]), -- subjectBind, elimBind, [(ctorName, elimBind)]
     target :: Term
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 data ReprDataCtorItem = ReprDataCtorItem
   { src :: Pat,
     target :: Term
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 data ReprDataItem = ReprDataItem
   { src :: Pat,
@@ -236,13 +236,13 @@ data ReprDataItem = ReprDataItem
     ctors :: [ReprDataCtorItem],
     cse :: Maybe ReprDataCaseItem
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 data ReprDeclItem = ReprDeclItem
   { src :: String,
     target :: Term
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | A declaration is a sequence of clauses, defining the equations for a function.
 data DeclItem = DeclItem
@@ -253,7 +253,7 @@ data DeclItem = DeclItem
     isRecursive :: Bool,
     unfold :: Bool
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | A data item is an indexed inductive data type declaration, with a sequence
 -- of constructors.
@@ -262,7 +262,7 @@ data DataItem = DataItem
     ty :: Type,
     ctors :: [CtorItem]
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | A constructor item is a constructor name and type.
 data CtorItem = CtorItem
@@ -271,18 +271,18 @@ data CtorItem = CtorItem
     idx :: Int,
     dataName :: String
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | A primitive item is a primitive name and type.
 data PrimItem = PrimItem
   { name :: String,
     ty :: Type
   }
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 -- | A program is a sequence of items.
 newtype Program = Program [Item]
-  deriving (Eq,  Show)
+  deriving (Eq, Show)
 
 instance Semigroup Program where
   Program a <> Program b = Program (a <> b)
@@ -426,4 +426,4 @@ type GlobalName = String
 
 -- | A variable
 -- Represented by a string name and a unique integer identifier (no shadowing).
-data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord,  Show)
+data Var = Var {name :: String, idx :: Int} deriving (Eq, Ord, Show)
