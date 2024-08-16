@@ -47,21 +47,6 @@ instance Lattice CanUnify where
   Maybe x /\ Maybe y = Maybe (x <> y)
 
 class (Eval m) => Unify m where
-  inPat :: m Bool
-  setInPat :: Bool -> m ()
-
-  enterPat :: m a -> m a
-  enterPat a = do
-    b <- inPat
-    setInPat True
-    a' <- a
-    setInPat b
-    return a'
-
-  ifInPat :: m a -> m a -> m a
-  ifInPat a b = do
-    b' <- inPat
-    if b' then a else b
 
 unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
 unifySpines _ Empty Empty = return Yes
@@ -93,8 +78,8 @@ unifyClause l (Impossible p) (Impossible p') = do
   unify (nextLvls l n) p.vPat p'.vPat
 unifyClause _ _ _ = return No
 
-unifyMeta :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-unifyMeta = undefined
+unifyFlex :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
+unifyFlex = undefined
 
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid = undefined
@@ -155,9 +140,9 @@ unify l t1 t2 = do
       if a /= b
         then return No
         else do
-          a <- unify l (VNeu s) (VNeu s')
-          b <- unifyClauses l bs bs'
-          return $ (a /\ b) \/ Maybe mempty
+          c <- unify l (VNeu s) (VNeu s')
+          d <- unifyClauses l bs bs'
+          return $ (c /\ d) \/ Maybe mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
@@ -167,8 +152,8 @@ unify l t1 t2 = do
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
-    (VNeu (VApp (VFlex x) sp), t') -> unifyMeta l x sp t'
-    (t, VNeu (VApp (VFlex x') sp')) -> unifyMeta l x' sp' t
+    (VNeu (VApp (VFlex x) sp), t') -> unifyFlex l x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex l x' sp' t
     (VNeu (VApp (VRigid x) sp), t') -> unifyRigid l x sp t'
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
     (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'

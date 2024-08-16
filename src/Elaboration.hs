@@ -8,8 +8,10 @@ module Elaboration
   )
 where
 
+import Algebra.Lattice ((/\), (\/))
 import Common
   ( Arg (..),
+    Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
     Glob (..),
@@ -20,11 +22,14 @@ import Common
     PiMode (..),
     Pos,
     Spine,
+    Times,
     inv,
     lvlToIdx,
     nextLvl,
     nextLvls,
-    pat, Times,
+    pat,
+    pattern Impossible,
+    pattern Possible,
   )
 import Control.Monad.Except (MonadError (throwError))
 import Data.Map (Map)
@@ -33,10 +38,11 @@ import Data.Sequence (Seq (..))
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vRepr, ($$))
 import Presyntax (PTm (..))
 import Syntax (STm (..), STy, toPSpine)
-import Unification (Unify (ifInPat), enterPat, unify)
+import Unification (CanUnify (..), Unify (), unify)
 import Value
   ( Closure (..),
     Env,
+    Sub,
     VTm (..),
     VTy,
     pattern VHead,
@@ -45,39 +51,70 @@ import Value
   )
 
 data ElabError
-  = Mismatch PTm PTm
+  = Mismatch VTm VTm
+  | PotentialMismatch VTm VTm
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern PTm
+  | ImpossibleCaseIsPossible VTm
+  | ImpossibleCaseMightBePossible VTm
+  | ImpossibleCase VTm
   | InvalidCaseSubject PTm
+
+data InPat = NotInPat | InPossiblePat | InImpossiblePat
 
 class (Eval m, Unify m, MonadError ElabError m) => Elab m where
   getCtx :: m Ctx
   setCtx :: Ctx -> m ()
 
-  accessCtx :: (Ctx -> a) -> m a
-  accessCtx f = f <$> getCtx
+inPat :: m InPat
+inPat = accessCtx (\c -> c.inPat)
 
-  modifyCtx :: (Ctx -> Ctx) -> m ()
-  modifyCtx f = do
-    ctx <- getCtx
-    setCtx (f ctx)
+setInPat :: InPat -> m ()
+setInPat p = modifyCtx (\c -> c {inPat = p})
 
-  enterCtx :: (Ctx -> Ctx) -> m a -> m a
-  enterCtx f a = do
-    ctx <- getCtx
-    setCtx (f ctx)
-    a' <- a
-    setCtx ctx
-    return a'
+enterPat :: InPat -> m a -> m a
+enterPat p a = do
+  b <- inPat
+  setInPat p
+  a' <- a
+  setInPat b
+  return a'
+
+ifInPat :: m a -> m a -> m a
+ifInPat a b = do
+  b' <- inPat
+  case b' of
+    NotInPat -> b
+    _ -> a
+
+accessCtx :: (Ctx -> a) -> m a
+accessCtx f = f <$> getCtx
+
+modifyCtx :: (Ctx -> Ctx) -> m ()
+modifyCtx f = do
+  ctx <- getCtx
+  setCtx (f ctx)
+
+enterCtx :: (Ctx -> Ctx) -> m a -> m a
+enterCtx f a = do
+  ctx <- getCtx
+  setCtx (f ctx)
+  a' <- a
+  setCtx ctx
+  return a'
 
 data Ctx = Ctx
   { env :: Env VTm,
     lvl :: Lvl,
+    inPat :: InPat,
     types :: [VTy],
     names :: Map Name Lvl,
     currentLoc :: Loc
   }
+
+applySubToCtx :: Sub -> Ctx -> Ctx
+applySubToCtx sub ctx = undefined
 
 bind :: Name -> VTy -> Ctx -> Ctx
 bind x ty ctx = define x (VNeu (VVar ctx.lvl)) ty ctx
@@ -124,8 +161,21 @@ evalHere t = do
 unifyHere :: (Elab m) => VTm -> VTm -> m ()
 unifyHere t1 t2 = do
   l <- accessCtx (\c -> c.lvl)
-  _ <- unify l t1 t2 -- @@Todo: check if in pattern
-  return ()
+  r <- unify l t1 t2
+  p <- inPat
+  case p of
+    InImpossiblePat -> case r of
+        Yes -> throwError $ ImpossibleCaseIsPossible t1
+        Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
+        No -> return ()
+    InPossiblePat -> case r of
+        Yes -> return ()
+        Maybe s -> modifyCtx (applySubToCtx s)
+        No -> throwError $ ImpossibleCase t1
+    NotInPat -> case r of
+        Yes -> return ()
+        Maybe _ -> throwError $ PotentialMismatch t1 t2
+        No -> throwError $ Mismatch t1 t2
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
 closeValHere n t = do
@@ -255,24 +305,32 @@ infer term = case term of
       (freshUserMeta Nothing)
   PCase s cs -> do
     forbidPat term
-    (s', sTy) <- infer s
-    vs <- evalHere s'
-    d <- ifIsData sTy return (throwError $ InvalidCaseSubject s)
-
-    mapM
-      ( \c -> do
-          sPat <- enterPat $ do
-            sPat <- check c.pat sTy
-            vPat <- evalHere sPat
-            unifyHere vPat vs
-            return sPat
-          -- Dependent pattern matching
-
-          return undefined
-      )
-      cs
-
-    return undefined
+    (ss, ssTy) <- infer s
+    vs <- evalHere ss
+    d <- ifIsData ssTy return (throwError $ InvalidCaseSubject s)
+    retTy <- freshMeta >>= evalHere
+    scs <-
+      mapM
+        ( \case
+            Possible p t -> do
+              sp <- enterPat InPossiblePat $ do
+                (sp, spTy) <- infer p
+                unifyHere ssTy spTy
+                vp <- evalHere sp
+                unifyHere vp vs
+                return sp
+              (st, stTy) <- infer t
+              unifyHere stTy retTy
+              return $ Possible sp st
+            Impossible p -> enterPat InImpossiblePat $ do
+              (sp, spTy) <- infer p
+              unifyHere ssTy spTy
+              vp <- evalHere sp
+              unifyHere vp vs
+              return $ Impossible sp
+        )
+        cs
+    return (SCase d ss scs, retTy)
   PLit l -> return undefined
 
 check :: (Elab m) => PTm -> VTy -> m STm
