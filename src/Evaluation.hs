@@ -18,6 +18,7 @@ import Common
   ( Arg (..),
     Clause (..),
     CtorGlobal (..),
+    DataGlobal,
     Glob (..),
     Idx (..),
     Lvl (..),
@@ -31,7 +32,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, DataGlobal,
+    pattern Possible,
   )
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -39,6 +40,7 @@ import Data.List.Extra (firstJust)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
+import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
 import Syntax (STm (..), numBinds, sAppSpine)
 import Value
@@ -52,7 +54,6 @@ import Value
     pattern VMeta,
     pattern VVar,
   )
-import Globals (HasSig (accessSig), getGlobalRepr, getCaseRepr)
 
 class (HasMetas m, HasSig m) => Eval m where
   reduceUnderBinders :: m Bool
@@ -71,14 +72,7 @@ Closure _ env t $$ us = eval (us ++ env) t
 vAppNeu :: (Eval m) => Lvl -> VNeu -> Spine VTm -> m VTm
 vAppNeu _ (VApp h us) u = return $ VNeu (VApp h (us >< u))
 vAppNeu _ (VReprApp m h us) u = return $ VNeu (VReprApp m h (us >< u))
-vAppNeu l (VCase dat c cls) u =
-  VNeu . VCase dat c
-    <$> mapM
-      ( \cl -> do
-          u' <- traverse (traverse (quote (nextLvls l cl.pat.numBinds))) u
-          bitraverse return (postCompose (`sAppSpine` u')) cl
-      )
-      cls
+vAppNeu l (VCaseApp dat c cls us) u = return $ VNeu (VCaseApp dat c cls (us >< u))
 
 vApp :: (Eval m) => Lvl -> VTm -> Spine VTm -> m VTm
 vApp l (VLam _ _ c) (Arg _ u :<| us) = do
@@ -104,7 +98,7 @@ vMatch _ _ = Nothing
 vCase :: (Eval m) => DataGlobal -> VNeu -> [Clause VPatB Closure] -> m VTm
 vCase dat v cs =
   fromMaybe
-    (return $ VNeu (VCase dat v cs))
+    (return $ VNeu (VCaseApp dat v cs Empty))
     ( firstJust
         ( \clause -> do
             case clause of
@@ -140,7 +134,6 @@ caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
 caseToSpine v cs = do
   return undefined -- @@Todo
 
-
 vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
 vRepr l (Finite 0) t = return t
 vRepr l m (VPi e v ty t) = do
@@ -156,7 +149,7 @@ vRepr l m (VGlobal g sp) = do
   g' <- accessSig (getGlobalRepr g)
   sp' <- mapSpineM (vRepr l m) sp
   vApp l g' sp'
-vRepr l m (VNeu (VCase dat v cs)) = do
+vRepr l m (VNeu (VCaseApp dat v cs sp)) = do
   f <- accessSig (getCaseRepr dat)
   sp <- caseToSpine v cs
   sp' <- mapSpineM (vRepr l m) sp
@@ -172,7 +165,6 @@ vRepr l m (VNeu (VReprApp m' v sp)) = do
       return $ VNeu (VApp v sp')
     else
       return $ VNeu (VReprApp mm' v sp')
-
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = do
@@ -266,7 +258,7 @@ quote l vt = do
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
-    VNeu (VCase dat v cs) -> do
+    VNeu (VCaseApp dat v cs sp) -> do
       v' <- quote l (VNeu v)
       cs' <-
         mapM
@@ -281,7 +273,7 @@ quote l vt = do
                 pt
           )
           cs
-      return $ SCase dat v' cs'
+      quoteSpine l (SCase dat v' cs') sp
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do

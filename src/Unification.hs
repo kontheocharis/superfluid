@@ -152,7 +152,7 @@ unify l t1 t2 = do
         else unfoldDefAndUnify l f sp t2'
     (VGlobal (DefGlob f) sp, t') -> unfoldDefAndUnify l f sp t'
     (t, VGlobal (DefGlob f') sp') -> unfoldDefAndUnify l f' sp' t
-    (VNeu (VCase a s bs), VNeu (VCase b s' bs')) -> do
+    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) -> do -- @@Todo
       if a /= b
         then return No
         else do
@@ -174,6 +174,6 @@ unify l t1 t2 = do
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
     (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'
     (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
-    (VNeu (VCase {}), _) -> return $ Maybe mempty
-    (_, VNeu (VCase {})) -> return $ Maybe mempty
+    (VNeu (VCaseApp {}), _) -> return $ Maybe mempty
+    (_, VNeu (VCaseApp {})) -> return $ Maybe mempty
     _ -> return No

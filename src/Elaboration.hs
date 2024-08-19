@@ -233,8 +233,8 @@ inferSpine (t, ty) (Arg m u :<| sp) = do
 lastIdx :: STm
 lastIdx = SVar (Idx 0)
 
-symbolicArgsForClosure :: Lvl -> Closure -> [VTm]
-symbolicArgsForClosure l (Closure n _ t) = map (VNeu . VVar . Lvl . (+ l.unLvl)) [0 .. n - 1]
+-- symbolicArgsForClosure :: Lvl -> Closure -> [VTm]
+-- symbolicArgsForClosure l (Closure n _ t) = map (VNeu . VVar . Lvl . (+ l.unLvl)) [0 .. n - 1]
 
 forbidPat :: (Elab m) => PTm -> m ()
 forbidPat p = ifInPat (throwError $ InvalidPattern p) (return ())
@@ -244,13 +244,6 @@ newPatBind x = do
   ty <- evalHere =<< freshMeta
   modifyCtx (bind x ty)
   return (lastIdx, ty)
-
-ifIsCtorName :: (Elab m) => Idx -> Name -> (CtorGlobal -> m a) -> m a -> m a
-ifIsCtorName i n a b = do
-  v <- accessCtx (definedValue i) >>= forceHere
-  case v of
-    VGlobal (CtorGlob g@(CtorGlobal s)) Empty | s == n -> a g
-    _ -> b
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do

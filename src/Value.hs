@@ -15,6 +15,7 @@ module Value
     pattern VHead,
     pattern VRepr,
     pattern VGl,
+    pattern VCase,
   )
 where
 
@@ -46,7 +47,7 @@ data VHead = VFlex MetaVar | VRigid Lvl deriving (Eq)
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCase DataGlobal VNeu [Clause VPatB Closure]
+  | VCaseApp DataGlobal VNeu [Clause VPatB Closure] (Spine VTm)
   | VReprApp Times VHead (Spine VTm)
 
 data VTm
@@ -59,6 +60,9 @@ data VTm
 
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty
+
+pattern VCase ::  DataGlobal -> VNeu -> [Clause VPatB Closure] -> VNeu
+pattern VCase dat m cls = VCaseApp dat m cls Empty
 
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
