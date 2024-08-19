@@ -39,7 +39,7 @@ import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vRepr, ($$))
-import Globals (KnownGlobal (..), knownData)
+import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownData, lookupGlobal)
 import Presyntax (PPat, PTm (..))
 import Syntax (SPat, STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
@@ -264,17 +264,30 @@ reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
 
+inferName :: (Elab m) => Name -> m (STm, VTy)
+inferName n =
+  ifInPat
+    ( do
+        l <- accessSig (lookupGlobal n)
+        case l of
+          Just c@(CtorInfo _) -> return (globalInfoToTm n c)
+          _ -> newPatBind n
+    )
+    ( do
+        r <- accessCtx (lookupName n)
+        case r of
+          Just (i, t) -> return (SVar i, t)
+          Nothing -> do
+            l <- accessSig (lookupGlobal n)
+            case l of
+              Just x -> return (globalInfoToTm n x)
+              Nothing -> throwError $ UnresolvedVariable n
+    )
+
 infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of
   PLocated l t -> enterCtx (located l) $ infer t
-  PName x -> do
-    n <- accessCtx (lookupName x)
-    case n of
-      Just (i, t) ->
-        ifInPat
-          (ifIsCtorName i x (\g -> return (SGlobal (CtorGlob g), t)) (newPatBind x))
-          (return (SVar i, t))
-      Nothing -> ifInPat (newPatBind x) (throwError $ UnresolvedVariable x)
+  PName x -> inferName x
   PLam m x t -> do
     forbidPat term
     a <- freshMeta >>= evalHere

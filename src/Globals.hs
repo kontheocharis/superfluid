@@ -20,13 +20,16 @@ module Globals
     KnownGlobal (..),
     knownData,
     knownCtor,
+    lookupGlobal,
+    globalInfoToTm,
   )
 where
 
-import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal, Glob (..), Name (..), PrimGlobal, globalName)
+import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal (DefGlobal), Glob (..), Name (..), PrimGlobal (..), globalName)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Value (VTm, VTy)
+import Syntax (STm (..))
+import Value (VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
 
@@ -64,6 +67,13 @@ getDefGlobal g sig = case M.lookup g.globalName sig.contents of
 
 lookupGlobal :: Name -> Sig -> Maybe GlobalInfo
 lookupGlobal n sig = M.lookup n sig.contents
+
+globalInfoToTm :: Name -> GlobalInfo -> (STm, VTy)
+globalInfoToTm n i = case i of
+    DefInfo d -> (SGlobal (DefGlob (DefGlobal n)), d.ty)
+    DataInfo _ -> (SGlobal (DataGlob (DataGlobal n)), VU)
+    CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
+    PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
 unfoldDef :: DefGlobal -> Sig -> VTm
 unfoldDef g sig = (getDefGlobal g sig).tm
