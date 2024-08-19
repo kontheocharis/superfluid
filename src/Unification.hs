@@ -7,65 +7,125 @@ import Common
     DefGlobal,
     Glob (..),
     Lit (..),
-    Lvl,
+    Lvl (..),
     MetaVar,
     PiMode (..),
     Spine,
     Times,
+    lvlToIdx,
     nextLvl,
     nextLvls,
     pattern Impossible,
     pattern Possible,
   )
 import Control.Exception (assert)
-import Data.Sequence (Seq (..))
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Trans (MonadTrans (lift))
+import Data.Bitraversable (Bitraversable (bitraverse))
+import Data.Either (fromRight)
+import Data.Foldable (toList)
+import qualified Data.IntMap as IM
+import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
-import Evaluation (Eval, evalInOwnCtx, force, vApp)
+import Evaluation (Eval, eval, evalInOwnCtx, force, vApp, ($$))
 import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfoldDef)
+import Literals (unfoldLit)
+import Meta (HasMetas (solveMeta))
 import Numeric.Natural (Natural)
+import Syntax (STm (..), uniqueSLams)
 import Value
   ( Closure,
+    PRen (..),
     Sub,
     VHead (..),
     VNeu (..),
     VPatB (..),
     VTm (..),
+    liftPRen,
     numBinds,
     pattern VGl,
     pattern VVar,
   )
-import Literals (unfoldLit)
 
-data CanUnify = Yes | No | Maybe Sub
+data UnifyError = InvertError | RenameError
+
+data CanUnify = Yes | No [UnifyError] | Maybe Sub
 
 instance Lattice CanUnify where
   Yes \/ _ = Yes
   _ \/ Yes = Yes
-  No \/ a = a
-  a \/ No = a
+  No _ \/ a = a
+  a \/ No _ = a
   Maybe x \/ Maybe _ = Maybe x
 
   Yes /\ a = a
   a /\ Yes = a
-  No /\ _ = No
-  _ /\ No = No
+  No xs /\ No ys = No (xs ++ ys)
+  No xs /\ _ = No xs
+  _ /\ No xs = No xs
   Maybe x /\ Maybe y = Maybe (x <> y)
 
 class (Eval m) => Unify m
+
+invertSpine :: (Unify m) => Lvl -> Spine VTm -> ExceptT UnifyError m PRen
+invertSpine l Empty = return $ PRen (Lvl 0) l mempty
+invertSpine l (sp' :|> Arg _ t) = do
+  (PRen dom cod ren) <- invertSpine l sp'
+  f <- lift $ force t
+  case f of
+    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen dom (nextLvl cod) (IM.insert l' cod ren)
+    _ -> throwError InvertError
+
+renameSp :: (Unify m) => MetaVar -> PRen -> STm -> Spine VTm -> ExceptT UnifyError m STm
+renameSp m pren t Empty = return t
+renameSp m pren t (sp :|> Arg i u) = do
+  xs <- renameSp m pren t sp
+  ys <- rename m pren u
+  return $ SApp i xs ys
+
+-- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
+rename :: (Unify m) => MetaVar -> PRen -> VTm -> ExceptT UnifyError m STm
+rename m pren t = do
+  f <- lift $ force t
+  case f of
+    VNeu (VApp (VFlex m') sp)
+      | m == m' -> throwError RenameError -- occurs check
+      | otherwise -> renameSp m pren (SMeta m') sp
+    VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
+      Nothing -> throwError RenameError -- scope error ("escaping variable" error)
+      Just x' -> renameSp m pren (SVar $ lvlToIdx pren.domSize x') sp
+    VNeu (VReprApp n h sp) -> do
+      t' <- rename m pren (VNeu (VApp h Empty))
+      renameSp m pren (SRepr n t') sp
+    VNeu (VCaseApp dat v cs sp) -> do
+      v' <- rename m pren (VNeu v)
+      return undefined -- @@Todo
+    VLam i x t -> do
+      vt <- lift $ t $$ [VNeu (VVar pren.codSize)]
+      t' <- rename m (liftPRen pren) vt
+      return $ SLam i x t'
+    VPi i x a b -> do
+      a' <- rename m pren a
+      vb <- lift $ b $$ [VNeu (VVar pren.codSize)]
+      b' <- rename m (liftPRen pren) vb
+      return $ SPi i x a' b'
+    VU -> return SU
+    VGlobal g sp -> renameSp m pren (SGlobal g) sp
+    VLit lit -> SLit <$> traverse (rename m pren) lit
 
 unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
 unifySpines _ Empty Empty = return Yes
 unifySpines l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
   x <- unifySpines l sp sp'
   (x /\) <$> unify l u u'
-unifySpines _ _ _ = return No
+unifySpines _ _ _ = return $ No []
 
 unifyClauses :: (Unify m) => Lvl -> [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
 unifyClauses l [] [] = return Yes
 unifyClauses l (c : cs) (c' : cs') = do
   a <- unifyClause l c c'
   (a /\) <$> unifyClauses l cs cs'
-unifyClauses _ _ _ = return No
+unifyClauses _ _ _ = return $ No []
 
 unifyClause :: (Unify m) => Lvl -> Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
 unifyClause l (Possible p t) (Possible p' t') = do
@@ -81,10 +141,21 @@ unifyClause l (Impossible p) (Impossible p') = do
   let n' = p'.numBinds
   assert (n == n') (return ())
   unify (nextLvls l n) p.vPat p'.vPat
-unifyClause _ _ _ = return No
+unifyClause _ _ _ = return $ No []
+
+handleUnifyError :: (Unify m) => ExceptT UnifyError m () -> m CanUnify
+handleUnifyError f = do
+  f' <- runExceptT f
+  case f' of
+    Left e -> return $ No [e]
+    Right () -> return Yes
 
 unifyFlex :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-unifyFlex = undefined
+unifyFlex l m sp t = handleUnifyError $ do
+  pren <- invertSpine l sp
+  rhs <- rename m pren t
+  solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
+  lift $ solveMeta m solution
 
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid = undefined
@@ -105,7 +176,7 @@ unifyLit l a t = case t of
     (CharLit x, CharLit y) | x == y -> return Yes
     (NatLit x, NatLit y) | x == y -> return Yes
     (FinLit d n, FinLit d' n') | d == d' -> unify l n n'
-    _ -> return No
+    _ -> return $ No []
   _ -> unify l (unfoldLit a) t
 
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
@@ -133,16 +204,8 @@ unify l t1 t2 = do
     (VU, VU) -> return Yes
     (t, VLit a') -> unifyLit l a' t
     (VLit a, t') -> unifyLit l a t'
-    (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') ->
-      if c == c'
-        then
-          unifySpines l sp sp'
-        else return No
-    (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') ->
-      if d == d'
-        then
-          unifySpines l sp sp'
-        else return No
+    (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') | c == c' -> unifySpines l sp sp'
+    (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') | d == d' -> unifySpines l sp sp'
     (VGlobal (DefGlob f) sp, VGlobal (DefGlob f') sp') ->
       if f == f'
         then do
@@ -152,14 +215,11 @@ unify l t1 t2 = do
         else unfoldDefAndUnify l f sp t2'
     (VGlobal (DefGlob f) sp, t') -> unfoldDefAndUnify l f sp t'
     (t, VGlobal (DefGlob f') sp') -> unfoldDefAndUnify l f' sp' t
-    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) -> do
-      if a /= b
-        then return No
-        else do
-          c <- unify l (VNeu s) (VNeu s')
-          d <- unifyClauses l bs bs'
-          e <- unifySpines l sp sp'
-          return $ (c /\ d /\ e) \/ Maybe mempty
+    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) | a == b -> do
+      c <- unify l (VNeu s) (VNeu s')
+      d <- unifyClauses l bs bs'
+      e <- unifySpines l sp sp'
+      return $ (c /\ d /\ e) \/ Maybe mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty
@@ -177,4 +237,4 @@ unify l t1 t2 = do
     (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
     (VNeu (VCaseApp {}), _) -> return $ Maybe mempty
     (_, VNeu (VCaseApp {})) -> return $ Maybe mempty
-    _ -> return No
+    _ -> return $ No []

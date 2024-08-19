@@ -24,5 +24,8 @@ class (Monad m) => HasMetas m where
     SolvedMetas ms <- solvedMetas
     return $ IM.lookup m ms
 
+  solveMeta :: MetaVar -> VTm -> m ()
+  solveMeta (MetaVar m) tm = modifySolvedMetas (\(SolvedMetas ms) -> SolvedMetas (IM.insert m tm ms))
+
   resetSolvedMetas :: m ()
   resetSolvedMetas = modifySolvedMetas (const emptySolvedMetas)

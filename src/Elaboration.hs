@@ -30,7 +30,7 @@ import Common
     nextLvls,
     pat,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, HasNameSupply (..),
   )
 import Control.Monad.Except (MonadError (throwError))
 import Data.Functor (void)
@@ -171,15 +171,15 @@ handleUnification r = do
     InImpossiblePat -> case r of
       Yes -> throwError $ ImpossibleCaseIsPossible t1
       Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
-      No -> return ()
+      No _ -> return ()
     InPossiblePat -> case r of
       Yes -> return ()
       Maybe s -> modifyCtx (applySubToCtx s)
-      No -> throwError $ ImpossibleCase t1
+      No _ -> throwError $ ImpossibleCase t1
     NotInPat -> case r of
       Yes -> return ()
       Maybe _ -> throwError $ PotentialMismatch t1 t2
-      No -> throwError $ Mismatch t1 t2
+      No _ -> throwError $ Mismatch t1 t2
 
 unifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
 unifyHere t1 t2 = do

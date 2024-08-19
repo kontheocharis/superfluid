@@ -32,7 +32,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, HasNameSupply (..),
   )
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -55,14 +55,12 @@ import Value
     pattern VVar,
   )
 
-class (HasMetas m, HasSig m) => Eval m where
+class (HasMetas m, HasSig m, HasNameSupply m) => Eval m where
   reduceUnderBinders :: m Bool
   setReduceUnderBinders :: Bool -> m ()
 
   reduceUnfoldDefs :: m Bool
   setReduceUnfoldDefs :: Bool -> m ()
-
-  uniqueName :: m Name
 
 infixl 8 $$
 

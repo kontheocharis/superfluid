@@ -5,21 +5,26 @@ module Syntax
     numBinds,
     toPSpine,
     sAppSpine,
+    sLams,
+    uniqueSLams,
   )
 where
 
 import Common
   ( Arg (..),
     Clause,
+    DataGlobal,
+    Glob,
+    HasNameSupply (uniqueName),
     Idx,
     Lit,
     MetaVar,
     Name,
     PiMode,
     Spine,
-    Times, Glob, DataGlobal,
+    Times,
   )
-import Data.Sequence (Seq (..))
+import Data.Sequence (Seq (..), fromList)
 import Presyntax (PTm (..))
 
 type STy = STm
@@ -53,3 +58,12 @@ toPSpine t = (t, Empty)
 sAppSpine :: STm -> Spine STm -> STm
 sAppSpine t Empty = t
 sAppSpine t (Arg m u :<| sp) = sAppSpine (SApp m t u) sp
+
+uniqueSLams :: (HasNameSupply m) => [PiMode] -> STm -> m STm
+uniqueSLams ms t = do
+  sp <- fromList <$> mapM (\m -> Arg m <$> uniqueName) ms
+  return $ sLams sp t
+
+sLams :: Spine Name -> STm -> STm
+sLams Empty t = t
+sLams (Arg m x :<| sp) t = SLam m x (sLams sp t)

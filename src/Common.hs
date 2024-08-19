@@ -33,6 +33,7 @@ module Common
     DataGlobal (..),
     PrimGlobal (..),
     DefGlobal (..),
+    HasNameSupply (..),
   )
 where
 
@@ -215,3 +216,7 @@ data Tag = UnfoldTag deriving (Eq, Ord, Enum, Bounded)
 
 instance Show Tag where
   show UnfoldTag = "unfold"
+
+
+class (Monad m) => HasNameSupply m where
+  uniqueName :: m Name
