@@ -23,7 +23,7 @@ module Globals
   )
 where
 
-import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal, Name (..), globalName, Glob (..), PrimGlobal)
+import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal, Glob (..), Name (..), PrimGlobal, globalName)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Value (VTm, VTy)
@@ -68,8 +68,6 @@ lookupGlobal n sig = M.lookup n sig.contents
 unfoldDef :: DefGlobal -> Sig -> VTm
 unfoldDef g sig = (getDefGlobal g sig).tm
 
-
-
 getDataRepr :: DataGlobal -> Sig -> VTm
 getDataRepr g sig = case M.lookup g.globalName sig.repr of
   Just t -> t
@@ -110,6 +108,19 @@ class (Monad m) => HasSig m where
 data KnownGlobal a where
   KnownSigma :: KnownGlobal DataGlobal
   KnownPair :: KnownGlobal CtorGlobal
+  KnownNat :: KnownGlobal DataGlobal
+  KnownZero :: KnownGlobal CtorGlobal
+  KnownSucc :: KnownGlobal CtorGlobal
+  KnownFin :: KnownGlobal DataGlobal
+  KnownFZero :: KnownGlobal CtorGlobal
+  KnownFSucc :: KnownGlobal CtorGlobal
+  KnownChar :: KnownGlobal DataGlobal
+  KnownChr :: KnownGlobal CtorGlobal
+  KnownList :: KnownGlobal DataGlobal
+  KnownNil :: KnownGlobal CtorGlobal
+  KnownCons :: KnownGlobal CtorGlobal
+  KnownString :: KnownGlobal DataGlobal
+  KnownStr :: KnownGlobal CtorGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -117,6 +128,19 @@ deriving instance Eq (KnownGlobal a)
 
 knownData :: KnownGlobal DataGlobal -> DataGlobal
 knownData KnownSigma = DataGlobal (Name "Sigma")
+knownData KnownNat = DataGlobal (Name "Nat")
+knownData KnownFin = DataGlobal (Name "Fin")
+knownData KnownChar = DataGlobal (Name "Char")
+knownData KnownList = DataGlobal (Name "List")
+knownData KnownString = DataGlobal (Name "String")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
+knownCtor KnownZero = CtorGlobal (Name "z")
+knownCtor KnownSucc = CtorGlobal (Name "s")
+knownCtor KnownFZero = CtorGlobal (Name "fz")
+knownCtor KnownFSucc = CtorGlobal (Name "fs")
+knownCtor KnownChr = CtorGlobal (Name "chr")
+knownCtor KnownNil = CtorGlobal (Name "nil")
+knownCtor KnownCons = CtorGlobal (Name "cons")
+knownCtor KnownStr = CtorGlobal (Name "str")

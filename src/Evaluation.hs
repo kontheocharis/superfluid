@@ -138,7 +138,7 @@ reprClosure m t = do
 
 caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
 caseToSpine v cs = do
-  return undefined
+  return undefined -- @@Todo
 
 
 vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
@@ -219,7 +219,7 @@ eval env (SCase dat t cs) = do
       cs
   vCase dat t' cs'
 eval _ SU = return VU
-eval _ (SLit l) = return $ VLit l
+eval l (SLit i) = VLit <$> traverse (eval l) i
 eval _ (SMeta m) = return $ VNeu (VMeta m)
 eval _ (SGlobal g) = return $ VGlobal g Empty
 eval env (SVar (Idx i)) = return $ env !! i
@@ -262,7 +262,7 @@ quote l vt = do
       t' <- quote (nextLvl l) a
       return $ SPi m x ty' t'
     VU -> return SU
-    VLit lit -> return $ SLit lit
+    VLit lit -> SLit <$> traverse (quote l) lit
     VGlobal g sp -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp

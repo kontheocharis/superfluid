@@ -16,6 +16,7 @@ import Common
     DataGlobal (..),
     Glob (..),
     Idx (..),
+    Lit (..),
     Loc,
     Lvl (..),
     Name,
@@ -32,12 +33,15 @@ import Common
     pattern Possible,
   )
 import Control.Monad.Except (MonadError (throwError))
+import Data.Functor (void)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as S
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vRepr, ($$))
-import Presyntax (PTm (..))
-import Syntax (STm (..), STy, toPSpine)
+import Globals (KnownGlobal (..), knownData)
+import Presyntax (PPat, PTm (..))
+import Syntax (SPat, STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
   ( Closure (..),
@@ -67,42 +71,42 @@ class (Eval m, Unify m, MonadError ElabError m) => Elab m where
   getCtx :: m Ctx
   setCtx :: Ctx -> m ()
 
-inPat :: m InPat
-inPat = accessCtx (\c -> c.inPat)
+  inPat :: m InPat
+  inPat = accessCtx (\c -> c.inPat)
 
-setInPat :: InPat -> m ()
-setInPat p = modifyCtx (\c -> c {inPat = p})
+  setInPat :: InPat -> m ()
+  setInPat p = modifyCtx (\c -> c {inPat = p})
 
-enterPat :: InPat -> m a -> m a
-enterPat p a = do
-  b <- inPat
-  setInPat p
-  a' <- a
-  setInPat b
-  return a'
+  enterPat :: InPat -> m a -> m a
+  enterPat p a = do
+    b <- inPat
+    setInPat p
+    a' <- a
+    setInPat b
+    return a'
 
-ifInPat :: m a -> m a -> m a
-ifInPat a b = do
-  b' <- inPat
-  case b' of
-    NotInPat -> b
-    _ -> a
+  ifInPat :: m a -> m a -> m a
+  ifInPat a b = do
+    b' <- inPat
+    case b' of
+      NotInPat -> b
+      _ -> a
 
-accessCtx :: (Ctx -> a) -> m a
-accessCtx f = f <$> getCtx
+  accessCtx :: (Ctx -> a) -> m a
+  accessCtx f = f <$> getCtx
 
-modifyCtx :: (Ctx -> Ctx) -> m ()
-modifyCtx f = do
-  ctx <- getCtx
-  setCtx (f ctx)
+  modifyCtx :: (Ctx -> Ctx) -> m ()
+  modifyCtx f = do
+    ctx <- getCtx
+    setCtx (f ctx)
 
-enterCtx :: (Ctx -> Ctx) -> m a -> m a
-enterCtx f a = do
-  ctx <- getCtx
-  setCtx (f ctx)
-  a' <- a
-  setCtx ctx
-  return a'
+  enterCtx :: (Ctx -> Ctx) -> m a -> m a
+  enterCtx f a = do
+    ctx <- getCtx
+    setCtx (f ctx)
+    a' <- a
+    setCtx ctx
+    return a'
 
 data Ctx = Ctx
   { env :: Env VTm,
@@ -158,24 +162,29 @@ evalHere t = do
   e <- accessCtx (\c -> c.env)
   eval e t
 
-unifyHere :: (Elab m) => VTm -> VTm -> m ()
-unifyHere t1 t2 = do
-  l <- accessCtx (\c -> c.lvl)
-  r <- unify l t1 t2
+handleUnification :: (Elab m) => CanUnify -> m ()
+handleUnification r = do
   p <- inPat
+  let t1 = undefined
+  let t2 = undefined -- @@Todo
   case p of
     InImpossiblePat -> case r of
-        Yes -> throwError $ ImpossibleCaseIsPossible t1
-        Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
-        No -> return ()
+      Yes -> throwError $ ImpossibleCaseIsPossible t1
+      Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
+      No -> return ()
     InPossiblePat -> case r of
-        Yes -> return ()
-        Maybe s -> modifyCtx (applySubToCtx s)
-        No -> throwError $ ImpossibleCase t1
+      Yes -> return ()
+      Maybe s -> modifyCtx (applySubToCtx s)
+      No -> throwError $ ImpossibleCase t1
     NotInPat -> case r of
-        Yes -> return ()
-        Maybe _ -> throwError $ PotentialMismatch t1 t2
-        No -> throwError $ Mismatch t1 t2
+      Yes -> return ()
+      Maybe _ -> throwError $ PotentialMismatch t1 t2
+      No -> throwError $ Mismatch t1 t2
+
+unifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
+unifyHere t1 t2 = do
+  l <- accessCtx (\c -> c.lvl)
+  unify l t1 t2
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
 closeValHere n t = do
@@ -247,7 +256,7 @@ ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
   v' <- forceHere v
   case v' of
-    VGlobal (DataGlob g@(DataGlobal s)) _ -> a g
+    VGlobal (DataGlob g@(DataGlobal _)) _ -> a g
     _ -> b
 
 reprHere :: (Elab m) => Times -> VTm -> m VTm
@@ -305,33 +314,42 @@ infer term = case term of
       (freshUserMeta Nothing)
   PCase s cs -> do
     forbidPat term
-    (ss, ssTy) <- infer s
+    (ss, vsTy) <- infer s
     vs <- evalHere ss
-    d <- ifIsData ssTy return (throwError $ InvalidCaseSubject s)
+    d <- ifIsData vsTy return (throwError $ InvalidCaseSubject s)
     retTy <- freshMeta >>= evalHere
     scs <-
       mapM
         ( \case
             Possible p t -> do
-              sp <- enterPat InPossiblePat $ do
-                (sp, spTy) <- infer p
-                unifyHere ssTy spTy
-                vp <- evalHere sp
-                unifyHere vp vs
-                return sp
-              (st, stTy) <- infer t
-              unifyHere stTy retTy
+              sp <- checkPatAgainstSubject InPossiblePat p vs vsTy
+              st <- check t retTy
               return $ Possible sp st
-            Impossible p -> enterPat InImpossiblePat $ do
-              (sp, spTy) <- infer p
-              unifyHere ssTy spTy
-              vp <- evalHere sp
-              unifyHere vp vs
+            Impossible p -> do
+              sp <- checkPatAgainstSubject InImpossiblePat p vs vsTy
               return $ Impossible sp
         )
         cs
     return (SCase d ss scs, retTy)
-  PLit l -> return undefined
+  PLit l -> do
+    (l', ty, args) <- case l of
+      StringLit s -> return (StringLit s, KnownString, Empty)
+      CharLit c -> return (CharLit c, KnownChar, Empty)
+      NatLit n -> return (NatLit n, KnownNat, Empty)
+      FinLit f bound -> do
+        bound' <- check bound (VGlobal (DataGlob (knownData KnownNat)) Empty)
+        vbound' <- evalHere bound'
+        return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
+    return (SLit l', VGlobal (DataGlob (knownData ty)) args)
+
+checkPatAgainstSubject :: (Elab m) => InPat -> PPat -> VTm -> VTy -> m SPat
+checkPatAgainstSubject i p vs vsTy = enterPat i $ do
+  (sp, spTy) <- infer p
+  a <- unifyHere vsTy spTy
+  vp <- evalHere sp
+  b <- unifyHere vp vs
+  handleUnification (a /\ b)
+  return sp
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
@@ -361,9 +379,9 @@ check term typ = do
       forbidPat term
       (t', ty') <- infer t >>= insert
       reprTy <- reprHere (inv m) ty
-      unifyHere reprTy ty'
+      unifyHere reprTy ty' >>= handleUnification
       return $ SRepr m t'
     (te, ty) -> do
       (te', ty') <- infer te >>= insert
-      unifyHere ty ty'
+      unifyHere ty ty' >>= handleUnification
       return te'

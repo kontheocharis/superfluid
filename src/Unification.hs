@@ -6,8 +6,10 @@ import Common
     Clause,
     DefGlobal,
     Glob (..),
+    Lit (..),
     Lvl,
     MetaVar,
+    PiMode (..),
     Spine,
     Times,
     nextLvl,
@@ -19,7 +21,8 @@ import Control.Exception (assert)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval, evalInOwnCtx, force, vApp)
-import Globals (HasSig (accessSig), unfoldDef)
+import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfoldDef)
+import Numeric.Natural (Natural)
 import Value
   ( Closure,
     Sub,
@@ -28,8 +31,10 @@ import Value
     VPatB (..),
     VTm (..),
     numBinds,
+    pattern VGl,
     pattern VVar,
   )
+import Literals (unfoldLit)
 
 data CanUnify = Yes | No | Maybe Sub
 
@@ -46,7 +51,7 @@ instance Lattice CanUnify where
   _ /\ No = No
   Maybe x /\ Maybe y = Maybe (x <> y)
 
-class (Eval m) => Unify m where
+class (Eval m) => Unify m
 
 unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
 unifySpines _ Empty Empty = return Yes
@@ -87,11 +92,21 @@ unifyRigid = undefined
 unifyReprApp :: (Unify m) => Lvl -> Times -> VHead -> Spine VTm -> VTm -> m CanUnify
 unifyReprApp = undefined
 
-unfoldAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
-unfoldAndUnify l g sp t' = do
+unfoldDefAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
+unfoldDefAndUnify l g sp t' = do
   gu <- accessSig (unfoldDef g)
   t <- vApp l gu sp
   unify l t t'
+
+unifyLit :: (Unify m) => Lvl -> Lit VTm -> VTm -> m CanUnify
+unifyLit l a t = case t of
+  VLit a' -> case (a, a') of
+    (StringLit x, StringLit y) | x == y -> return Yes
+    (CharLit x, CharLit y) | x == y -> return Yes
+    (NatLit x, NatLit y) | x == y -> return Yes
+    (FinLit d n, FinLit d' n') | d == d' -> unify l n n'
+    _ -> return No
+  _ -> unify l (unfoldLit a) t
 
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
@@ -116,7 +131,8 @@ unify l t1 t2 = do
       x' <- vApp l t (S.singleton (Arg m (VNeu (VVar l))))
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes
-    (VLit a, VLit a') | a == a' -> return Yes
+    (t, VLit a') -> unifyLit l a' t
+    (VLit a, t') -> unifyLit l a t'
     (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') ->
       if c == c'
         then
@@ -131,11 +147,11 @@ unify l t1 t2 = do
       if f == f'
         then do
           a <- unifySpines l sp sp'
-          b <- unfoldAndUnify l f sp t2'
+          b <- unfoldDefAndUnify l f sp t2'
           return $ a \/ b
-        else unfoldAndUnify l f sp t2'
-    (VGlobal (DefGlob f) sp, t') -> unfoldAndUnify l f sp t'
-    (t, VGlobal (DefGlob f') sp') -> unfoldAndUnify l f' sp' t
+        else unfoldDefAndUnify l f sp t2'
+    (VGlobal (DefGlob f) sp, t') -> unfoldDefAndUnify l f sp t'
+    (t, VGlobal (DefGlob f') sp') -> unfoldDefAndUnify l f' sp' t
     (VNeu (VCase a s bs), VNeu (VCase b s' bs')) -> do
       if a /= b
         then return No

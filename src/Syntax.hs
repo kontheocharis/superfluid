@@ -36,7 +36,7 @@ data STm
   | SU
   | SGlobal Glob
   | SVar Idx
-  | SLit (Lit ())
+  | SLit (Lit STm)
   | SRepr Times STm
 
 numBinds :: SPat -> Int

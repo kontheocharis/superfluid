@@ -14,6 +14,7 @@ module Value
     pattern VMeta,
     pattern VHead,
     pattern VRepr,
+    pattern VGl,
   )
 where
 
@@ -53,7 +54,7 @@ data VTm
   | VLam PiMode Name Closure
   | VU
   | VGlobal Glob (Spine VTm)
-  | VLit (Lit ())
+  | VLit (Lit VTm)
   | VNeu VNeu
 
 pattern VVar :: Lvl -> VNeu
@@ -67,3 +68,6 @@ pattern VHead m = VApp m Empty
 
 pattern VRepr :: Times -> VHead -> VNeu
 pattern VRepr m t = VReprApp m t Empty
+
+pattern VGl :: Glob -> VTm
+pattern VGl g = VGlobal g Empty
