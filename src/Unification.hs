@@ -95,7 +95,7 @@ unifyReprApp = undefined
 unfoldDefAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify l g sp t' = do
   gu <- accessSig (unfoldDef g)
-  t <- vApp l gu sp
+  t <- vApp gu sp
   unify l t t'
 
 unifyLit :: (Unify m) => Lvl -> Lit VTm -> VTm -> m CanUnify
@@ -110,8 +110,8 @@ unifyLit l a t = case t of
 
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
-  t1' <- force l t1
-  t2' <- force l t2
+  t1' <- force t1
+  t2' <- force t2
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
       a <- unify l t t'
@@ -123,12 +123,12 @@ unify l t1 t2 = do
       x' <- evalInOwnCtx c'
       unify (nextLvl l) x x'
     (t, VLam m' _ c') -> do
-      x <- vApp l t (S.singleton (Arg m' (VNeu (VVar l))))
+      x <- vApp t (S.singleton (Arg m' (VNeu (VVar l))))
       x' <- evalInOwnCtx c'
       unify (nextLvl l) x x'
     (VLam m _ c, t) -> do
       x <- evalInOwnCtx c
-      x' <- vApp l t (S.singleton (Arg m (VNeu (VVar l))))
+      x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes
     (t, VLit a') -> unifyLit l a' t
@@ -152,13 +152,14 @@ unify l t1 t2 = do
         else unfoldDefAndUnify l f sp t2'
     (VGlobal (DefGlob f) sp, t') -> unfoldDefAndUnify l f sp t'
     (t, VGlobal (DefGlob f') sp') -> unfoldDefAndUnify l f' sp' t
-    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) -> do -- @@Todo
+    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) -> do
       if a /= b
         then return No
         else do
           c <- unify l (VNeu s) (VNeu s')
           d <- unifyClauses l bs bs'
-          return $ (c /\ d) \/ Maybe mempty
+          e <- unifySpines l sp sp'
+          return $ (c /\ d /\ e) \/ Maybe mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
       a <- unifySpines l sp sp'
       return $ a \/ Maybe mempty

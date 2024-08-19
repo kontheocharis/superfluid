@@ -16,7 +16,6 @@ import Data.Text.IO (hPutStrLn)
 -- import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 
 import Elaboration (Ctx)
-import Lang (Program)
 import Language.C (CTranslUnit, Pretty (pretty))
 import Language.JavaScript.Parser (JSAST, renderJS, renderToString)
 import Meta (SolvedMetas)

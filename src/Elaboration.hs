@@ -197,14 +197,9 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
-forceHere :: (Elab m) => VTm -> m VTm
-forceHere t = do
-  l <- accessCtx (\c -> c.lvl)
-  force l t
-
 forcePiType :: (Elab m) => PiMode -> VTy -> m (VTy, Closure)
 forcePiType m ty = do
-  ty' <- forceHere ty
+  ty' <- force ty
   case ty' of
     VPi m' _ a b -> do
       if m == m'
@@ -214,7 +209,7 @@ forcePiType m ty = do
       a <- freshMeta >>= evalHere
       v <- uniqueName
       b <- closeHere 1 =<< enterCtx (bind v a) freshMeta
-      unifyHere ty (VPi m v a b)
+      unifyHere ty (VPi m v a b) >>= handleUnification
       return (a, b)
 
 inferSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
@@ -233,9 +228,6 @@ inferSpine (t, ty) (Arg m u :<| sp) = do
 lastIdx :: STm
 lastIdx = SVar (Idx 0)
 
--- symbolicArgsForClosure :: Lvl -> Closure -> [VTm]
--- symbolicArgsForClosure l (Closure n _ t) = map (VNeu . VVar . Lvl . (+ l.unLvl)) [0 .. n - 1]
-
 forbidPat :: (Elab m) => PTm -> m ()
 forbidPat p = ifInPat (throwError $ InvalidPattern p) (return ())
 
@@ -247,7 +239,7 @@ newPatBind x = do
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
-  v' <- forceHere v
+  v' <- force v
   case v' of
     VGlobal (DataGlob g@(DataGlobal _)) _ -> a g
     _ -> b
@@ -359,7 +351,7 @@ checkPatAgainstSubject i p vs vsTy = enterPat i $ do
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
-  typ' <- forceHere typ
+  typ' <- force typ
   case (term, typ') of
     (PLocated l t, ty) -> enterCtx (located l) $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do

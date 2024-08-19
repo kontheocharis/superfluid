@@ -30,7 +30,6 @@ library
       Elaboration
       Evaluation
       Globals
-      Lang
       Literals
       Meta
       Parsing

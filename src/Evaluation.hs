@@ -69,18 +69,18 @@ infixl 8 $$
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (us ++ env) t
 
-vAppNeu :: (Eval m) => Lvl -> VNeu -> Spine VTm -> m VTm
-vAppNeu _ (VApp h us) u = return $ VNeu (VApp h (us >< u))
-vAppNeu _ (VReprApp m h us) u = return $ VNeu (VReprApp m h (us >< u))
-vAppNeu l (VCaseApp dat c cls us) u = return $ VNeu (VCaseApp dat c cls (us >< u))
+vAppNeu :: VNeu -> Spine VTm -> VTm
+vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
+vAppNeu (VReprApp m h us) u = VNeu (VReprApp m h (us >< u))
+vAppNeu (VCaseApp dat c cls us) u = VNeu (VCaseApp dat c cls (us >< u))
 
-vApp :: (Eval m) => Lvl -> VTm -> Spine VTm -> m VTm
-vApp l (VLam _ _ c) (Arg _ u :<| us) = do
+vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
+vApp (VLam _ _ c) (Arg _ u :<| us) = do
   c' <- c $$ [u]
-  vApp l c' us
-vApp _ (VGlobal g us) u = return $ VGlobal g (us >< u)
-vApp l (VNeu n) u = vAppNeu l n u
-vApp _ _ _ = error "impossible"
+  vApp c' us
+vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
+vApp (VNeu n) u = return $ vAppNeu n u
+vApp _ _ = error "impossible"
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
@@ -148,12 +148,13 @@ vRepr l _ (VLit i) = return $ VLit i
 vRepr l m (VGlobal g sp) = do
   g' <- accessSig (getGlobalRepr g)
   sp' <- mapSpineM (vRepr l m) sp
-  vApp l g' sp'
+  vApp g' sp'
 vRepr l m (VNeu (VCaseApp dat v cs sp)) = do
   f <- accessSig (getCaseRepr dat)
-  sp <- caseToSpine v cs
-  sp' <- mapSpineM (vRepr l m) sp
-  vApp l f sp'
+  cssp <- caseToSpine v cs
+  cssp' <- mapSpineM (vRepr l m) cssp
+  a <- vApp f cssp'
+  vApp a sp
 vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return $ VNeu (VReprApp m h sp')
@@ -197,7 +198,7 @@ eval env (SLet _ _ t1 t2) = do
 eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
-  vApp (envQuoteLvl env) t1' (S.singleton (Arg m t2'))
+  vApp t1' (S.singleton (Arg m t2'))
 eval env (SCase dat t cs) = do
   t' <- evalToNeu env t
   cs' <-
@@ -219,15 +220,15 @@ eval env (SRepr m t) = do
   t' <- eval env t
   vRepr (envQuoteLvl env) m t'
 
-force :: (Eval m) => Lvl -> VTm -> m VTm
-force l v@(VNeu (VApp (VFlex m) sp)) = do
+force :: (Eval m) => VTm -> m VTm
+force v@(VNeu (VApp (VFlex m) sp)) = do
   mt <- lookupMeta m
   case mt of
     Just t -> do
-      t' <- vApp l t sp
-      force l t'
+      t' <- vApp t sp
+      force t'
     Nothing -> return v
-force _ v = return v
+force v = return v
 
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
 quoteSpine l t Empty = return t
@@ -242,7 +243,7 @@ quoteHead l (VRigid l') = SVar (lvlToIdx l l')
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
-  vt' <- force l vt
+  vt' <- force vt
   case vt' of
     VLam m x t -> do
       a <- t $$ [VNeu (VVar l)]
