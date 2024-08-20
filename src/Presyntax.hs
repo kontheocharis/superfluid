@@ -151,48 +151,78 @@ isCompound (PRepr {}) = True
 isCompound (PLocated _ t) = isCompound t
 isCompound _ = False
 
-instance Pretty PTm where
+instance (Monad m) => Pretty m PTm where
   -- \| Show a term value, with parentheses if it is compound.
-  singlePretty v | isCompound v = "(" ++ pretty v ++ ")"
+  singlePretty v | isCompound v = pretty v >>= \p -> return $ "(" ++ p ++ ")"
   singlePretty v = pretty v
 
-  pretty (PPi Explicit v t1 t2) = "(" ++ pretty v ++ " : " ++ pretty t1 ++ ") -> " ++ pretty t2
-  pretty (PPi Implicit v t1 t2) = "[" ++ pretty v ++ " : " ++ pretty t1 ++ "] -> " ++ pretty t2
-  pretty (PPi Instance v t1 t2) = "[[" ++ pretty v ++ " : " ++ pretty t1 ++ "]] -> " ++ pretty t2
-  pretty l@(PLam {}) =
+  pretty (PPi Explicit v t1 t2) = do
+    pv <- pretty v
+    pt1 <- pretty t1
+    pt2 <- pretty t2
+    return $ "(" ++ pv ++ " : " ++ pt1 ++ ") -> " ++ pt2
+  pretty (PPi Implicit v t1 t2) = do
+    pv <- pretty v
+    pt1 <- pretty t1
+    pt2 <- pretty t2
+    return $ "[" ++ pv ++ " : " ++ pt1 ++ "] -> " ++ pt2
+  pretty (PPi Instance v t1 t2) = do
+    pv <- pretty v
+    pt1 <- pretty t1
+    pt2 <- pretty t2
+    return $ "[[" ++ pv ++ " : " ++ pt1 ++ "]] -> " ++ pt2
+  pretty l@(PLam {}) = do
     let (vs, b) = pLamsToList l
-     in "\\" ++ intercalate " " (map pretty vs) ++ " => " ++ pretty b
-  pretty (PSigma v t1 t2) = "(" ++ pretty v ++ " : " ++ pretty t1 ++ ") * " ++ pretty t2
-  pretty (PPair t1 t2) = "(" ++ pretty t1 ++ ", " ++ pretty t2 ++ ")"
-  pretty t@(PApp {}) =
+    pvs <- mapM pretty vs
+    pb <- pretty b
+    return $ "\\" ++ intercalate " " pvs ++ " => " ++ pb
+  pretty (PSigma v t1 t2) = do
+    pv <- pretty v
+    pt1 <- pretty t1
+    pt2 <- pretty t2
+    return $ "(" ++ pv ++ " : " ++ pt1 ++ ") * " ++ pt2
+  pretty (PPair t1 t2) = do
+    pt1 <- pretty t1
+    pt2 <- pretty t2
+    return $ "(" ++ pt1 ++ ", " ++ pt2 ++ ")"
+  pretty t@(PApp {}) = do
     let (x, xs) = pAppToList t
-     in pretty x ++ " " ++ intercalate " " (map pretty xs)
-  pretty l@(PLet {}) =
-    curlies $
-      let (binds, ret) = pLetToList l
-       in intercalate "\n" $
-            map
-              (\(v, ty, t) -> "let " ++ pretty v ++ " : " ++ pretty ty ++ " = " ++ pretty t ++ ";")
-              binds
-              ++ [pretty ret]
-  pretty (PCase t cs) =
-    "case "
-      ++ pretty t
-      ++ " "
-      ++ curlies
-        ( intercalate
-            ",\n"
-            ( map
-                ( \(Clause p c) ->
-                    pretty p ++ " => " ++ maybe "impossible" pretty c
-                )
-                cs
-            )
+    px <- pretty x
+    pxs <- mapM pretty xs
+    return $ px ++ " " ++ intercalate " " pxs
+  pretty l@(PLet {}) = do
+    let (binds, ret) = pLetToList l
+    pbinds <-
+      mapM
+        ( \(v, ty, t) -> do
+            pv <- pretty v
+            pty <- pretty ty
+            pt <- pretty t
+            return $ "let " ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
         )
-  pretty PU = "Type"
-  pretty PWild = "_"
+        binds
+    pret <- pretty ret
+    return $ curlies $ intercalate "\n" (pbinds ++ [pret])
+  pretty (PCase t cs) = do
+    pt <- pretty t
+    pcs <-
+      mapM
+        ( \(Clause p c) -> do
+            pp <- pretty p
+            pc <- maybe (return "impossible") pretty c
+            return $ pp ++ " => " ++ pc
+        )
+        cs
+    return $ "case " ++ pt ++ " " ++ curlies (intercalate ",\n" pcs)
+  pretty PU = return "Type"
+  pretty PWild = return "_"
   pretty (PName n) = pretty n
   pretty (PLit l) = pretty l
-  pretty (PHole i) = "?" ++ pretty i
-  pretty (PRepr n s) = "repr " ++ if n == Finite 1 then "" else (pretty n ++ " ") ++ pretty s
+  pretty (PHole i) = do
+    pi' <- pretty i
+    return $ "?" ++ pi'
+  pretty (PRepr n s) = do
+    pn <- pretty n
+    ps <- pretty s
+    return $ "repr " ++ if n == Finite 1 then ps else pn ++ " " ++ ps
   pretty (PLocated _ t) = pretty t

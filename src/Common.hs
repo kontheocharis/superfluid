@@ -1,7 +1,3 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE PatternSynonyms #-}
-
 module Common
   ( Name (..),
     PiMode (..),
@@ -20,6 +16,7 @@ module Common
     globName,
     Idx (..),
     Lvl (..),
+    WithNames (..),
     nextLvl,
     nextLvls,
     lvlToIdx,
@@ -35,6 +32,7 @@ module Common
     PrimGlobal (..),
     DefGlobal (..),
     HasNameSupply (..),
+    HasProjectFiles (..),
   )
 where
 
@@ -52,10 +50,20 @@ data PiMode
   = Implicit
   | Explicit
   | Instance
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show PiMode where
+  show Implicit = "implicit"
+  show Explicit = "explicit"
+  show Instance = "instance"
+
+-- instance
 
 -- | An identifier
 newtype Name = Name {unName :: String} deriving (Eq, Show, Ord)
+
+-- | A value with a list of names
+data WithNames a = WithNames {names :: [Name], value :: a}
 
 -- | A pattern clause, generic over the syntax types
 data Clause p t
@@ -135,25 +143,24 @@ instance Ord Times where
 
 -- | An optional location in the source code, represented by a start (inclusive) and
 -- end (exclusive) position.
-data Loc = NoLoc | Loc Pos Pos deriving (Eq, Show)
-
--- | A monoid instance for locations, that gets the maximum span.
-instance Monoid Loc where
-  mempty = NoLoc
+data Loc = NoLoc | Loc String Pos Pos deriving (Eq, Show)
 
 instance Semigroup Loc where
   NoLoc <> NoLoc = NoLoc
-  NoLoc <> Loc s e = Loc s e
-  Loc s e <> NoLoc = Loc s e
-  Loc s1 e1 <> Loc s2 e2 = Loc (min s1 s2) (max e1 e2)
+  NoLoc <> Loc f s e = Loc f s e
+  Loc f s e <> NoLoc = Loc f s e
+  Loc f s1 e1 <> Loc f' s2 e2 =
+    if f == f'
+      then Loc f (min s1 s2) (max e1 e2)
+      else error "Cannot merge locations from different files"
 
 instance Ord Loc where
   NoLoc <= _ = True
   _ <= NoLoc = False
-  Loc s1 e1 <= Loc s2 e2 = s1 <= s2 && e1 <= e2
+  Loc f s1 e1 <= Loc f' s2 e2 = if f == f' then s1 <= s2 && e1 <= e2 else error "Cannot compare locations from different files"
 
 -- | A position in the source code, represented by a line and column number.
-data Pos = Pos Int Int deriving (Eq, Show)
+data Pos = Pos {line :: Int, col :: Int} deriving (Eq, Show)
 
 -- | An ordering for positions, that gets the minimum position.
 instance Ord Pos where
@@ -162,12 +169,17 @@ instance Ord Pos where
 -- | Get the starting position of a location.
 startPos :: Loc -> Maybe Pos
 startPos NoLoc = Nothing
-startPos (Loc start _) = Just start
+startPos (Loc _ start _) = Just start
 
 -- | Get the ending position of a location.
 endPos :: Loc -> Maybe Pos
 endPos NoLoc = Nothing
-endPos (Loc _ end) = Just end
+endPos (Loc _ _ end) = Just end
+
+-- | Get the project file name of a location.
+locProjectFileName :: Loc -> Maybe String
+locProjectFileName NoLoc = Nothing
+locProjectFileName (Loc f _ _) = Just f
 
 -- De Brujin indices and levels
 
@@ -238,22 +250,61 @@ class (Monad m) => HasNameSupply m where
 
 -- Printing
 
-instance Pretty Name where
-  pretty (Name n) = n
+instance (Monad m) => Pretty m Name where
+  pretty (Name n) = return n
 
-instance (Pretty x) => Pretty (Arg x) where
+instance (Pretty m x) => Pretty m (Arg x) where
   pretty (Arg m x) = case m of
     Explicit -> singlePretty x
-    Implicit -> "[" ++ pretty x ++ "]"
-    Instance -> "[[" ++ pretty x ++ "]]"
+    Implicit -> do
+      x' <- pretty x
+      return $ "[" ++ x' ++ "]"
+    Instance -> do
+      x' <- pretty x
+      return $ "[[" ++ x' ++ "]]"
 
-instance Pretty Times where
-  pretty (Finite n) = show n
-  pretty NegInf = "-inf"
-  pretty PosInf = "inf"
+instance (Monad m) => Pretty m PiMode where
+  pretty Implicit = return "implicit"
+  pretty Explicit = return "explicit"
+  pretty Instance = return "instance"
 
-instance (Pretty a) => Pretty (Lit a) where
-  pretty (StringLit s) = show s
-  pretty (CharLit c) = show c
-  pretty (NatLit n) = show n
-  pretty (FinLit n t) = show n ++ " % " ++ pretty t
+instance (Monad m) => Pretty m Times where
+  pretty (Finite n) = return $ show n
+  pretty NegInf = return "-inf"
+  pretty PosInf = return "inf"
+
+instance (Pretty m a) => Pretty m (Lit a) where
+  pretty (StringLit s) = return $ show s
+  pretty (CharLit c) = return $ show c
+  pretty (NatLit n) = return $ show n
+  pretty (FinLit n t) = do
+    t' <- pretty t
+    return $ show n ++ " % " ++ t'
+
+-- Files
+
+class (Monad m) => HasProjectFiles m where
+  getProjectFileContents :: String -> m String
+
+instance (HasProjectFiles m) => Pretty m Loc where
+  pretty NoLoc = return ""
+  pretty (Loc f s e) = do
+    -- Fetch the contents of the file
+    contents <- getProjectFileContents f
+    let contentLines = lines contents
+
+    -- Extract the lines that span the start and end positions
+    let startLine = s.line
+        endLine = e.line
+        relevantLines = zip [startLine..endLine] $ take (endLine - startLine + 1) $ drop (startLine - 1) contentLines
+
+    -- Generate the underline string with carets
+    let startCol = s.col
+        endCol = if startLine == endLine then e.col else length (snd (last relevantLines))
+        underline = replicate (startCol + length (show startLine) + 2 - 1) ' ' ++ replicate (endCol - startCol) '^'
+
+    -- Combine the relevant lines with the underline
+    let numberedLines = unlines $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines
+    let highlightedCode = numberedLines ++ "\n" ++ underline
+
+    return highlightedCode

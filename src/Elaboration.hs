@@ -17,6 +17,7 @@ import Common
     DataGlobal (..),
     Glob (..),
     HasNameSupply (..),
+    HasProjectFiles,
     Idx (..),
     Lit (..),
     Loc,
@@ -26,6 +27,7 @@ import Common
     Pos,
     Spine,
     Times,
+    WithNames (..),
     globName,
     inv,
     lvlToIdx,
@@ -40,6 +42,7 @@ import Control.Monad.Except (MonadError (throwError))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Functor (void)
 import qualified Data.IntMap as IM
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
@@ -48,6 +51,7 @@ import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRe
 import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownCtor, knownData, lookupGlobal)
 import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
 import Presyntax (PPat, PTm (..), pApp)
+import Printing (Pretty (..))
 import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
@@ -58,6 +62,7 @@ import Value
     VNeu (..),
     VTm (..),
     VTy,
+    isEmptySub,
     vars,
     pattern VHead,
     pattern VRepr,
@@ -70,13 +75,84 @@ data ElabError
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern PTm
-  | ImpossibleCaseIsPossible VTm
-  | ImpossibleCaseMightBePossible VTm
+  | ImpossibleCaseIsPossible VTm VTm
+  | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm
   | InvalidCaseSubject PTm
   | Chain [ElabError]
 
 data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
+
+instance (Elab m) => Pretty m VTm where
+  pretty v = do
+    n <- accessCtx (\c -> c.nameList)
+    quote (Lvl (length n)) v >>= unelab n >>= pretty
+
+instance (Elab m) => Pretty m STm where
+  pretty t = do
+    n <- accessCtx (\c -> c.nameList)
+    unelab n t >>= pretty
+
+instance (Elab m) => Pretty m Sub where
+  pretty sub = do
+    let l = IM.size sub.vars
+    vars <-
+      mapM
+        ( \(x, v) -> do
+            l' <- pretty (VNeu (VVar (Lvl x)))
+            v' <- pretty v
+            return $ l' <> " = " <> v'
+        )
+        (IM.toList sub.vars)
+    return $ intercalate ", " vars
+
+instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
+  pretty e = do
+    loc <- accessCtx (\c -> c.currentLoc)
+    loc' <- pretty loc
+    err' <- err
+    return $ loc' <> "\n" <> err'
+    where
+      err = case e of
+        Mismatch t1 t2 -> do
+          t1' <- pretty t1
+          t2' <- pretty t2
+          return $ "Mismatch: " <> t1' <> " and " <> t2'
+        PotentialMismatch t1 t2 -> do
+          t1' <- pretty t1
+          t2' <- pretty t2
+          return $ "Potential mismatch: " <> t1' <> " and " <> t2'
+        UnresolvedVariable n -> do
+          n' <- pretty n
+          return $ "Unresolved variable: " <> n'
+        ImplicitMismatch m1 m2 -> do
+          return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
+        InvalidPattern p -> do
+          p' <- pretty p
+          return $ "Invalid pattern: " <> p'
+        ImpossibleCaseIsPossible t1 t2 -> do
+          t1' <- pretty t1
+          t2' <- pretty t2
+          return $ "Impossible case is possible: " <> t1' <> " = " <> t2'
+        ImpossibleCaseMightBePossible t1 t2 s -> do
+          t1' <- pretty t1
+          t2' <- pretty t2
+          s' <-
+            if isEmptySub s
+              then return ""
+              else do
+                s' <- pretty s
+                return $ "\nThis could happen if " ++ s'
+          return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
+        ImpossibleCase t -> do
+          t' <- pretty t
+          return $ "Impossible case: " <> t'
+        InvalidCaseSubject t -> do
+          t' <- pretty t
+          return $ "Invalid case subject: " <> t'
+        Chain es -> do
+          es' <- mapM pretty es
+          return $ unlines es'
 
 class (Eval m, Unify m, MonadError ElabError m) => Elab m where
   getCtx :: m Ctx
@@ -128,6 +204,7 @@ data Ctx = Ctx
     inPat :: InPat,
     types :: [VTy],
     bounds :: Bounds,
+    nameList :: [Name],
     names :: Map Name Lvl,
     currentLoc :: Loc
   }
@@ -153,7 +230,8 @@ bind x ty ctx =
       lvl = nextLvl ctx.lvl,
       types = ty : ctx.types,
       bounds = Bound : ctx.bounds,
-      names = M.insert x ctx.lvl ctx.names
+      names = M.insert x ctx.lvl ctx.names,
+      nameList = x : ctx.nameList
     }
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
@@ -166,7 +244,8 @@ define x t ty ctx =
       lvl = nextLvl ctx.lvl,
       types = ty : ctx.types,
       bounds = Defined : ctx.bounds,
-      names = M.insert x ctx.lvl ctx.names
+      names = M.insert x ctx.lvl ctx.names,
+      nameList = x : ctx.nameList
     }
 
 lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
@@ -222,8 +301,8 @@ handleUnification t1 t2 r = do
   p <- inPat
   case p of
     InImpossiblePat -> case r of
-      Yes -> throwError $ ImpossibleCaseIsPossible t1
-      Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
+      Yes -> throwError $ ImpossibleCaseIsPossible t1 t2
+      Maybe s -> throwError $ ImpossibleCaseMightBePossible t1 t2 s
       No _ -> return ()
     InPossiblePat _ -> case r of
       Yes -> return ()
@@ -472,7 +551,7 @@ unelab _ (SMeta m _) = do
     Nothing -> return $ PHole (Name $ "m" ++ show m.unMetaVar)
 unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
 unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
-unelab ns (SCase d t cs) =
+unelab ns (SCase _ t cs) =
   PCase
     <$> unelab ns t
     <*> mapM
@@ -482,7 +561,7 @@ unelab ns (SCase d t cs) =
             <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
       )
       cs
-unelab ns SU = return PU
-unelab ns (SGlobal g) = return $ PName (globName g)
+unelab _ SU = return PU
+unelab _ (SGlobal g) = return $ PName (globName g)
 unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
 unelab ns (SRepr m t) = PRepr m <$> unelab ns t

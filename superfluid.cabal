@@ -36,6 +36,7 @@ library
       Persistence
       Presyntax
       Printing
+      Report
       Syntax
       Unification
       Value
@@ -50,6 +51,11 @@ library
       DuplicateRecordFields
       NoFieldSelectors
       PatternSynonyms
+      DeriveDataTypeable
+      DeriveTraversable
+      FlexibleInstances
+      MultiParamTypeClasses
+      TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       array ==0.5.*
@@ -88,6 +94,11 @@ executable superfluid-exe
       DuplicateRecordFields
       NoFieldSelectors
       PatternSynonyms
+      DeriveDataTypeable
+      DeriveTraversable
+      FlexibleInstances
+      MultiParamTypeClasses
+      TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -O3
   build-depends:
       array ==0.5.*
@@ -128,6 +139,11 @@ test-suite superfluid-test
       DuplicateRecordFields
       NoFieldSelectors
       PatternSynonyms
+      DeriveDataTypeable
+      DeriveTraversable
+      FlexibleInstances
+      MultiParamTypeClasses
+      TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       array ==0.5.*

@@ -63,6 +63,11 @@ default-extensions:
   - DuplicateRecordFields
   - NoFieldSelectors
   - PatternSynonyms
+  - DeriveDataTypeable
+  - DeriveTraversable
+  - FlexibleInstances
+  - MultiParamTypeClasses
+  - TypeOperators
 
 executables:
   superfluid-exe:

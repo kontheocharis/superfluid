@@ -1,11 +1,16 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Printing (Pretty (..), indented, curlies, indentedFst) where
 
 import Data.List (intercalate)
+import Control.Monad.Identity (Identity(runIdentity))
 
-class Pretty a where
-  pretty :: a -> String
+class (Monad m) => Pretty m a where
+  pretty :: a -> m String
 
-  singlePretty :: a -> String
+  prettyPure :: (m ~ Identity) => a -> String
+  prettyPure x = runIdentity (pretty x)
+
+  singlePretty :: a -> m String
   singlePretty = pretty
 
 -- | Replace each newline with a newline followed by 2 spaces.

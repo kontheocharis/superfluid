@@ -24,11 +24,12 @@ import Data.String
 import Data.Text (Text)
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
-import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>))
+import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>), sourceName)
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import GHC.ExecutionStack (SrcLoc(sourceFile))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -109,10 +110,11 @@ getPos = do
 
 located :: (a -> Loc -> b) -> Parser a -> Parser b
 located f p = do
+  n <- sourceName <$> getPosition
   start <- getPos
   x <- p
   end <- getPos
-  return $ f x (Loc start end)
+  return $ f x (Loc n start end)
 
 locatedTerm :: Parser PTm -> Parser PTm
 locatedTerm p = do
@@ -404,11 +406,12 @@ lam = do
   v <- many1 (((Implicit,) <$> try (square (located (,) var))) <|> ((Explicit,) <$> located (,) var))
   reservedOp "=>"
   t <- term
+  n <- sourceName <$> getPosition
   end <- getPos
   return $
     foldr
       ( \(m, (x, l)) acc ->
-          PLocated (l <> Loc end end) (PLam m x acc)
+          PLocated (l <> Loc n end end) (PLam m x acc)
       )
       t
       v
