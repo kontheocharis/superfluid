@@ -41,16 +41,17 @@ import Common
   )
 import Control.Monad (unless, zipWithM, zipWithM_)
 import qualified Data.IntMap as IM
-import Data.List (intercalate)
+import Data.List (intercalate, zipWith4)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
+import Debug.Trace (traceM)
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, isCtorTy, isTypeFamily, quote, vApp, vRepr, ($$))
 import Globals (CtorGlobalInfo (..), DataGlobalInfo (..), DefGlobalInfo (..), GlobalInfo (..), HasSig (accessSig, modifySig), KnownGlobal (..), PrimGlobalInfo (PrimGlobalInfo), addItem, globalInfoToTm, knownCtor, knownData, lookupGlobal, modifyDataItem)
 import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
 import Presyntax (PCtor (..), PData (..), PDef (..), PItem (..), PPat, PPrim (..), PProgram (..), PTm (..), PTy, pApp)
-import Printing (Pretty (..))
+import Printing (Pretty (..), indentedFst)
 import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
@@ -84,6 +85,11 @@ data ElabError
   | Chain [ElabError]
 
 data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
+
+instance Show InPat where
+  show NotInPat = "not in pat"
+  show (InPossiblePat ns) = "in possible pat with " ++ show ns
+  show InImpossiblePat = "in impossible pat"
 
 instance (Elab m) => Pretty m VTm where
   pretty v = do
@@ -170,6 +176,8 @@ class (Eval m, Unify m) => Elab m where
   setCtx :: Ctx -> m ()
   elabError :: ElabError -> m a
 
+  showMessage :: String -> m ()
+
   inPat :: m InPat
   inPat = accessCtx (\c -> c.inPat)
 
@@ -220,6 +228,36 @@ data Ctx = Ctx
     names :: Map Name Lvl,
     currentLoc :: Loc
   }
+
+con :: Ctx -> [(Name, VTy, Maybe VTm)]
+con c =
+  zipWith4
+    ( \n t b e ->
+        ( n,
+          t,
+          case b of
+            Bound -> Nothing
+            Defined -> Just e
+        )
+    )
+    c.nameList
+    c.types
+    c.bounds
+    c.env
+
+instance (Elab m) => Pretty m Ctx where
+  pretty c =
+    intercalate "\n"
+      <$> mapM
+        ( \(n, ty, tm) -> do
+            n' <- pretty n
+            ty' <- pretty ty
+            tm' <- case tm of
+              Just t -> (" = " ++) <$> pretty t
+              Nothing -> return ""
+            return $ n' ++ " : " ++ ty' ++ tm'
+        )
+        (reverse $ con c)
 
 emptyCtx :: Ctx
 emptyCtx =
@@ -285,8 +323,24 @@ inferMetaHere :: (Elab m) => Maybe Name -> m (STm, VTy)
 inferMetaHere n = do
   ty <- newMetaHere Nothing
   vty <- evalHere ty
-  m <- newMetaHere n
+  m <- checkMetaHere n vty
   return (m, vty)
+
+prettyGoal :: (Elab m) => Name -> VTy -> m String
+prettyGoal n ty = do
+  c <- getCtx >>= pretty
+  n' <- pretty (PHole n)
+  ty' <- pretty ty
+  let g = n' ++ " : " ++ ty'
+  return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g
+
+checkMetaHere :: (Elab m) => Maybe Name -> VTy -> m STm
+checkMetaHere n ty = do
+  m <- newMetaHere n
+  case n of
+    Just n' -> prettyGoal n' ty >>= showMessage
+    Nothing -> return ()
+  return m
 
 newMetaHere :: (Elab m) => Maybe Name -> m STm
 newMetaHere n = do
@@ -388,16 +442,21 @@ lastIdx = SVar (Idx 0)
 forbidPat :: (Elab m) => PTm -> m ()
 forbidPat p = ifInPat (elabError $ InvalidPattern p) (return ())
 
-newPatBind :: (Elab m) => Name -> m (STm, VTy)
-newPatBind x = do
+inferPatBind :: (Elab m) => Name -> m (STm, VTy)
+inferPatBind x = do
   ty <- freshMetaHere >>= evalHere
+  x' <- checkPatBind x ty
+  return (x', ty)
+
+checkPatBind :: (Elab m) => Name -> VTy -> m STm
+checkPatBind x ty = do
   modifyCtx (bind x ty)
   whenInPat
     ( \case
         InPossiblePat ns -> setInPat (InPossiblePat (x : ns))
         _ -> return ()
     )
-  return (lastIdx, ty)
+  return lastIdx
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
@@ -418,7 +477,7 @@ inferName n =
         l <- accessSig (lookupGlobal n)
         case l of
           Just c@(CtorInfo _) -> return (globalInfoToTm n c)
-          _ -> newPatBind n
+          _ -> inferPatBind n
     )
     ( do
         r <- accessCtx (lookupName n)
@@ -441,15 +500,18 @@ checkDef def = do
 checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()
 checkCtor dat idx ctor = do
   ty' <- check ctor.ty VU >>= evalHere
-  i <- isCtorTy dat ty'
+  i <- getLvl >>= (\l -> isCtorTy l dat ty')
   unless i (elabError $ InvalidCtorType ty')
   modifySig (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)))
   modifySig (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
 
+getLvl :: (Elab m) => m Lvl
+getLvl = accessCtx (\c -> c.lvl)
+
 checkData :: (Elab m) => PData -> m ()
 checkData dat = do
   ty' <- check dat.ty VU >>= evalHere
-  i <- isTypeFamily ty'
+  i <- getLvl >>= (`isTypeFamily` ty')
   unless i (elabError $ InvalidDataFamily ty')
   modifySig (addItem dat.name (DataInfo (DataGlobalInfo ty' [])))
   zipWithM_ (checkCtor (DataGlobal dat.name)) [0 ..] dat.ctors
@@ -519,7 +581,7 @@ infer term = case term of
     inferMetaHere (Just n)
   PWild ->
     ifInPat
-      (uniqueName >>= newPatBind)
+      (uniqueName >>= inferPatBind)
       (inferMetaHere Nothing)
   PCase s cs -> do
     forbidPat term
@@ -568,6 +630,11 @@ checkPatAgainstSubject p vs vsTy = do
   handleUnification vp vs (a /\ b)
   return $ SPat sp ns
 
+evalInOwnCtxHere :: (Elab m) => Closure -> m VTm
+evalInOwnCtxHere t = do
+  lvl <- accessCtx (\c -> c.lvl)
+  evalInOwnCtx lvl t
+
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
   typ' <- force typ
@@ -575,10 +642,10 @@ check term typ = do
     (PLocated l t, ty) -> enterCtx (located l) $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
       forbidPat term
-      vb <- evalInOwnCtx b
+      vb <- evalInOwnCtxHere b
       SLam m x <$> enterCtx (bind x a) (check t vb)
     (t, VPi Implicit x' a b) -> do
-      vb <- evalInOwnCtx b
+      vb <- evalInOwnCtxHere b
       SLam Implicit x' <$> enterCtx (insertedBind x' a) (check t vb)
     (PLet x a t u, ty) -> do
       forbidPat term
@@ -598,6 +665,13 @@ check term typ = do
       reprTy <- reprHere (inv m) ty
       unifyHere reprTy ty'
       return $ SRepr m t'
+    (PHole n, ty) -> do
+      forbidPat term
+      checkMetaHere (Just n) ty
+    (PWild, ty) ->
+      ifInPat
+        (uniqueName >>= (`checkPatBind` ty))
+        (checkMetaHere Nothing ty)
     (te, ty) -> do
       (te', ty') <- infer te >>= insert
       unifyHere ty ty'

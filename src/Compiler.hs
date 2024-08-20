@@ -165,6 +165,8 @@ instance Elab Comp where
   setCtx ctx = modify (\s -> s {ctx = ctx})
   elabError e = throwError $ ElabCompilerError e
 
+  showMessage = msg
+
 instance HasProjectFiles Comp where
   getProjectFileContents f = do
     fs <- gets (\c -> c.files)

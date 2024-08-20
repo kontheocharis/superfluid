@@ -200,12 +200,11 @@ close n env t = do
     else return $ Closure n env t
 
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
-extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) [0 .. n - 1] ++ env
+extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
 
-evalInOwnCtx :: (Eval m) => Closure -> m VTm
-evalInOwnCtx cl = do
-  let vars = extendEnvByNVars cl.numVars []
-  cl $$ vars
+evalInOwnCtx :: (Eval m) => Lvl -> Closure -> m VTm
+evalInOwnCtx lvl cl = do
+  cl $$ map (VNeu . VVar . nextLvls lvl) (reverse [0 .. cl.numVars - 1])
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
@@ -309,7 +308,7 @@ quote l vt = do
               bitraverse
                 (\p -> SPat <$> quote (nextLvls l n) p.vPat <*> return p.binds)
                 ( \t -> do
-                    a <- evalInOwnCtx t
+                    a <- evalInOwnCtx l t
                     quote (nextLvls l n) a
                 )
                 pt
@@ -325,22 +324,22 @@ nf env t = do
 envQuoteLvl :: Env VTm -> Lvl
 envQuoteLvl env = Lvl (length env)
 
-isTypeFamily :: (Eval m) => VTm -> m Bool
-isTypeFamily t = do
+isTypeFamily :: (Eval m) => Lvl -> VTm -> m Bool
+isTypeFamily l t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx b
-      isTypeFamily b'
+      b' <- evalInOwnCtx l b
+      isTypeFamily (nextLvl l) b'
     VU -> return True
     _ -> return False
 
-isCtorTy :: (Eval m) => DataGlobal -> VTm -> m Bool
-isCtorTy d t = do
+isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m Bool
+isCtorTy l d t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx b
-      isCtorTy d b'
+      b' <- evalInOwnCtx l b
+      isCtorTy (nextLvl l) d b'
     (VGlobal (DataGlob d') _) -> return $ d == d'
     _ -> return False

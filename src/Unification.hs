@@ -147,8 +147,8 @@ unifyClause l (Possible p t) (Possible p' t') = do
   let n' = length p'.binds
   assert (n == n') (return ())
   a <- unify (nextLvls l n) p.vPat p'.vPat
-  x <- evalInOwnCtx t
-  x' <- evalInOwnCtx t'
+  x <- evalInOwnCtx l t
+  x' <- evalInOwnCtx l t'
   (a /\) <$> unify (nextLvls l n) x x'
 unifyClause l (Impossible p) (Impossible p') = do
   let n = length p.binds
@@ -198,19 +198,19 @@ unify l t1 t2 = do
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
       a <- unify l t t'
-      x <- evalInOwnCtx c
-      x' <- evalInOwnCtx c'
+      x <- evalInOwnCtx l c
+      x' <- evalInOwnCtx l c'
       (a /\) <$> unify (nextLvl l) x x'
     (VLam m _ c, VLam m' _ c') | m == m' -> do
-      x <- evalInOwnCtx c
-      x' <- evalInOwnCtx c'
+      x <- evalInOwnCtx l c
+      x' <- evalInOwnCtx l c'
       unify (nextLvl l) x x'
     (t, VLam m' _ c') -> do
       x <- vApp t (S.singleton (Arg m' (VNeu (VVar l))))
-      x' <- evalInOwnCtx c'
+      x' <- evalInOwnCtx l c'
       unify (nextLvl l) x x'
     (VLam m _ c, t) -> do
-      x <- evalInOwnCtx c
+      x <- evalInOwnCtx l c
       x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
       unify (nextLvl l) x x'
     (VU, VU) -> return Yes

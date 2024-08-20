@@ -1,4 +1,4 @@
 
-def main : Unit {
-  (tt, tt)
+def main : [A : Type, B : A -> Type] -> ((x : A) -> B x) -> (a : A) -> ((m : A) * B m) {
+  \f a => (a, ?h1)
 }

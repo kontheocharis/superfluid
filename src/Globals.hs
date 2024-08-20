@@ -84,7 +84,7 @@ lookupGlobal n sig = M.lookup n sig.contents
 globalInfoToTm :: Name -> GlobalInfo -> (STm, VTy)
 globalInfoToTm n i = case i of
   DefInfo d -> (SGlobal (DefGlob (DefGlobal n)), d.ty)
-  DataInfo _ -> (SGlobal (DataGlob (DataGlobal n)), VU)
+  DataInfo d -> (SGlobal (DataGlob (DataGlobal n)), d.ty)
   CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
   PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 

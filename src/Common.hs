@@ -63,7 +63,10 @@ instance Show PiMode where
 -- instance
 
 -- | An identifier
-newtype Name = Name {unName :: String} deriving (Eq, Show, Ord)
+newtype Name = Name {unName :: String} deriving (Eq, Ord)
+
+instance Show Name where
+  show (Name n) = n
 
 -- | A value with a list of names
 data WithNames a = WithNames {names :: [Name], value :: a}

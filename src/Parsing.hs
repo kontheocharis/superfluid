@@ -428,7 +428,9 @@ pairOrParens = locatedTerm . parens $ do
 
 -- | Parse a variable or hole. Holes are prefixed with a question mark.
 varOrHoleOrU :: Parser PTm
-varOrHoleOrU = locatedTerm $ ( symbol "Type" >> return PU)
+varOrHoleOrU =
+  locatedTerm $
+    (symbol "Type" >> return PU)
       <|> do
         hole <- optionMaybe $ reservedOp "?"
         v <- var
