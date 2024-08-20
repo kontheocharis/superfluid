@@ -9,6 +9,8 @@ module Evaluation
     ($$),
     vApp,
     vRepr,
+    vLams,
+    uniqueVLams,
     evalInOwnCtx,
     close,
   )
@@ -20,8 +22,10 @@ import Common
     CtorGlobal (..),
     DataGlobal,
     Glob (..),
+    HasNameSupply (..),
     Idx (..),
     Lvl (..),
+    MetaVar,
     Name,
     PiMode (..),
     Spine,
@@ -32,17 +36,17 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, HasNameSupply (..), MetaVar,
+    pattern Possible,
   )
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.List.Extra (firstJust)
 import Data.Maybe (fromMaybe)
-import Data.Sequence (Seq (..), (><))
+import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
-import Syntax (STm (..), numBinds, sAppSpine, Bounds, BoundState (..))
+import Syntax (BoundState (..), Bounds, STm (..), numBinds, sAppSpine, sLams, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -79,6 +83,17 @@ vApp (VLam _ _ c) (Arg _ u :<| us) = do
 vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
 vApp (VNeu n) u = return $ vAppNeu n u
 vApp _ _ = error "impossible"
+
+uniqueVLams :: (Eval m) => [PiMode] -> Closure -> m VTm
+uniqueVLams ms t = do
+  sp <- fromList <$> mapM (\m -> Arg m <$> uniqueName) ms
+  vLams sp t
+
+vLams :: (Eval m) => Spine Name -> Closure -> m VTm
+vLams Empty t = t $$ []
+vLams (Arg m x :<| sp) t = do
+  let inner = sLams sp t.body
+  return $ VLam m x (Closure (t.numVars + 1) t.env inner)
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
@@ -129,8 +144,16 @@ reprClosure m t = do
   preCompose a (SRepr (inv m))
 
 caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
-caseToSpine v cs = do
-  return undefined -- @@Todo
+caseToSpine v cls = do
+  foldM
+    ( \acc -> \case
+        Possible p t -> do
+          t' <- uniqueVLams (replicate p.numBinds Explicit) t
+          return $ Arg Explicit t' :<| acc
+        Impossible _ -> return acc
+    )
+    (Arg Explicit (VNeu v) :<| Empty)
+    cls
 
 vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
 vRepr l (Finite 0) t = return t
@@ -284,7 +307,7 @@ quote l vt = do
               bitraverse
                 (\p -> quote (nextLvls l n) p.vPat)
                 ( \t -> do
-                    a <- t $$ extendEnvByNVars n []
+                    a <- evalInOwnCtx t
                     quote (nextLvls l n) a
                 )
                 pt

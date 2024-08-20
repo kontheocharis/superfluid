@@ -3,7 +3,7 @@ module Unification (Unify (..), unify, CanUnify (..)) where
 import Algebra.Lattice (Lattice (..))
 import Common
   ( Arg (..),
-    Clause,
+    Clause (..),
     DefGlobal,
     Glob (..),
     Lit (..),
@@ -42,9 +42,11 @@ import Value
     VPatB (..),
     VTm (..),
     liftPRen,
+    liftPRenN,
     numBinds,
+    subbing,
     pattern VGl,
-    pattern VVar, subbing,
+    pattern VVar,
   )
 
 data UnifyError = InvertError | RenameError
@@ -85,8 +87,8 @@ renameSp m pren t (sp :|> Arg i u) = do
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
 rename :: (Unify m) => MetaVar -> PRen -> VTm -> ExceptT UnifyError m STm
-rename m pren t = do
-  f <- lift $ force t
+rename m pren tm = do
+  f <- lift $ force tm
   case f of
     VNeu (VApp (VFlex m') sp)
       | m == m' -> throwError RenameError -- occurs check
@@ -99,7 +101,20 @@ rename m pren t = do
       renameSp m pren (SRepr n t') sp
     VNeu (VCaseApp dat v cs sp) -> do
       v' <- rename m pren (VNeu v)
-      return undefined -- @@Todo
+      cs' <-
+        mapM
+          ( \pt -> do
+              let n = pt.pat.numBinds
+              bitraverse
+                (\p -> rename m pren p.vPat)
+                ( \t' -> do
+                    a <- lift $ t' $$ map (VNeu . VVar) [pren.codSize .. nextLvls pren.codSize n] -- @@Todo: right??
+                    rename m (liftPRenN n pren) a
+                )
+                pt
+          )
+          cs
+      renameSp m pren (SCase dat v' cs') sp
     VLam i x t -> do
       vt <- lift $ t $$ [VNeu (VVar pren.codSize)]
       t' <- rename m (liftPRen pren) vt

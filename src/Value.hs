@@ -13,6 +13,7 @@ module Value
     Sub (..),
     subbing,
     liftPRen,
+    liftPRenN,
     pattern VVar,
     pattern VMeta,
     pattern VHead,
@@ -22,11 +23,11 @@ module Value
   )
 where
 
-import Common (Clause, DataGlobal, Glob, Lit, Lvl, MetaVar, Name, PiMode, Spine, Times, nextLvl, unLvl)
+import Common (Arg (..), Clause, DataGlobal, Glob, HasNameSupply (..), Lit, Lvl (..), MetaVar, Name, PiMode, Spine, Times, nextLvl, unLvl)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
-import Data.Sequence (Seq (Empty))
-import Syntax (STm)
+import Data.Sequence (Seq (..), fromList)
+import Syntax (STm, sLams)
 
 newtype Sub = Sub {vars :: IntMap VTm}
 
@@ -43,7 +44,10 @@ data PRen = PRen
   }
 
 liftPRen :: PRen -> PRen
-liftPRen (PRen dom cod ren) = PRen (nextLvl dom) (nextLvl cod) (IM.insert cod.unLvl dom ren)
+liftPRen = liftPRenN 1
+
+liftPRenN :: Int -> PRen -> PRen
+liftPRenN n (PRen dom cod ren) = PRen (Lvl (dom.unLvl + n)) (Lvl (cod.unLvl + n)) (IM.map (\c -> Lvl (c.unLvl + n)) ren)
 
 instance Monoid Sub where
   mempty = Sub IM.empty

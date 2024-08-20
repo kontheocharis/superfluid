@@ -173,6 +173,14 @@ newtype Idx = Idx {unIdx :: Int} deriving (Eq, Show)
 
 newtype Lvl = Lvl {unLvl :: Int} deriving (Eq, Show)
 
+instance Enum Lvl where
+  toEnum = Lvl
+  fromEnum l = l.unLvl
+
+instance Enum Idx where
+  toEnum = Idx
+  fromEnum i = i.unIdx
+
 nextLvl :: Lvl -> Lvl
 nextLvl (Lvl l) = Lvl (l + 1)
 

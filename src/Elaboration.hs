@@ -70,6 +70,7 @@ data ElabError
   | ImpossibleCaseMightBePossible VTm
   | ImpossibleCase VTm
   | InvalidCaseSubject PTm
+  | Chain [ElabError]
 
 data InPat = NotInPat | InPossiblePat | InImpossiblePat
 
@@ -209,11 +210,9 @@ evalHere t = do
   e <- accessCtx (\c -> c.env)
   eval e t
 
-handleUnification :: (Elab m) => CanUnify -> m ()
-handleUnification r = do
+handleUnification :: (Elab m) => VTm -> VTm -> CanUnify -> m ()
+handleUnification t1 t2 r = do
   p <- inPat
-  let t1 = undefined
-  let t2 = undefined -- @@Todo
   case p of
     InImpossiblePat -> case r of
       Yes -> throwError $ ImpossibleCaseIsPossible t1
@@ -228,10 +227,13 @@ handleUnification r = do
       Maybe _ -> throwError $ PotentialMismatch t1 t2
       No _ -> throwError $ Mismatch t1 t2
 
-unifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
-unifyHere t1 t2 = do
+canUnifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
+canUnifyHere t1 t2 = do
   l <- accessCtx (\c -> c.lvl)
   unify l t1 t2
+
+unifyHere :: (Elab m) => VTm -> VTm -> m ()
+unifyHere t1 t2 = canUnifyHere t1 t2 >>= handleUnification t1 t2
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
 closeValHere n t = do
@@ -256,7 +258,7 @@ forcePiType m ty = do
       a <- freshMetaHere >>= evalHere
       v <- uniqueName
       b <- closeHere 1 =<< enterCtx (bind v a) freshMetaHere
-      unifyHere ty (VPi m v a b) >>= handleUnification
+      unifyHere ty (VPi m v a b)
       return (a, b)
 
 inferSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
@@ -390,10 +392,10 @@ infer term = case term of
 checkPatAgainstSubject :: (Elab m) => InPat -> PPat -> VTm -> VTy -> m SPat
 checkPatAgainstSubject i p vs vsTy = enterPat i $ do
   (sp, spTy) <- infer p
-  a <- unifyHere vsTy spTy
+  a <- canUnifyHere vsTy spTy
   vp <- evalHere sp
-  b <- unifyHere vp vs
-  handleUnification (a /\ b)
+  b <- canUnifyHere vp vs
+  handleUnification vp vs (a /\ b)
   return sp
 
 check :: (Elab m) => PTm -> VTy -> m STm
@@ -424,9 +426,9 @@ check term typ = do
       forbidPat term
       (t', ty') <- infer t >>= insert
       reprTy <- reprHere (inv m) ty
-      unifyHere reprTy ty' >>= handleUnification
+      unifyHere reprTy ty'
       return $ SRepr m t'
     (te, ty) -> do
       (te', ty') <- infer te >>= insert
-      unifyHere ty ty' >>= handleUnification
+      unifyHere ty ty'
       return te'
