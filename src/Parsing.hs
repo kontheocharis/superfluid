@@ -22,14 +22,14 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.String
 import Data.Text (Text)
+import GHC.ExecutionStack (SrcLoc (sourceFile))
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
-import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, string, (<|>), sourceName)
+import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
-import GHC.ExecutionStack (SrcLoc(sourceFile))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -68,7 +68,7 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible", "Type"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -273,7 +273,7 @@ term = choice [caseExpr, lets, piTOrSigmaT, lam, app]
 --
 -- This is a term which never requires parentheses to disambiguate.
 singleTerm :: Parser PTm
-singleTerm = choice [literal, varOrHole, repTerm, unrepTerm, pairOrParens]
+singleTerm = choice [literal, varOrHoleOrU, repTerm, unrepTerm, pairOrParens]
 
 literal :: Parser PTm
 literal = locatedTerm $ do
@@ -427,13 +427,14 @@ pairOrParens = locatedTerm . parens $ do
     Nothing -> return t1
 
 -- | Parse a variable or hole. Holes are prefixed with a question mark.
-varOrHole :: Parser PTm
-varOrHole = locatedTerm $ do
-  hole <- optionMaybe $ reservedOp "?"
-  v <- var
-  case hole of
-    Just _ -> return $ PHole v
-    Nothing -> return $ PName v
+varOrHoleOrU :: Parser PTm
+varOrHoleOrU = locatedTerm $ ( symbol "Type" >> return PU)
+      <|> do
+        hole <- optionMaybe $ reservedOp "?"
+        v <- var
+        case hole of
+          Just _ -> return $ PHole v
+          Nothing -> return $ PName v
 
 caseExpr :: Parser PTm
 caseExpr = locatedTerm $ do

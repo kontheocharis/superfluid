@@ -39,16 +39,17 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
+import Control.Monad (unless, zipWithM, zipWithM_)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRepr, ($$))
-import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownCtor, knownData, lookupGlobal)
+import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, isCtorTy, isTypeFamily, quote, vApp, vRepr, ($$))
+import Globals (CtorGlobalInfo (..), DataGlobalInfo (..), DefGlobalInfo (..), GlobalInfo (..), HasSig (accessSig, modifySig), KnownGlobal (..), PrimGlobalInfo (PrimGlobalInfo), addItem, globalInfoToTm, knownCtor, knownData, lookupGlobal, modifyDataItem)
 import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
-import Presyntax (PPat, PTm (..), pApp, PProgram)
+import Presyntax (PCtor (..), PData (..), PDef (..), PItem (..), PPat, PPrim (..), PProgram (..), PTm (..), PTy, pApp)
 import Printing (Pretty (..))
 import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
@@ -77,6 +78,9 @@ data ElabError
   | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm
   | InvalidCaseSubject PTm
+  | InvalidDataFamily VTy
+  | InvalidCtorType VTy
+  | DuplicateItem Name
   | Chain [ElabError]
 
 data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
@@ -148,6 +152,15 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
         InvalidCaseSubject t -> do
           t' <- pretty t
           return $ "Invalid case subject: " <> t'
+        InvalidDataFamily t -> do
+          t' <- pretty t
+          return $ "Invalid data family type: " <> t'
+        InvalidCtorType t -> do
+          t' <- pretty t
+          return $ "Invalid constructor type: " <> t'
+        DuplicateItem n -> do
+          n' <- pretty n
+          return $ "Duplicate item: " <> n'
         Chain es -> do
           es' <- mapM pretty es
           return $ unlines es'
@@ -418,8 +431,46 @@ inferName n =
               Nothing -> elabError $ UnresolvedVariable n
     )
 
+checkDef :: (Elab m) => PDef -> m ()
+checkDef def = do
+  ty' <- check def.ty VU >>= evalHere
+  tm' <- check def.tm ty' >>= evalHere
+  modifySig (addItem def.name (DefInfo (DefGlobalInfo ty' tm')))
+  return ()
+
+checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()
+checkCtor dat idx ctor = do
+  ty' <- check ctor.ty VU >>= evalHere
+  i <- isCtorTy dat ty'
+  unless i (elabError $ InvalidCtorType ty')
+  modifySig (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)))
+  modifySig (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
+
+checkData :: (Elab m) => PData -> m ()
+checkData dat = do
+  ty' <- check dat.ty VU >>= evalHere
+  i <- isTypeFamily ty'
+  unless i (elabError $ InvalidDataFamily ty')
+  modifySig (addItem dat.name (DataInfo (DataGlobalInfo ty' [])))
+  zipWithM_ (checkCtor (DataGlobal dat.name)) [0 ..] dat.ctors
+
+checkPrim :: (Elab m) => PPrim -> m ()
+checkPrim prim = do
+  ty' <- check prim.ty VU >>= evalHere
+  modifySig (addItem prim.name (PrimInfo (PrimGlobalInfo ty')))
+  return ()
+
+checkItem :: (Elab m) => PItem -> m ()
+checkItem = \case
+  PDef def -> checkDef def
+  PData dat -> checkData dat
+  PPrim prim -> checkPrim prim
+  PDataRep {} -> return () -- @@Todo
+  PDefRep {} -> return () -- @@Todo
+  PLocatedItem l i -> enterCtx (located l) $ checkItem i
+
 checkProgram :: (Elab m) => PProgram -> m ()
-checkProgram = undefined -- @@Todo
+checkProgram (PProgram items) = mapM_ checkItem items
 
 infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of

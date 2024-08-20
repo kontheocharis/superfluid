@@ -144,6 +144,7 @@ instance HasMetas Comp where
 
 instance HasSig Comp where
   getSig = gets (\c -> c.sig)
+  modifySig f = modify (\s -> s {sig = f s.sig})
 
 instance HasNameSupply Comp where
   uniqueName = do

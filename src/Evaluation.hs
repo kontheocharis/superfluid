@@ -6,6 +6,8 @@ module Evaluation
     nf,
     force,
     eval,
+    isTypeFamily,
+    isCtorTy,
     ($$),
     vApp,
     vRepr,
@@ -46,7 +48,7 @@ import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
-import Syntax (BoundState (..), Bounds, STm (..), SPat(..), sAppSpine, sLams, uniqueSLams)
+import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -322,3 +324,23 @@ nf env t = do
 
 envQuoteLvl :: Env VTm -> Lvl
 envQuoteLvl env = Lvl (length env)
+
+isTypeFamily :: (Eval m) => VTm -> m Bool
+isTypeFamily t = do
+  t' <- force t
+  case t' of
+    (VPi _ _ _ b) -> do
+      b' <- evalInOwnCtx b
+      isTypeFamily b'
+    VU -> return True
+    _ -> return False
+
+isCtorTy :: (Eval m) => DataGlobal -> VTm -> m Bool
+isCtorTy d t = do
+  t' <- force t
+  case t' of
+    (VPi _ _ _ b) -> do
+      b' <- evalInOwnCtx b
+      isCtorTy d b'
+    (VGlobal (DataGlob d') _) -> return $ d == d'
+    _ -> return False

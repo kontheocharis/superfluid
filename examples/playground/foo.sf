@@ -1,5 +1,4 @@
 
-def main : IO Unit {
-  let x : Equal 1 0 = refl;
-  io-return tt
+def main : Unit {
+  (tt, tt)
 }

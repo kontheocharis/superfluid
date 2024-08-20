@@ -5,6 +5,7 @@ module Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
     DefGlobalInfo (..),
+    PrimGlobalInfo (..),
     GlobalInfo (..),
     Sig (..),
     getDataGlobal,
@@ -17,12 +18,14 @@ module Globals
     getCaseRepr,
     getCtorRepr,
     getDefRepr,
+    modifyDataItem,
     KnownGlobal (..),
     knownData,
     knownCtor,
     lookupGlobal,
     emptySig,
     globalInfoToTm,
+    addItem,
   )
 where
 
@@ -51,6 +54,12 @@ data Sig = Sig
 emptySig :: Sig
 emptySig = Sig M.empty M.empty M.empty
 
+addItem :: Name -> GlobalInfo -> Sig -> Sig
+addItem n i s = s {contents = M.insert n i s.contents}
+
+modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
+modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}
+
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (DataInfo info) -> info
@@ -74,10 +83,10 @@ lookupGlobal n sig = M.lookup n sig.contents
 
 globalInfoToTm :: Name -> GlobalInfo -> (STm, VTy)
 globalInfoToTm n i = case i of
-    DefInfo d -> (SGlobal (DefGlob (DefGlobal n)), d.ty)
-    DataInfo _ -> (SGlobal (DataGlob (DataGlobal n)), VU)
-    CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
-    PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
+  DefInfo d -> (SGlobal (DefGlob (DefGlobal n)), d.ty)
+  DataInfo _ -> (SGlobal (DataGlob (DataGlobal n)), VU)
+  CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
+  PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
 unfoldDef :: DefGlobal -> Sig -> VTm
 unfoldDef g sig = (getDefGlobal g sig).tm
@@ -115,6 +124,7 @@ getGlobalRepr (PrimGlob g) = getPrimRepr g
 
 class (Monad m) => HasSig m where
   getSig :: m Sig
+  modifySig :: (Sig -> Sig) -> m ()
 
   accessSig :: (Sig -> a) -> m a
   accessSig f = f <$> getSig
