@@ -44,6 +44,9 @@ import Data.Generics (Data, Typeable)
 import Data.Sequence (Seq)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import Data.Set (Set)
+import Data.List (intercalate)
+import Data.Foldable (toList)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -242,6 +245,12 @@ globName (PrimGlob g) = g.globalName
 
 data Tag = UnfoldTag deriving (Eq, Ord, Enum, Bounded)
 
+instance (Monad m) => Pretty m Tag where
+  pretty t = return $ "#" ++ show t
+
+instance (Monad m) => Pretty m (Set Tag) where
+  pretty ts = return $ intercalate " " (map show $ toList ts) ++ (if null ts then "" else " ")
+
 instance Show Tag where
   show UnfoldTag = "unfold"
 
@@ -284,27 +293,30 @@ instance (Pretty m a) => Pretty m (Lit a) where
 -- Files
 
 class (Monad m) => HasProjectFiles m where
-  getProjectFileContents :: String -> m String
+  getProjectFileContents :: String -> m (Maybe String)
 
 instance (HasProjectFiles m) => Pretty m Loc where
   pretty NoLoc = return ""
   pretty (Loc f s e) = do
     -- Fetch the contents of the file
-    contents <- getProjectFileContents f
-    let contentLines = lines contents
+    contents' <- getProjectFileContents f
+    case contents' of
+      Nothing -> return "<unknown file>"
+      Just contents -> do
+        let contentLines = lines contents
 
-    -- Extract the lines that span the start and end positions
-    let startLine = s.line
-        endLine = e.line
-        relevantLines = zip [startLine..endLine] $ take (endLine - startLine + 1) $ drop (startLine - 1) contentLines
+        -- Extract the lines that span the start and end positions
+        let startLine = s.line
+            endLine = e.line
+            relevantLines = zip [startLine .. endLine] $ take (endLine - startLine + 1) $ drop (startLine - 1) contentLines
 
-    -- Generate the underline string with carets
-    let startCol = s.col
-        endCol = if startLine == endLine then e.col else length (snd (last relevantLines))
-        underline = replicate (startCol + length (show startLine) + 2 - 1) ' ' ++ replicate (endCol - startCol) '^'
+        -- Generate the underline string with carets
+        let startCol = s.col
+            endCol = if startLine == endLine then e.col else length (snd (last relevantLines))
+            underline = replicate (startCol + length (show startLine) + 2 - 1) ' ' ++ replicate (endCol - startCol) '^'
 
-    -- Combine the relevant lines with the underline
-    let numberedLines = unlines $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines
-    let highlightedCode = numberedLines ++ "\n" ++ underline
+        -- Combine the relevant lines with the underline
+        let numberedLines = unlines $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines
+        let highlightedCode = numberedLines ++ "\n" ++ underline
 
-    return highlightedCode
+        return highlightedCode

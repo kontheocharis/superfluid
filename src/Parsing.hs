@@ -142,7 +142,7 @@ item = do
   ts <- tags
   tagged ts
     <$> ( PData <$> dataItem
-            <|> PDef <$> declItem
+            <|> PDef <$> defItem
             <|> PDataRep <$> reprDataItem
             <|> PDefRep <$> reprDeclItem
             <|> PPrim <$> primItem
@@ -219,7 +219,7 @@ ctorItem = do
 dataItem :: Parser PData
 dataItem = whiteWrap $ do
   symbol "data"
-  (name, ty) <- declSignature
+  (name, ty) <- defSig
   ctors <- curlies (commaSep ctorItem)
   return $
     MkPData
@@ -232,7 +232,7 @@ dataItem = whiteWrap $ do
 primItem :: Parser PPrim
 primItem = whiteWrap $ do
   symbol "prim"
-  (name, ty) <- declSignature
+  (name, ty) <- defSig
   case ty of
     Nothing -> fail "Primitive items must have a type signature"
     Just ty' -> return $ MkPPrim name ty' mempty
@@ -250,16 +250,16 @@ tags = do
       )
 
 -- | Parse a declaration.
-declItem :: Parser PDef
-declItem = whiteWrap $ do
+defItem :: Parser PDef
+defItem = whiteWrap $ do
   symbol "def"
-  (name, ty) <- declSignature
+  (name, ty) <- defSig
   t <- lets
   return $ MkPDef name (fromMaybe PWild ty) t mempty
 
 -- | Parse the type signature of a declaration.
-declSignature :: Parser (Name, Maybe PTy)
-declSignature = do
+defSig :: Parser (Name, Maybe PTy)
+defSig = do
   name <- identifier
   ty <- optionMaybe $ colon >> term
   return (name, ty)
@@ -346,9 +346,10 @@ named =
   where
     typings :: Parser (NonEmpty (Loc, Name, PTy))
     typings = commaSep1 . located (\(n, t) l -> (l, n, t)) . try $ do
+      n <- var
       _ <- colon
       ty <- term
-      return (Name "_", ty)
+      return (n, ty)
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy

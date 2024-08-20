@@ -9,7 +9,7 @@ data Bool : Type {
   false : Bool
 }
 
-def id : [A : Type,] -> A -> A {
+def id : [A : Type] -> A -> A {
   \a => a
 }
 
@@ -20,7 +20,7 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   }
 }
 
-prim impossible : [A : Type] -> A
+prim conjure : [A : Type] -> A
 
 -- JS primitives
 
@@ -203,14 +203,14 @@ data Dec : Type -> Type {
   no : [A : Type] -> (A -> Empty) -> Dec A
 }
 
-def rec add : Nat -> Nat -> Nat {
+def add : Nat -> Nat -> Nat {
   \m n => case m {
     z => n,
     s m' => s (add m' n),
   }
 }
 
-def rec sub : Nat -> Nat -> Nat {
+def sub : Nat -> Nat -> Nat {
   \m n => case n {
     z => m,
     s n' => case m {
@@ -220,14 +220,14 @@ def rec sub : Nat -> Nat -> Nat {
   }
 }
 
-def rec mul : Nat -> Nat -> Nat {
+def mul : Nat -> Nat -> Nat {
   \m n => case m {
     z => z,
     s m' => add n (mul m' n),
   }
 }
 
-def rec is-even : Nat -> Bool {
+def is-even : Nat -> Bool {
   \n => case n {
     z => true,
     s n' => case n' {
@@ -237,42 +237,42 @@ def rec is-even : Nat -> Bool {
   }
 }
 
-def rec pow : Nat -> Nat -> Nat {
+def pow : Nat -> Nat -> Nat {
   \m n => case n {
     z => s z,
     s n' => mul m (pow m n'),
   }
 }
 
-def rec and : Bool -> Bool -> Bool {
+def and : Bool -> Bool -> Bool {
   \a b => case a {
     true => b,
     false => false,
   }
 }
 
-def rec or : Bool -> Bool -> Bool {
+def or : Bool -> Bool -> Bool {
   \a b => case a {
     true => true,
     false => b,
   }
 }
 
-def rec not : Bool -> Bool {
+def not : Bool -> Bool {
   \a => case a {
     true => false,
     false => true,
   }
 }
 
-def rec fin-to-nat : [n : Nat] -> Fin n -> Nat {
+def fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
     fs f' => s (fin-to-nat f'),
   }
 }
 
-def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
+def fin-is-even : [n : Nat] -> Fin n -> Bool {
   \x => case x {
     fz => true,
     fs x => case x {
@@ -282,11 +282,11 @@ def rec fin-is-even : [n : Nat] -> Fin n -> Bool {
   }
 }
 
-def rec upgrade : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add (s i) n) {
+def upgrade : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add (s i) n) {
   ?upgrade
 }
 
-def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
+def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
   \a b => case a {
     fz => case b {
       fz => true,
@@ -299,21 +299,21 @@ def rec fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
   }
 }
 
-def rec length : [A : Type] -> List A -> Nat {
+def length : [A : Type] -> List A -> Nat {
   \xs => case xs {
     nil => z,
     cons _ xs' => s (length xs'),
   }
 }
 
-def rec map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
+def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
   \f xs => case xs {
     nil => nil,
     cons x xs' => cons (f x) (map f xs')
   }
 }
 
-def rec find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
+def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   \p xs => case xs {
     nil => nothing,
     cons x xs' => case p x {
@@ -323,14 +323,14 @@ def rec find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   }
 }
 
-def rec fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
+def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
   \f acc xs => case xs {
     nil => acc,
     cons x xs' => f x (fold f acc xs')
   }
 }
 
-def rec index : [A : Type] -> Nat -> List A -> Maybe A {
+def index : [A : Type] -> Nat -> List A -> Maybe A {
   \n xs => case xs {
     nil => nothing,
     cons x xs' => case n {
@@ -380,7 +380,7 @@ def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y)
   \m p => m (s-inj p)
 }
 
-def rec nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
+def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
   \n m => case n {
     z => case m {
       z => yes refl,

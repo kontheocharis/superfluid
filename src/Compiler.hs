@@ -1,3 +1,6 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 module Compiler (runCli) where
 
 -- import Checking.Context (Tc, TcState)
@@ -5,29 +8,37 @@ module Compiler (runCli) where
 -- import Checking.Representation (representProgram)
 -- import Checking.Typechecking (checkProgram, inferTerm)
 -- import Checking.Utils (runTc)
-import Control.Monad (when)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (MonadState (..), StateT)
-import Data.Char (isSpace)
-import Data.String
-import Data.Text.IO (hPutStrLn)
+
 -- import Interface.Pretty
 
 -- import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 
-import Elaboration (Ctx)
-import Language.C (CTranslUnit, Pretty (pretty))
-import Language.JavaScript.Parser (JSAST, renderJS, renderToString)
-import Meta (SolvedMetas)
+import Common (HasNameSupply (..), HasProjectFiles (getProjectFileContents), Name (..))
+import Control.Monad (void, when)
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.State (MonadState (get, put), StateT (..))
+import Control.Monad.State.Class (gets, modify)
+import Data.Map (Map)
+import qualified Data.Map as M
+import Data.String
+import Data.Text.IO (hPutStrLn)
+import Elaboration (Ctx, Elab (..), ElabError, emptyCtx, checkProgram)
+import Evaluation (Eval (..))
+import Globals (HasSig (..), Sig, emptySig)
+import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
 import Options.Applicative (execParser, (<**>), (<|>))
 import Options.Applicative.Builder (fullDesc, header, help, info, long, progDesc, short, strOption, switch)
 import Options.Applicative.Common (Parser)
 import Options.Applicative.Extra (helper)
-import Parsing (parseProgram, parseTerm)
-import System.Console.Haskeline (InputT, defaultSettings, getInputLine, outputStrLn, runInputT)
+import Parsing (parseProgram)
+import Presyntax (PProgram)
+import Printing (Pretty (..))
+import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Globals (Sig)
+import Unification (Unify)
+import Persistence (preludePath)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -39,8 +50,6 @@ data Mode
     ParseFile String
   | -- | Represent a file
     RepresentFile String
-  | -- | Run a REPL
-    Repl
   | -- | Generate code
     GenerateCode String
   deriving (Show)
@@ -78,7 +87,6 @@ parseMode =
     <|> (ParseFile <$> strOption (long "parse" <> short 'p' <> help "File to parse"))
     <|> (RepresentFile <$> strOption (long "represent" <> short 'r' <> help "File to represent"))
     <|> (GenerateCode <$> strOption (long "generate" <> short 'g' <> help "File to generate code for"))
-    <|> pure Repl
 
 -- | Parse the command line arguments.
 parseArgs :: Parser Args
@@ -88,7 +96,7 @@ parseArgs = Args <$> parseMode <*> parseFlags
 runCli :: IO ()
 runCli = do
   args <- execParser opts
-  runInputT defaultSettings $ runCompiler args
+  runComp (compile args) emptyCompiler
   where
     opts =
       info
@@ -99,68 +107,130 @@ runCli = do
         )
 
 -- | Log a message.
-msg :: String -> InputT IO ()
+msg :: String -> Comp ()
 msg m = do
   liftIO $ putStrLn m
   return ()
 
 -- | Log a message to stderr and exit with an error code.
-err :: String -> InputT IO a
+err :: String -> Comp a
 err m = liftIO $ do
   hPutStrLn stderr $ fromString m
   exitFailure
 
 data Compiler = Compiler
-  { solvedMetas :: SolvedMetas,
+  { files :: Map String String,
+    solvedMetas :: SolvedMetas,
     ctx :: Ctx,
-    signature :: Sig,
+    sig :: Sig,
     inPat :: Bool,
     reduceUnderBinders :: Bool,
+    lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool
   }
 
-type Comp a = StateT Compiler (InputT IO) a
+data CompilerError = ElabCompilerError ElabError | ParseCompilerError String
+
+instance Pretty Comp CompilerError where
+  pretty (ElabCompilerError e) = pretty e
+  pretty (ParseCompilerError e) = return e
+
+newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
+  deriving (Functor, Applicative, Monad, MonadState Compiler, MonadError CompilerError, MonadIO)
+
+instance HasMetas Comp where
+  solvedMetas = gets (\c -> c.solvedMetas)
+  modifySolvedMetas f = modify (\s -> s {solvedMetas = f s.solvedMetas})
+
+instance HasSig Comp where
+  getSig = gets (\c -> c.sig)
+
+instance HasNameSupply Comp where
+  uniqueName = do
+    n <- gets (\c -> c.lastNameIdx)
+    modify (\s -> s {lastNameIdx = n + 1})
+    return . Name $ "x" ++ show n
+
+instance Eval Comp where
+  reduceUnderBinders = gets (\c -> c.reduceUnderBinders)
+  setReduceUnderBinders b = modify (\s -> s {reduceUnderBinders = b})
+  reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
+  setReduceUnfoldDefs b = modify (\s -> s {reduceUnfoldDefs = b})
+
+instance Unify Comp
+
+instance Elab Comp where
+  getCtx = gets (\c -> c.ctx)
+  setCtx ctx = modify (\s -> s {ctx = ctx})
+  elabError e = throwError $ ElabCompilerError e
+
+instance HasProjectFiles Comp where
+  getProjectFileContents f = do
+    fs <- gets (\c -> c.files)
+    return $ M.lookup f fs
+
+emptyCompiler :: Compiler
+emptyCompiler =
+  Compiler
+    { files = M.empty,
+      solvedMetas = emptySolvedMetas,
+      ctx = emptyCtx,
+      sig = emptySig,
+      inPat = False,
+      reduceUnderBinders = False,
+      lastNameIdx = 0,
+      reduceUnfoldDefs = False
+    }
+
+runComp :: Comp a -> Compiler -> IO ()
+runComp c s = do
+  let c' = do
+        void c
+          `catchError` ( \e -> do
+                           e' <- pretty e
+                           err e'
+                       )
+  (_, _) <- runStateT (runExceptT c'.unComp) s
+  return ()
 
 -- | Run the compiler.
-runCompiler :: Args -> InputT IO ()
-runCompiler (Args (CheckFile file) flags) = do
-  -- checked <- andPotentiallyNormalise flags <$> checkFile file
-  when flags.verbose $ msg "\nTypechecked program successfully"
-  -- when flags.dump $ msg $ printVal checked
-runCompiler (Args (ParseFile file) flags) = do
-  when flags.verbose $ msg $ "Parsing file " ++ file
-  -- parsed <- parseFile file
-  -- when flags.dump $ msg $ printVal parsed
-runCompiler (Args (RepresentFile file) flags) = do
-  -- represented <- andPotentiallyNormalise flags <$> representFile file
-  when flags.verbose $ msg "\nTypechecked and represented program successfully"
-  -- when flags.dump $ msg $ printVal represented
-runCompiler (Args (GenerateCode file) flags) = do
-  -- code <- generateCode file
-  when flags.verbose $ msg "Generated code successfully"
-  -- when flags.dump $ msg $ renderJsProg code
-runCompiler (Args Repl _) = undefined
+compile :: Args -> Comp ()
+compile args = do
+  case args of
+    Args (CheckFile file) flags -> do
+      parseAndCheckPrelude
+      parsed <- parseFile file
+      checkProgram parsed
+      when flags.verbose $ msg "\nTypechecked program successfully"
+    -- when flags.dump $ msg $ printVal checked
+    Args (ParseFile file) flags -> do
+      parsed <- parseFile file
+      when flags.verbose $ msg $ "Parsing file " ++ file
+      printed <- pretty parsed
+      when flags.dump . msg $ printed
+    Args (RepresentFile file) flags -> error "unimplemented"
+      -- represented <- andPotentiallyNormalise flags <$> representFile file
+      -- when flags.verbose $ msg "\nTypechecked and represented program successfully"
+    -- when flags.dump $ msg $ printVal represented
+    Args (GenerateCode file) flags -> error "unimplemented"
+      -- code <- generateCode file
+      -- when flags.verbose $ msg "Generated code successfully"
 
--- | Parse a file.
--- parseFile :: String -> InputT IO Program
--- parseFile file = do
---   -- (p, _, _) <- parseFile' file
---   return p
+-- when flags.dump $ msg $ renderJsProg code
 
--- | Parse a file and return the current TC state.
--- parseFile' :: String -> InputT IO (Program, Program, Ctx)
--- parseFile' file = do
---   (prelude, st) <- parseAndCheckPrelude
---   contents <- liftIO $ readFile file
---   program <- handleParse err (parseProgram file contents (Just prelude))
---   return (program, prelude, st)
+parseAndCheckPrelude :: Comp ()
+parseAndCheckPrelude = do
+  parsed <- parseFile preludePath
+  checkProgram parsed
 
--- -- | Parse and check a file.
--- checkFile :: String -> InputT IO Program
--- checkFile file = do
---   (parsed, _, st) <- parseFile' file
---   (checked, _) <- handleTc err (put st >> checkProgram parsed)
---   return checked
+-- | Parse a file with the given name and add it to the program
+parseFile :: String -> Comp PProgram
+parseFile file = do
+  contents <- liftIO $ readFile file
+  modify (\c -> c {files = M.insert file contents c.files})
+  case parseProgram file contents of
+    Left e -> throwError $ ParseCompilerError e
+    Right p -> return p
 
 -- -- | Parse, check and represent a file.
 -- representFile :: String -> InputT IO Program
@@ -186,33 +256,8 @@ runCompiler (Args Repl _) = undefined
 --   liftIO $ writeFile file contents
 --   msg $ "Wrote file " ++ file
 
--- -- | Run the REPL.
--- runRepl :: InputT IO a
--- runRepl = do
---   i <- getInputLine "> "
---   case i of
---     Nothing -> return ()
---     Just ('@' : 't' : ' ' : inp) -> do
---       t <- handleParse replErr (parseTerm inp)
---       ((ty, _), _) <- handleTc replErr (inferTerm t)
---       outputStrLn $ printVal ty
---     Just inp | all isSpace inp -> return ()
---     Just inp -> do
---       t <- handleParse replErr (parseTerm inp)
---       _ <- handleTc replErr (inferTerm t)
---       (t', _) <- handleTc replErr (return $ normaliseTermFully mempty mempty t)
---       outputStrLn $ printVal t'
---   runRepl
-
--- -- | Parse and check the Prelude, returning the final TC state and the parsed program.
--- parseAndCheckPrelude :: InputT IO (Program, Ctx)
--- parseAndCheckPrelude = do
---   parsed <- handleParse err (parseProgram preludePath preludeContents Nothing)
---   (checked, st) <- handleTc err (checkProgram parsed)
---   return (checked, st)
-
 -- -- | Handle a parsing result.
--- handleParse :: (String -> InputT IO a) -> Either String a -> InputT IO a
+-- handleParse :: (String -> Comp a) -> Either String a -> Comp a
 -- handleParse er res = do
 --   case res of
 --     Left e -> er $ "Failed to parse: " ++ e

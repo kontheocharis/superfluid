@@ -1,15 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Elaboration
-  ( ElabError (..),
-    Ctx,
+  ( Elab (..),
+    ElabError (..),
+    Ctx (..),
+    emptyCtx,
     infer,
+    checkProgram,
     check,
     unelab,
   )
 where
 
-import Algebra.Lattice ((/\), (\/))
+import Algebra.Lattice ((/\))
 import Common
   ( Arg (..),
     Clause (..),
@@ -20,14 +23,12 @@ import Common
     HasProjectFiles,
     Idx (..),
     Lit (..),
-    Loc,
+    Loc (NoLoc),
     Lvl (..),
     Name (..),
     PiMode (..),
-    Pos,
     Spine,
     Times,
-    WithNames (..),
     globName,
     inv,
     lvlToIdx,
@@ -38,9 +39,6 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad.Except (MonadError (throwError))
-import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.Functor (void)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Map (Map)
@@ -50,9 +48,9 @@ import qualified Data.Sequence as S
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRepr, ($$))
 import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownCtor, knownData, lookupGlobal)
 import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
-import Presyntax (PPat, PTm (..), pApp)
+import Presyntax (PPat, PTm (..), pApp, PProgram)
 import Printing (Pretty (..))
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, toPSpine)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
   ( Closure (..),
@@ -154,9 +152,10 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
           es' <- mapM pretty es
           return $ unlines es'
 
-class (Eval m, Unify m, MonadError ElabError m) => Elab m where
+class (Eval m, Unify m) => Elab m where
   getCtx :: m Ctx
   setCtx :: Ctx -> m ()
+  elabError :: ElabError -> m a
 
   inPat :: m InPat
   inPat = accessCtx (\c -> c.inPat)
@@ -209,6 +208,19 @@ data Ctx = Ctx
     currentLoc :: Loc
   }
 
+emptyCtx :: Ctx
+emptyCtx =
+  Ctx
+    { env = [],
+      lvl = Lvl 0,
+      inPat = NotInPat,
+      types = [],
+      bounds = [],
+      nameList = [],
+      names = M.empty,
+      currentLoc = NoLoc
+    }
+
 applySubToCtx :: (Elab m) => Sub -> m ()
 applySubToCtx sub = do
   ctx <- getCtx
@@ -252,9 +264,6 @@ lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
 lookupName n ctx = case M.lookup n ctx.names of
   Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
   Nothing -> Nothing
-
-definedValue :: Idx -> Ctx -> VTm
-definedValue i ctx = ctx.env !! i.unIdx
 
 located :: Loc -> Ctx -> Ctx
 located l ctx = ctx {currentLoc = l}
@@ -301,17 +310,17 @@ handleUnification t1 t2 r = do
   p <- inPat
   case p of
     InImpossiblePat -> case r of
-      Yes -> throwError $ ImpossibleCaseIsPossible t1 t2
-      Maybe s -> throwError $ ImpossibleCaseMightBePossible t1 t2 s
+      Yes -> elabError $ ImpossibleCaseIsPossible t1 t2
+      Maybe s -> elabError $ ImpossibleCaseMightBePossible t1 t2 s
       No _ -> return ()
     InPossiblePat _ -> case r of
       Yes -> return ()
       Maybe s -> applySubToCtx s
-      No _ -> throwError $ ImpossibleCase t1
+      No _ -> elabError $ ImpossibleCase t1
     NotInPat -> case r of
       Yes -> return ()
-      Maybe _ -> throwError $ PotentialMismatch t1 t2
-      No _ -> throwError $ Mismatch t1 t2
+      Maybe _ -> elabError $ PotentialMismatch t1 t2
+      No _ -> elabError $ Mismatch t1 t2
 
 canUnifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
 canUnifyHere t1 t2 = do
@@ -339,7 +348,7 @@ forcePiType m ty = do
     VPi m' _ a b -> do
       if m == m'
         then return (a, b)
-        else throwError $ ImplicitMismatch m m'
+        else elabError $ ImplicitMismatch m m'
     _ -> do
       a <- freshMetaHere >>= evalHere
       v <- uniqueName
@@ -364,7 +373,7 @@ lastIdx :: STm
 lastIdx = SVar (Idx 0)
 
 forbidPat :: (Elab m) => PTm -> m ()
-forbidPat p = ifInPat (throwError $ InvalidPattern p) (return ())
+forbidPat p = ifInPat (elabError $ InvalidPattern p) (return ())
 
 newPatBind :: (Elab m) => Name -> m (STm, VTy)
 newPatBind x = do
@@ -406,8 +415,11 @@ inferName n =
             l <- accessSig (lookupGlobal n)
             case l of
               Just x -> return (globalInfoToTm n x)
-              Nothing -> throwError $ UnresolvedVariable n
+              Nothing -> elabError $ UnresolvedVariable n
     )
+
+checkProgram :: (Elab m) => PProgram -> m ()
+checkProgram = undefined -- @@Todo
 
 infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of
@@ -462,7 +474,7 @@ infer term = case term of
     forbidPat term
     (ss, vsTy) <- infer s
     vs <- evalHere ss
-    d <- ifIsData vsTy return (throwError $ InvalidCaseSubject s)
+    d <- ifIsData vsTy return (elabError $ InvalidCaseSubject s)
     retTy <- freshMetaHere >>= evalHere
     scs <-
       mapM

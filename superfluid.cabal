@@ -36,7 +36,6 @@ library
       Persistence
       Presyntax
       Printing
-      Report
       Syntax
       Unification
       Value

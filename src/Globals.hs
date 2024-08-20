@@ -21,6 +21,7 @@ module Globals
     knownData,
     knownCtor,
     lookupGlobal,
+    emptySig,
     globalInfoToTm,
   )
 where
@@ -46,6 +47,9 @@ data Sig = Sig
     repr :: Map Name VTm,
     reprCase :: Map Name VTm
   }
+
+emptySig :: Sig
+emptySig = Sig M.empty M.empty M.empty
 
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of
