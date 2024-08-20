@@ -35,6 +35,7 @@ library
       Parsing
       Persistence
       Presyntax
+      Printing
       Syntax
       Unification
       Value
