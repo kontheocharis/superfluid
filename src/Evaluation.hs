@@ -249,7 +249,7 @@ vAppBinds env v binds = case (env, binds) of
   (x : env', Bound : binds') -> do
     v' <- vApp v (S.singleton (Arg Explicit x))
     vAppBinds env' v' binds'
-  (_, Defined : binds') -> vAppBinds env v binds'
+  (_ : env', Defined : binds') -> vAppBinds env' v binds'
   _ -> error "impossible"
 
 vMeta :: (Eval m) => MetaVar -> m VTm
