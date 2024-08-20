@@ -17,6 +17,7 @@ module Common
     Pos (..),
     startPos,
     endPos,
+    globName,
     Idx (..),
     Lvl (..),
     nextLvl,
@@ -205,7 +206,7 @@ mapSpineM f = traverse (traverse f)
 
 -- Metas
 
-newtype MetaVar = MetaVar Int deriving (Eq, Show)
+newtype MetaVar = MetaVar {unMetaVar :: Int} deriving (Eq, Show)
 
 -- Globals
 
@@ -218,6 +219,12 @@ newtype DefGlobal = DefGlobal {globalName :: Name} deriving (Eq, Show)
 newtype PrimGlobal = PrimGlobal {globalName :: Name} deriving (Eq, Show)
 
 data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal | PrimGlob PrimGlobal deriving (Eq, Show)
+
+globName :: Glob -> Name
+globName (CtorGlob g) = g.globalName
+globName (DataGlob g) = g.globalName
+globName (DefGlob g) = g.globalName
+globName (PrimGlob g) = g.globalName
 
 -- Tags
 

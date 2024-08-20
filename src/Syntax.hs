@@ -1,10 +1,9 @@
 module Syntax
   ( STm (..),
     STy,
-    SPat,
+    SPat (..),
     BoundState (..),
     Bounds,
-    numBinds,
     toPSpine,
     sAppSpine,
     sLams,
@@ -31,7 +30,7 @@ import Presyntax (PTm (..))
 
 type STy = STm
 
-type SPat = STm
+data SPat = SPat { asTm :: STm, binds :: [Name] }
 
 data BoundState = Bound | Defined
 
@@ -50,13 +49,6 @@ data STm
   | SLit (Lit STm)
   | SRepr Times STm
 
-numBinds :: SPat -> Int
-numBinds (SVar _) = 1
-numBinds (SGlobal _) = 0
-numBinds (SLit _) = 0
-numBinds (SApp _ t u) = numBinds t + numBinds u
-numBinds _ = error "impossible"
-
 toPSpine :: PTm -> (PTm, Spine PTm)
 toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
 toPSpine t = (t, Empty)
@@ -73,3 +65,6 @@ uniqueSLams ms t = do
 sLams :: Spine Name -> STm -> STm
 sLams Empty t = t
 sLams (Arg m x :<| sp) t = SLam m x (sLams sp t)
+
+
+

@@ -5,6 +5,7 @@ module Elaboration
     Ctx,
     infer,
     check,
+    unelab,
   )
 where
 
@@ -20,20 +21,23 @@ import Common
     Lit (..),
     Loc,
     Lvl (..),
-    Name,
+    Name (..),
     PiMode (..),
     Pos,
     Spine,
     Times,
+    globName,
     inv,
     lvlToIdx,
     nextLvl,
     nextLvls,
     pat,
+    unMetaVar,
     pattern Impossible,
     pattern Possible,
   )
 import Control.Monad.Except (MonadError (throwError))
+import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Functor (void)
 import qualified Data.IntMap as IM
 import Data.Map (Map)
@@ -42,9 +46,9 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRepr, ($$))
 import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownCtor, knownData, lookupGlobal)
-import Meta (HasMetas (freshMetaVar))
+import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
 import Presyntax (PPat, PTm (..), pApp)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat, STm (..), STy, toPSpine)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
   ( Closure (..),
@@ -72,7 +76,7 @@ data ElabError
   | InvalidCaseSubject PTm
   | Chain [ElabError]
 
-data InPat = NotInPat | InPossiblePat | InImpossiblePat
+data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
 
 class (Eval m, Unify m, MonadError ElabError m) => Elab m where
   getCtx :: m Ctx
@@ -92,12 +96,15 @@ class (Eval m, Unify m, MonadError ElabError m) => Elab m where
     setInPat b
     return a'
 
+  whenInPat :: (InPat -> m a) -> m a
+  whenInPat f = do
+    p <- inPat
+    f p
+
   ifInPat :: m a -> m a -> m a
-  ifInPat a b = do
-    b' <- inPat
-    case b' of
-      NotInPat -> b
-      _ -> a
+  ifInPat a b = whenInPat $ \case
+    NotInPat -> b
+    _ -> a
 
   accessCtx :: (Ctx -> a) -> m a
   accessCtx f = f <$> getCtx
@@ -218,7 +225,7 @@ handleUnification t1 t2 r = do
       Yes -> throwError $ ImpossibleCaseIsPossible t1
       Maybe _ -> throwError $ ImpossibleCaseMightBePossible t1
       No _ -> return ()
-    InPossiblePat -> case r of
+    InPossiblePat _ -> case r of
       Yes -> return ()
       Maybe s -> applySubToCtx s
       No _ -> throwError $ ImpossibleCase t1
@@ -284,6 +291,11 @@ newPatBind :: (Elab m) => Name -> m (STm, VTy)
 newPatBind x = do
   ty <- freshMetaHere >>= evalHere
   modifyCtx (bind x ty)
+  whenInPat
+    ( \case
+        InPossiblePat ns -> setInPat (InPossiblePat (x : ns))
+        _ -> return ()
+    )
   return (lastIdx, ty)
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
@@ -377,11 +389,11 @@ infer term = case term of
       mapM
         ( \case
             Possible p t -> do
-              sp <- checkPatAgainstSubject InPossiblePat p vs vsTy
+              sp <- enterPat (InPossiblePat []) $ checkPatAgainstSubject p vs vsTy
               st <- check t retTy
               return $ Possible sp st
             Impossible p -> do
-              sp <- checkPatAgainstSubject InImpossiblePat p vs vsTy
+              sp <- enterPat InImpossiblePat $ checkPatAgainstSubject p vs vsTy
               return $ Impossible sp
         )
         cs
@@ -397,14 +409,22 @@ infer term = case term of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
     return (SLit l', VGlobal (DataGlob (knownData ty)) args)
 
-checkPatAgainstSubject :: (Elab m) => InPat -> PPat -> VTm -> VTy -> m SPat
-checkPatAgainstSubject i p vs vsTy = enterPat i $ do
+currentPatBinds :: (Elab m) => m [Name]
+currentPatBinds = do
+  p <- accessCtx (\c -> c.inPat)
+  case p of
+    InPossiblePat ns -> return ns
+    _ -> return []
+
+checkPatAgainstSubject :: (Elab m) => PPat -> VTm -> VTy -> m SPat
+checkPatAgainstSubject p vs vsTy = do
   (sp, spTy) <- infer p
+  ns <- currentPatBinds
   a <- canUnifyHere vsTy spTy
   vp <- evalHere sp
   b <- canUnifyHere vp vs
   handleUnification vp vs (a /\ b)
-  return sp
+  return $ SPat sp ns
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
@@ -440,3 +460,29 @@ check term typ = do
       (te', ty') <- infer te >>= insert
       unifyHere ty ty'
       return te'
+
+unelab :: (HasMetas m) => [Name] -> STm -> m PTm
+unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
+unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
+unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+unelab _ (SMeta m _) = do
+  n <- lookupMetaVarName m
+  case n of
+    Just n' -> return $ PHole n'
+    Nothing -> return $ PHole (Name $ "m" ++ show m.unMetaVar)
+unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
+unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
+unelab ns (SCase d t cs) =
+  PCase
+    <$> unelab ns t
+    <*> mapM
+      ( \c ->
+          Clause
+            <$> unelab (c.pat.binds ++ ns) c.pat.asTm
+            <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
+      )
+      cs
+unelab ns SU = return PU
+unelab ns (SGlobal g) = return $ PName (globName g)
+unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
+unelab ns (SRepr m t) = PRepr m <$> unelab ns t

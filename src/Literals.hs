@@ -12,7 +12,6 @@ import Globals (KnownGlobal (..), knownCtor, knownData)
 import Numeric.Natural (Natural)
 import Value
   ( VTm (..),
-    numBinds,
     pattern VGl,
   )
 

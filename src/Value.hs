@@ -54,7 +54,7 @@ instance Monoid Sub where
 
 type VPat = VTm
 
-data VPatB = VPatB {vPat :: VPat, numBinds :: Int}
+data VPatB = VPatB {vPat :: VPat, binds :: [Name]}
 
 type VTy = VTm
 

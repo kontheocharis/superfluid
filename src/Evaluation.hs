@@ -46,7 +46,7 @@ import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
-import Syntax (BoundState (..), Bounds, STm (..), numBinds, sAppSpine, sLams, uniqueSLams)
+import Syntax (BoundState (..), Bounds, STm (..), SPat(..), sAppSpine, sLams, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -148,7 +148,7 @@ caseToSpine v cls = do
   foldM
     ( \acc -> \case
         Possible p t -> do
-          t' <- uniqueVLams (replicate p.numBinds Explicit) t
+          t' <- uniqueVLams (map (const Explicit) p.binds) t
           return $ Arg Explicit t' :<| acc
         Impossible _ -> return acc
     )
@@ -226,9 +226,9 @@ eval env (SCase dat t cs) = do
     mapM
       ( \p -> do
           let pat = p.pat
-          let n = numBinds pat
-          pat' <- eval (extendEnvByNVars n env) pat
-          bitraverse (const $ return (VPatB pat' n)) (close n env) p
+          let n = length pat.binds
+          pat' <- eval (extendEnvByNVars n env) pat.asTm
+          bitraverse (const $ return (VPatB pat' pat.binds)) (close n env) p
       )
       cs
   vCase dat t' cs'
@@ -303,9 +303,9 @@ quote l vt = do
       cs' <-
         mapM
           ( \pt -> do
-              let n = pt.pat.numBinds
+              let n = length pt.pat.binds
               bitraverse
-                (\p -> quote (nextLvls l n) p.vPat)
+                (\p -> SPat <$> quote (nextLvls l n) p.vPat <*> return p.binds)
                 ( \t -> do
                     a <- evalInOwnCtx t
                     quote (nextLvls l n) a

@@ -32,7 +32,7 @@ import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfo
 import Literals (unfoldLit)
 import Meta (HasMetas (solveMetaVar))
 import Numeric.Natural (Natural)
-import Syntax (STm (..), uniqueSLams)
+import Syntax (STm (..), uniqueSLams, SPat (..))
 import Value
   ( Closure,
     PRen (..),
@@ -43,7 +43,6 @@ import Value
     VTm (..),
     liftPRen,
     liftPRenN,
-    numBinds,
     subbing,
     pattern VGl,
     pattern VVar,
@@ -104,9 +103,9 @@ rename m pren tm = do
       cs' <-
         mapM
           ( \pt -> do
-              let n = pt.pat.numBinds
+              let n = length pt.pat.binds
               bitraverse
-                (\p -> rename m pren p.vPat)
+                (\p -> SPat <$> rename m pren p.vPat <*> return p.binds)
                 ( \t' -> do
                     a <- lift $ t' $$ map (VNeu . VVar) [pren.codSize .. nextLvls pren.codSize n] -- @@Todo: right??
                     rename m (liftPRenN n pren) a
@@ -144,16 +143,16 @@ unifyClauses _ _ _ = return $ No []
 
 unifyClause :: (Unify m) => Lvl -> Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
 unifyClause l (Possible p t) (Possible p' t') = do
-  let n = p.numBinds
-  let n' = p'.numBinds
+  let n = length p.binds
+  let n' = length p'.binds
   assert (n == n') (return ())
   a <- unify (nextLvls l n) p.vPat p'.vPat
   x <- evalInOwnCtx t
   x' <- evalInOwnCtx t'
   (a /\) <$> unify (nextLvls l n) x x'
 unifyClause l (Impossible p) (Impossible p') = do
-  let n = p.numBinds
-  let n' = p'.numBinds
+  let n = length p.binds
+  let n' = length p'.binds
   assert (n == n') (return ())
   unify (nextLvls l n) p.vPat p'.vPat
 unifyClause _ _ _ = return $ No []
