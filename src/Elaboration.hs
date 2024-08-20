@@ -188,8 +188,21 @@ newMetaHere n = do
 freshMetaHere :: (Elab m) => m STm
 freshMetaHere = newMetaHere Nothing
 
+insertFull :: (Elab m) => (STm, VTy) -> m (STm, VTy)
+insertFull (tm, ty) = do
+  f <- force ty
+  case f of
+    VPi Implicit _ _ b -> do
+      meta <- freshMetaHere
+      vmeta <- evalHere meta
+      ty' <-  b $$ [vmeta]
+      insertFull (SApp Implicit tm meta, ty')
+    _ -> return (tm, ty)
+
 insert :: (Elab m) => (STm, VTy) -> m (STm, VTy)
-insert = undefined
+insert (tm, ty) = case tm of
+  SLam Implicit _ _ -> return (tm, ty)
+  _ -> insertFull (tm, ty)
 
 evalHere :: (Elab m) => STm -> m VTm
 evalHere t = do
@@ -251,7 +264,7 @@ inferSpine (t, ty) Empty = return (t, ty)
 inferSpine (t, ty) (Arg m u :<| sp) = do
   (t', ty') <- case m of
     Implicit -> return (t, ty)
-    Explicit -> insert (t, ty)
+    Explicit -> insertFull (t, ty)
     Instance -> error "unimplemented"
   (a, b) <- forcePiType m ty'
   u' <- check u a
