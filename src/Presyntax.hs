@@ -109,8 +109,10 @@ newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 
 data PTm
   = PPi PiMode Name PTy PTy
+  | PSigma Name PTy PTy
   | PLam PiMode Name PTm
   | PLet Name PTy PTm PTm
+  | PPair PTm PTm
   | PApp PiMode PTm PTm
   | PCase PTm [Clause PPat PTm]
   | PU
@@ -127,6 +129,7 @@ pApp = foldl (\g x -> PApp x.mode g x.arg)
 
 isCompound :: PTm -> Bool
 isCompound (PPi {}) = True
+isCompound (PSigma {}) = True
 isCompound (PLam {}) = True
 isCompound (PLet {}) = True
 isCompound (PCase {}) = True

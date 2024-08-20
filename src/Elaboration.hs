@@ -41,9 +41,9 @@ import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRepr, ($$))
-import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownData, lookupGlobal)
+import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownCtor, knownData, lookupGlobal)
 import Meta (HasMetas (freshMetaVar))
-import Presyntax (PPat, PTm (..))
+import Presyntax (PPat, PTm (..), pApp)
 import Syntax (BoundState (Bound, Defined), Bounds, SPat, STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
@@ -196,7 +196,7 @@ insertFull (tm, ty) = do
     VPi Implicit _ _ b -> do
       meta <- freshMetaHere
       vmeta <- evalHere meta
-      ty' <-  b $$ [vmeta]
+      ty' <- b $$ [vmeta]
       insertFull (SApp Implicit tm meta, ty')
     _ -> return (tm, ty)
 
@@ -322,6 +322,14 @@ infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of
   PLocated l t -> enterCtx (located l) $ infer t
   PName x -> inferName x
+  PSigma x a b ->
+    infer $
+      pApp
+        (PName (knownData KnownSigma).globalName)
+        [Arg Explicit a, Arg Explicit (PLam Explicit x b)]
+  PPair t1 t2 ->
+    infer $
+      pApp (PName (knownCtor KnownPair).globalName) [Arg Explicit t1, Arg Explicit t2]
   PLam m x t -> do
     forbidPat term
     a <- freshMetaHere >>= evalHere

@@ -352,12 +352,7 @@ named =
 piTOrSigmaT :: Parser PTy
 piTOrSigmaT = try $ do
   (m, ts) <- named
-  op <-
-    (reservedOp "->" >> return (PPi m))
-      <|> ( reservedOp "*"
-              >> return
-                (\x a b -> pApp (PName (knownData KnownSigma).globalName) [Arg Explicit a, Arg Explicit (PLam Explicit x b)])
-          )
+  op <- (reservedOp "->" >> return (PPi m)) <|> (reservedOp "*" >> return PSigma)
   ret <- term
   return $ foldr (\(l, name, ty) acc -> PLocated l (op name ty acc)) ret ts
 
@@ -424,7 +419,7 @@ pairOrParens = locatedTerm . parens $ do
   t1 <- term
   t2 <- optionMaybe $ comma >> term
   case t2 of
-    Just t2' -> return $ pApp (PName (knownCtor KnownPair).globalName) [Arg Explicit t1, Arg Explicit t2']
+    Just t2' -> return $ PPair t1 t2'
     Nothing -> return t1
 
 -- | Parse a variable or hole. Holes are prefixed with a question mark.
