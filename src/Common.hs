@@ -44,6 +44,7 @@ import Data.Bitraversable (Bitraversable (..))
 import Data.Generics (Data, Typeable)
 import Data.Sequence (Seq)
 import Numeric.Natural (Natural)
+import Printing (Pretty (..))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -225,6 +226,27 @@ data Tag = UnfoldTag deriving (Eq, Ord, Enum, Bounded)
 instance Show Tag where
   show UnfoldTag = "unfold"
 
-
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name
+
+-- Printing
+
+instance Pretty Name where
+  pretty (Name n) = n
+
+instance (Pretty x) => Pretty (Arg x) where
+  pretty (Arg m x) = case m of
+    Explicit -> singlePretty x
+    Implicit -> "[" ++ pretty x ++ "]"
+    Instance -> "[[" ++ pretty x ++ "]]"
+
+instance Pretty Times where
+  pretty (Finite n) = show n
+  pretty NegInf = "-inf"
+  pretty PosInf = "inf"
+
+instance (Pretty a) => Pretty (Lit a) where
+  pretty (StringLit s) = show s
+  pretty (CharLit c) = show c
+  pretty (NatLit n) = show n
+  pretty (FinLit n t) = show n ++ " % " ++ pretty t

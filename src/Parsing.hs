@@ -67,7 +67,7 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "unrepr", "impossible"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do

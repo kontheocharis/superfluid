@@ -18,10 +18,11 @@ module Presyntax
   )
 where
 
-import Common (Arg, Clause, Lit, Loc, Name, PiMode, Pos, Tag, Times, arg, mode)
+import Common (Arg (..), Clause (..), Lit, Loc, Name, PiMode (..), Pos, Tag, Times (..), arg, mode)
+import Data.List (intercalate)
 import Data.Set (Set)
 import Data.Typeable (Typeable)
-import Printing (Pretty (..))
+import Printing (Pretty (..), curlies)
 
 type PTy = PTm
 
@@ -127,6 +128,18 @@ data PTm
 pApp :: PTm -> [Arg PTm] -> PTm
 pApp = foldl (\g x -> PApp x.mode g x.arg)
 
+pLamsToList :: PTm -> ([Arg Name], PTm)
+pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m n : ns, b)
+pLamsToList t = ([], t)
+
+pAppToList :: PTm -> (PTm, [Arg PTm])
+pAppToList (PApp m t u) = let (t', us) = pAppToList t in (t', us ++ [Arg m u])
+pAppToList t = (t, [])
+
+pLetToList :: PTm -> ([(Name, PTy, PTm)], PTm)
+pLetToList (PLet n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((n, ty, t1) : binds, ret)
+pLetToList t = ([], t)
+
 isCompound :: PTm -> Bool
 isCompound (PPi {}) = True
 isCompound (PSigma {}) = True
@@ -138,74 +151,48 @@ isCompound (PRepr {}) = True
 isCompound (PLocated _ t) = isCompound t
 isCompound _ = False
 
-
 instance Pretty PTm where
   -- \| Show a term value, with parentheses if it is compound.
   singlePretty v | isCompound v = "(" ++ pretty v ++ ")"
   singlePretty v = pretty v
 
-  -- printVal (PiT Explicit v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") -> " ++ printVal t2
-  -- printVal (PiT Implicit v t1 t2) = "[" ++ printVal v ++ " : " ++ printVal t1 ++ "] -> " ++ printVal t2
-  -- printVal (PiT Instance v t1 t2) = "[[" ++ printVal v ++ " : " ++ printVal t1 ++ "]] -> " ++ printVal t2
-  -- printVal l@(Lam {}) =
-  --   let (vs, b) = lamsToList (genTerm l)
-  --    in "\\"
-  --         ++ intercalate
-  --           " "
-  --           ( map
-  --               ( \(m, v) -> case m of
-  --                   Explicit -> printSingleVal v
-  --                   Implicit -> "[" ++ printVal v ++ "]"
-  --                   Instance -> "[[" ++ printVal v ++ "]]"
-  --               )
-  --               vs
-  --           )
-  --         ++ " => "
-  --         ++ printVal b
-  -- printVal (SigmaT v t1 t2) = "(" ++ printVal v ++ " : " ++ printVal t1 ++ ") * " ++ printVal t2
-  -- printVal (Pair t1 t2) = "(" ++ printVal t1 ++ ", " ++ printVal t2 ++ ")"
-  -- printVal t@(App {}) =
-  --   let (x, xs) = appToList (genTerm t)
-  --    in printSingleVal x
-  --         ++ " "
-  --         ++ intercalate
-  --           " "
-  --           ( map
-  --               ( \(m, x') -> case m of
-  --                   Explicit -> printSingleVal x'
-  --                   Implicit -> "[" ++ printVal x' ++ "]"
-  --                   Instance -> "[[" ++ printVal x' ++ "]]"
-  --               )
-  --               xs
-  --           )
-  -- printVal l@(Let {}) =
-  --   curlies $
-  --     let (binds, ret) = letToList (genTerm l)
-  --      in intercalate "\n" $
-  --           map
-  --             (\(v, ty, t) -> "let " ++ printVal v ++ " : " ++ printVal ty ++ " = " ++ printVal t ++ ";")
-  --             binds
-  --             ++ [printVal ret]
-  -- printVal (Case _ t cs) =
-  --   "case "
-  --     ++ printSingleVal t
-  --     ++ " "
-  --     ++ curlies
-  --       ( intercalate
-  --           ",\n"
-  --           ( map
-  --               ( \(p, c) ->
-  --                   printVal p ++ " => " ++ maybe "!" printVal c
-  --               )
-  --               cs
-  --           )
-  --       )
-  -- printVal TyT = "Type"
-  -- printVal Wild = "_"
-  -- printVal (V v) = printVal v
-  -- printVal (Global s) = s
-  -- printVal (Hole i) = "?" ++ printVal i
-  -- printVal (Meta i) = "!" ++ printVal i
-  -- printVal (Lit s) = printVal s
-  -- printVal (Rep s) = "repr " ++ printSingleVal s
-  -- printVal (Unrep n s) = "unrepr " ++ n ++ " " ++ printSingleVal s
+  pretty (PPi Explicit v t1 t2) = "(" ++ pretty v ++ " : " ++ pretty t1 ++ ") -> " ++ pretty t2
+  pretty (PPi Implicit v t1 t2) = "[" ++ pretty v ++ " : " ++ pretty t1 ++ "] -> " ++ pretty t2
+  pretty (PPi Instance v t1 t2) = "[[" ++ pretty v ++ " : " ++ pretty t1 ++ "]] -> " ++ pretty t2
+  pretty l@(PLam {}) =
+    let (vs, b) = pLamsToList l
+     in "\\" ++ intercalate " " (map pretty vs) ++ " => " ++ pretty b
+  pretty (PSigma v t1 t2) = "(" ++ pretty v ++ " : " ++ pretty t1 ++ ") * " ++ pretty t2
+  pretty (PPair t1 t2) = "(" ++ pretty t1 ++ ", " ++ pretty t2 ++ ")"
+  pretty t@(PApp {}) =
+    let (x, xs) = pAppToList t
+     in pretty x ++ " " ++ intercalate " " (map pretty xs)
+  pretty l@(PLet {}) =
+    curlies $
+      let (binds, ret) = pLetToList l
+       in intercalate "\n" $
+            map
+              (\(v, ty, t) -> "let " ++ pretty v ++ " : " ++ pretty ty ++ " = " ++ pretty t ++ ";")
+              binds
+              ++ [pretty ret]
+  pretty (PCase t cs) =
+    "case "
+      ++ pretty t
+      ++ " "
+      ++ curlies
+        ( intercalate
+            ",\n"
+            ( map
+                ( \(Clause p c) ->
+                    pretty p ++ " => " ++ maybe "impossible" pretty c
+                )
+                cs
+            )
+        )
+  pretty PU = "Type"
+  pretty PWild = "_"
+  pretty (PName n) = pretty n
+  pretty (PLit l) = pretty l
+  pretty (PHole i) = "?" ++ pretty i
+  pretty (PRepr n s) = "repr " ++ if n == Finite 1 then "" else (pretty n ++ " ") ++ pretty s
+  pretty (PLocated _ t) = pretty t
