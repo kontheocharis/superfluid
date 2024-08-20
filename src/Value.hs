@@ -1,8 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 module Value
-  ( Sub,
-    VPat,
+  ( VPat,
     VPatB (..),
     VTy,
     Env,
@@ -11,6 +10,8 @@ module Value
     VNeu (..),
     VTm (..),
     PRen (..),
+    Sub (..),
+    subbing,
     liftPRen,
     pattern VVar,
     pattern VMeta,
@@ -28,6 +29,9 @@ import Data.Sequence (Seq (Empty))
 import Syntax (STm)
 
 newtype Sub = Sub {vars :: IntMap VTm}
+
+subbing :: Lvl -> VTm -> Sub
+subbing l v = Sub (IM.singleton l.unLvl v)
 
 instance Semigroup Sub where
   Sub v1 <> Sub v2 = Sub (IM.union v1 v2)

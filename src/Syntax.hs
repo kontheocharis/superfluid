@@ -2,6 +2,8 @@ module Syntax
   ( STm (..),
     STy,
     SPat,
+    BoundState (..),
+    Bounds,
     numBinds,
     toPSpine,
     sAppSpine,
@@ -31,11 +33,15 @@ type STy = STm
 
 type SPat = STm
 
+data BoundState = Bound | Defined
+
+type Bounds = [BoundState]
+
 data STm
   = SPi PiMode Name STm STm
   | SLam PiMode Name STm
   | SLet Name STy STm STm
-  | SMeta MetaVar
+  | SMeta MetaVar Bounds
   | SApp PiMode STm STm
   | SCase DataGlobal STm [Clause SPat STm]
   | SU

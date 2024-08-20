@@ -30,13 +30,13 @@ import qualified Data.Sequence as S
 import Evaluation (Eval, eval, evalInOwnCtx, force, vApp, ($$))
 import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfoldDef)
 import Literals (unfoldLit)
-import Meta (HasMetas (solveMeta))
+import Meta (HasMetas (solveMetaVar))
 import Numeric.Natural (Natural)
 import Syntax (STm (..), uniqueSLams)
 import Value
   ( Closure,
     PRen (..),
-    Sub,
+    Sub (..),
     VHead (..),
     VNeu (..),
     VPatB (..),
@@ -44,7 +44,7 @@ import Value
     liftPRen,
     numBinds,
     pattern VGl,
-    pattern VVar,
+    pattern VVar, subbing,
   )
 
 data UnifyError = InvertError | RenameError
@@ -90,7 +90,7 @@ rename m pren t = do
   case f of
     VNeu (VApp (VFlex m') sp)
       | m == m' -> throwError RenameError -- occurs check
-      | otherwise -> renameSp m pren (SMeta m') sp
+      | otherwise -> renameSp m pren (SMeta m' []) sp
     VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
       Nothing -> throwError RenameError -- scope error ("escaping variable" error)
       Just x' -> renameSp m pren (SVar $ lvlToIdx pren.domSize x') sp
@@ -155,13 +155,11 @@ unifyFlex l m sp t = handleUnifyError $ do
   pren <- invertSpine l sp
   rhs <- rename m pren t
   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
-  lift $ solveMeta m solution
+  lift $ solveMetaVar m solution
 
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
-unifyRigid = undefined
-
-unifyReprApp :: (Unify m) => Lvl -> Times -> VHead -> Spine VTm -> VTm -> m CanUnify
-unifyReprApp = undefined
+unifyRigid _ x Empty t = return $ Maybe (subbing x t)
+unifyRigid _ _ _ _ = return $ Maybe mempty
 
 unfoldDefAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify l g sp t' = do
@@ -233,8 +231,8 @@ unify l t1 t2 = do
     (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex l x' sp' t
     (VNeu (VApp (VRigid x) sp), t') -> unifyRigid l x sp t'
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid l x' sp' t
-    (VNeu (VReprApp m v sp), t') -> unifyReprApp l m v sp t'
-    (t, VNeu (VReprApp m' v' sp')) -> unifyReprApp l m' v' sp' t
+    (VNeu (VReprApp {}), _) -> return $ Maybe mempty
+    (_, VNeu (VReprApp {})) -> return $ Maybe mempty
     (VNeu (VCaseApp {}), _) -> return $ Maybe mempty
     (_, VNeu (VCaseApp {})) -> return $ Maybe mempty
     _ -> return $ No []

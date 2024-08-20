@@ -32,7 +32,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, HasNameSupply (..),
+    pattern Possible, HasNameSupply (..), MetaVar,
   )
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -42,7 +42,7 @@ import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
-import Syntax (STm (..), numBinds, sAppSpine)
+import Syntax (STm (..), numBinds, sAppSpine, Bounds, BoundState (..))
 import Value
   ( Closure (..),
     Env,
@@ -211,16 +211,34 @@ eval env (SCase dat t cs) = do
   vCase dat t' cs'
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
-eval _ (SMeta m) = return $ VNeu (VMeta m)
+eval env (SMeta m bds) = do
+  m' <- vMeta m
+  vAppBinds env m' bds
 eval _ (SGlobal g) = return $ VGlobal g Empty
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
   vRepr (envQuoteLvl env) m t'
 
+vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
+vAppBinds env v binds = case (env, binds) of
+  ([], []) -> return v
+  (x : env', Bound : binds') -> do
+    v' <- vApp v (S.singleton (Arg Explicit x))
+    vAppBinds env' v' binds'
+  (_, Defined : binds') -> vAppBinds env v binds'
+  _ -> error "impossible"
+
+vMeta :: (Eval m) => MetaVar -> m VTm
+vMeta m = do
+  mt <- lookupMetaVar m
+  case mt of
+    Just t -> return t
+    Nothing -> return $ VNeu (VMeta m)
+
 force :: (Eval m) => VTm -> m VTm
 force v@(VNeu (VApp (VFlex m) sp)) = do
-  mt <- lookupMeta m
+  mt <- lookupMetaVar m
   case mt of
     Just t -> do
       t' <- vApp t sp
@@ -236,7 +254,7 @@ quoteSpine l t (sp :|> Arg m u) = do
   return $ SApp m t' u'
 
 quoteHead :: Lvl -> VHead -> STm
-quoteHead _ (VFlex m) = SMeta m
+quoteHead _ (VFlex m) = SMeta m []
 quoteHead l (VRigid l') = SVar (lvlToIdx l l')
 
 quote :: (Eval m) => Lvl -> VTm -> m STm

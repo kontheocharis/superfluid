@@ -15,6 +15,7 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     Glob (..),
+    HasNameSupply (..),
     Idx (..),
     Lit (..),
     Loc,
@@ -30,25 +31,30 @@ import Common
     nextLvls,
     pat,
     pattern Impossible,
-    pattern Possible, HasNameSupply (..),
+    pattern Possible,
   )
 import Control.Monad.Except (MonadError (throwError))
 import Data.Functor (void)
+import qualified Data.IntMap as IM
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vRepr, ($$))
+import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, quote, vApp, vRepr, ($$))
 import Globals (GlobalInfo (..), HasSig (accessSig), KnownGlobal (..), globalInfoToTm, knownData, lookupGlobal)
+import Meta (HasMetas (freshMetaVar))
 import Presyntax (PPat, PTm (..))
-import Syntax (SPat, STm (..), STy, toPSpine)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat, STm (..), STy, toPSpine)
 import Unification (CanUnify (..), Unify (), unify)
 import Value
   ( Closure (..),
     Env,
     Sub,
+    VHead (..),
+    VNeu (..),
     VTm (..),
     VTy,
+    vars,
     pattern VHead,
     pattern VRepr,
     pattern VVar,
@@ -113,15 +119,34 @@ data Ctx = Ctx
     lvl :: Lvl,
     inPat :: InPat,
     types :: [VTy],
+    bounds :: Bounds,
     names :: Map Name Lvl,
     currentLoc :: Loc
   }
 
-applySubToCtx :: Sub -> Ctx -> Ctx
-applySubToCtx sub ctx = undefined
+applySubToCtx :: (Elab m) => Sub -> m ()
+applySubToCtx sub = do
+  ctx <- getCtx
+  env' <-
+    mapM
+      ( \t -> case t of
+          VNeu (VApp (VRigid i) sp) -> case IM.lookup i.unLvl sub.vars of
+            Just t' -> vApp t' sp
+            Nothing -> return t
+          _ -> return t
+      )
+      ctx.env
+  modifyCtx $ \c -> c {env = env'} -- @@Fixme: this aint quite right chief
 
 bind :: Name -> VTy -> Ctx -> Ctx
-bind x ty ctx = define x (VNeu (VVar ctx.lvl)) ty ctx
+bind x ty ctx =
+  ctx
+    { env = VNeu (VVar ctx.lvl) : ctx.env,
+      lvl = nextLvl ctx.lvl,
+      types = ty : ctx.types,
+      bounds = Bound : ctx.bounds,
+      names = M.insert x ctx.lvl ctx.names
+    }
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
 insertedBind = bind
@@ -132,6 +157,7 @@ define x t ty ctx =
     { env = t : ctx.env,
       lvl = nextLvl ctx.lvl,
       types = ty : ctx.types,
+      bounds = Defined : ctx.bounds,
       names = M.insert x ctx.lvl ctx.names
     }
 
@@ -146,13 +172,21 @@ definedValue i ctx = ctx.env !! i.unIdx
 located :: Loc -> Ctx -> Ctx
 located l ctx = ctx {currentLoc = l}
 
-freshUserMeta :: (Elab m) => Maybe Name -> m (STm, VTy)
-freshUserMeta n = do
-  m <- freshMeta >>= evalHere
-  return undefined
+inferMetaHere :: (Elab m) => Maybe Name -> m (STm, VTy)
+inferMetaHere n = do
+  ty <- newMetaHere Nothing
+  vty <- evalHere ty
+  m <- newMetaHere n
+  return (m, vty)
 
-freshMeta :: (Elab m) => m STy
-freshMeta = undefined
+newMetaHere :: (Elab m) => Maybe Name -> m STm
+newMetaHere n = do
+  bs <- accessCtx (\c -> c.bounds)
+  m <- freshMetaVar n
+  return (SMeta m bs)
+
+freshMetaHere :: (Elab m) => m STm
+freshMetaHere = newMetaHere Nothing
 
 insert :: (Elab m) => (STm, VTy) -> m (STm, VTy)
 insert = undefined
@@ -174,7 +208,7 @@ handleUnification r = do
       No _ -> return ()
     InPossiblePat -> case r of
       Yes -> return ()
-      Maybe s -> modifyCtx (applySubToCtx s)
+      Maybe s -> applySubToCtx s
       No _ -> throwError $ ImpossibleCase t1
     NotInPat -> case r of
       Yes -> return ()
@@ -206,9 +240,9 @@ forcePiType m ty = do
         then return (a, b)
         else throwError $ ImplicitMismatch m m'
     _ -> do
-      a <- freshMeta >>= evalHere
+      a <- freshMetaHere >>= evalHere
       v <- uniqueName
-      b <- closeHere 1 =<< enterCtx (bind v a) freshMeta
+      b <- closeHere 1 =<< enterCtx (bind v a) freshMetaHere
       unifyHere ty (VPi m v a b) >>= handleUnification
       return (a, b)
 
@@ -233,7 +267,7 @@ forbidPat p = ifInPat (throwError $ InvalidPattern p) (return ())
 
 newPatBind :: (Elab m) => Name -> m (STm, VTy)
 newPatBind x = do
-  ty <- evalHere =<< freshMeta
+  ty <- freshMetaHere >>= evalHere
   modifyCtx (bind x ty)
   return (lastIdx, ty)
 
@@ -275,7 +309,7 @@ infer term = case term of
   PName x -> inferName x
   PLam m x t -> do
     forbidPat term
-    a <- freshMeta >>= evalHere
+    a <- freshMetaHere >>= evalHere
     (t', b) <- enterCtx (bind x a) $ infer t >>= insert
     b' <- closeValHere 1 b
     return (SLam m x t', VPi m x a b')
@@ -297,7 +331,7 @@ infer term = case term of
     t' <- check t va
     vt <- evalHere t'
     (u', b) <- enterCtx (define x vt va) $ infer u
-    pure (SLet x a' t' u', b)
+    return (SLet x a' t' u', b)
   PRepr m x -> do
     forbidPat term
     (x', ty) <- infer x
@@ -305,17 +339,17 @@ infer term = case term of
     return (SRepr m x', reprTy)
   PHole n -> do
     forbidPat term
-    freshUserMeta (Just n)
+    inferMetaHere (Just n)
   PWild ->
     ifInPat
       (uniqueName >>= newPatBind)
-      (freshUserMeta Nothing)
+      (inferMetaHere Nothing)
   PCase s cs -> do
     forbidPat term
     (ss, vsTy) <- infer s
     vs <- evalHere ss
     d <- ifIsData vsTy return (throwError $ InvalidCaseSubject s)
-    retTy <- freshMeta >>= evalHere
+    retTy <- freshMetaHere >>= evalHere
     scs <-
       mapM
         ( \case
