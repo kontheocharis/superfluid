@@ -1,4 +1,17 @@
 
-def main : [A : Type, B : A -> Type] -> ((x : A) -> B x) -> (a : A) -> ((m : A) * B m) {
-  \f a => (a, ?h1)
+-- def main : [A : Type, B : A -> Type] -> ((x : A) -> B x) -> (a : A) -> ((m : A) * B m) {
+--   \f a => (a, ?h1)
+-- }
+
+-- def simple-pair : [A : Type, B : Type] -> A -> B -> (A * B) {
+--   \a b => (a, b)
+-- }
+
+data Equal : [A : Type] -> A -> A -> Type {
+  refl : [A : Type] -> [x : A] -> Equal x x
+}
+
+def main : Unit {
+  -- let x : Unit * Unit = (tt, tt);
+  ?h1
 }

@@ -17,190 +17,190 @@ def id : [A : Type] -> A -> A {
   \a => a
 }
 
--- def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
---   \[A] b t f => case b {
---     true => t tt,
---     false => f tt
---   }
--- }
+def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+  \[A] b t f => case b {
+    true => t tt,
+    false => f tt
+  }
+}
 
--- prim conjure : [A : Type] -> A
+prim conjure : [A : Type] -> A
 
 -- -- JS primitives
 
--- prim JS : Type
+prim JS : Type
 
--- prim to-js : [A : Type] -> A -> JS
+prim to-js : [A : Type] -> A -> JS
 
--- prim js-null : JS
+prim js-null : JS
 
--- prim js-undefined : JS
+prim js-undefined : JS
 
--- prim js-true : JS
+prim js-true : JS
 
--- prim js-false : JS
+prim js-false : JS
 
--- prim js-empty-array : JS
+prim js-empty-array : JS
 
--- prim js-array-extend-l : JS -> JS -> JS
+prim js-array-extend-l : JS -> JS -> JS
 
--- prim js-array-extend-r : JS -> JS -> JS
+prim js-array-extend-r : JS -> JS -> JS
 
--- prim js-slice : JS -> JS -> JS -> JS
+prim js-slice : JS -> JS -> JS -> JS
 
--- prim js-map : (JS -> JS) -> JS -> JS
+prim js-map : (JS -> JS) -> JS -> JS
 
--- prim js-fold : (JS -> JS -> JS) -> JS -> JS -> JS
+prim js-fold : (JS -> JS -> JS) -> JS -> JS -> JS
 
--- prim js-length : JS -> JS
+prim js-length : JS -> JS
 
--- prim js-index : JS -> JS -> JS
+prim js-index : JS -> JS -> JS
 
--- prim js-zero : JS
+prim js-zero : JS
 
--- prim js-one : JS
+prim js-one : JS
 
--- prim js-plus : JS -> JS -> JS
+prim js-plus : JS -> JS -> JS
 
--- prim js-minus : JS -> JS -> JS
+prim js-minus : JS -> JS -> JS
 
--- prim js-times : JS -> JS -> JS
+prim js-times : JS -> JS -> JS
 
--- prim js-div : JS -> JS -> JS
+prim js-div : JS -> JS -> JS
 
--- prim js-mod : JS -> JS -> JS
+prim js-mod : JS -> JS -> JS
 
--- prim js-pow : JS -> JS -> JS
+prim js-pow : JS -> JS -> JS
 
--- prim js-neg : JS -> JS
+prim js-neg : JS -> JS
 
--- prim js-eq : JS -> JS -> JS
+prim js-eq : JS -> JS -> JS
 
--- prim js-eqq : JS -> JS -> JS
+prim js-eqq : JS -> JS -> JS
 
--- prim js-neq : JS -> JS -> JS
+prim js-neq : JS -> JS -> JS
 
--- prim js-neqq : JS -> JS -> JS
+prim js-neqq : JS -> JS -> JS
 
--- prim js-lt : JS -> JS -> JS
+prim js-lt : JS -> JS -> JS
 
--- prim js-lte : JS -> JS -> JS
+prim js-lte : JS -> JS -> JS
 
--- prim js-gt : JS -> JS -> JS
+prim js-gt : JS -> JS -> JS
 
--- prim js-gte : JS -> JS -> JS
+prim js-gte : JS -> JS -> JS
 
--- prim js-and : JS -> JS -> JS
+prim js-and : JS -> JS -> JS
 
--- prim js-or : JS -> JS -> JS
+prim js-or : JS -> JS -> JS
 
--- prim js-not : JS -> JS
+prim js-not : JS -> JS
 
--- prim js-if : [A : Type] -> JS -> A -> A -> A
+prim js-if : [A : Type] -> JS -> A -> A -> A
 
--- prim js-typeof : JS -> JS
+prim js-typeof : JS -> JS
 
 -- -- IO
 
--- prim IO : Type -> Type
+prim IO : Type -> Type
 
 -- -- JS IO
 
--- prim js-console-log : JS -> IO Unit
+prim js-console-log : JS -> IO Unit
 
--- prim js-prompt : IO JS
+prim js-prompt : IO JS
 
 -- -- JS Buffer
 
--- prim js-buffer-alloc : JS -> JS
+prim js-buffer-alloc : JS -> JS
 
--- prim js-buffer-byte-length : JS -> JS
+prim js-buffer-byte-length : JS -> JS
 
 -- -- source, sourceStart, sourceEnd, targetStart, target
--- prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS
+prim js-buffer-copy : JS -> JS -> JS -> JS -> JS -> JS
 
 -- -- buffer, value, offset
--- prim js-buffer-write-uint16-be : JS -> JS -> JS -> JS
+prim js-buffer-write-uint16-be : JS -> JS -> JS -> JS
 
--- prim js-buffer-write-uint8 : JS -> JS -> JS -> JS
+prim js-buffer-write-uint8 : JS -> JS -> JS -> JS
 
--- prim js-buffer-read-uint16-be : JS -> JS -> JS
+prim js-buffer-read-uint16-be : JS -> JS -> JS
 
--- prim js-buffer-read-uint8 : JS -> JS -> JS
+prim js-buffer-read-uint8 : JS -> JS -> JS
 
--- prim js-buffer-subarray : JS -> JS -> JS -> JS
+prim js-buffer-subarray : JS -> JS -> JS -> JS
 
 -- -- Shorthands
--- #unfold
--- def js-two : JS {
---  js-plus js-one js-one
--- }
+#unfold
+def js-two : JS {
+ js-plus js-one js-one
+}
 
--- #unfold
--- def js-four : JS {
---  js-times js-two js-two
--- }
+#unfold
+def js-four : JS {
+ js-times js-two js-two
+}
 
--- #unfold
--- def js-six : JS {
---  js-plus js-four js-two
--- }
+#unfold
+def js-six : JS {
+ js-plus js-four js-two
+}
 
--- #unfold
--- def js-eight : JS {
---  js-times js-four js-four
--- }
+#unfold
+def js-eight : JS {
+ js-times js-four js-four
+}
 
 -- -- General primitives
 
--- prim cast : [A : Type] -> [B : Type] -> A -> B
+prim cast : [A : Type] -> [B : Type] -> A -> B
 
--- def from-js : [A : Type] -> JS -> A {
---   \a => cast a
--- }
+def from-js : [A : Type] -> JS -> A {
+  \a => cast a
+}
 
--- prim io-return : [A : Type] -> A -> IO A
+prim io-return : [A : Type] -> A -> IO A
 
--- prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
+prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
 
--- def debug-print : [A : Type] -> A -> IO Unit {
---   \a => js-console-log (to-js a)
--- }
+def debug-print : [A : Type] -> A -> IO Unit {
+  \a => js-console-log (to-js a)
+}
 
--- data Maybe : Type -> Type {
---   nothing : [A : Type] -> Maybe A,
---   just : [A : Type] -> A -> Maybe A
--- }
+data Maybe : Type -> Type {
+  nothing : [A : Type] -> Maybe A,
+  just : [A : Type] -> A -> Maybe A
+}
 
--- data Either : Type -> Type -> Type {
---   left : [A : Type, B : Type] -> A -> Either A B,
---   right : [A : Type, B : Type] -> B -> Either A B
--- }
+data Either : Type -> Type -> Type {
+  left : [A : Type, B : Type] -> A -> Either A B,
+  right : [A : Type, B : Type] -> B -> Either A B
+}
 
 -- data Equal : [A : Type] -> A -> A -> Type {
 --   refl : [A : Type] -> [x : A] -> Equal x x
 -- }
 
--- data Nat : Type {
---   z : Nat,
---   s : Nat -> Nat
--- }
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat
+}
 
--- data List : Type -> Type {
---   nil : [A : Type] -> List A,
---   cons : [A : Type] -> A -> List A -> List A
--- }
+data List : Type -> Type {
+  nil : [A : Type] -> List A,
+  cons : [A : Type] -> A -> List A -> List A
+}
 
 -- data Fin : Nat -> Type {
 --   fz : [n : Nat] -> Fin (s n),
 --   fs : [n : Nat] -> Fin n -> Fin (s n)
 -- }
 
--- data Empty : Type {}
+data Empty : Type {}
 
--- def void : [A : Type] -> Empty -> A {
---   \m => case m {}
--- }
+def void : [A : Type] -> Empty -> A {
+  \m => case m {}
+}
 
 -- data Dec : Type -> Type {
 --   yes : [A : Type] -> A -> Dec A,

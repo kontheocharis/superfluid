@@ -62,20 +62,21 @@ instance Monoid Sub where
 
 type VPat = VTm
 
-data VPatB = VPatB {vPat :: VPat, binds :: [Name]}
+data VPatB = VPatB {vPat :: VPat, binds :: [Name]} deriving (Show)
 
 type VTy = VTm
 
 type Env v = [v]
 
-data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm}
+data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
 
-data VHead = VFlex MetaVar | VRigid Lvl deriving (Eq)
+data VHead = VFlex MetaVar | VRigid Lvl deriving (Show, Eq)
 
 data VNeu
   = VApp VHead (Spine VTm)
   | VCaseApp DataGlobal VNeu [Clause VPatB Closure] (Spine VTm)
   | VReprApp Times VHead (Spine VTm)
+  deriving (Show)
 
 data VTm
   = VPi PiMode Name VTy Closure
@@ -84,6 +85,7 @@ data VTm
   | VGlobal Glob (Spine VTm)
   | VLit (Lit VTm)
   | VNeu VNeu
+  deriving (Show)
 
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty

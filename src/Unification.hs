@@ -27,12 +27,13 @@ import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
+import Debug.Trace (traceM)
 import Evaluation (Eval, eval, evalInOwnCtx, force, vApp, ($$))
 import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfoldDef)
 import Literals (unfoldLit)
 import Meta (HasMetas (solveMetaVar))
 import Numeric.Natural (Natural)
-import Syntax (STm (..), uniqueSLams, SPat (..))
+import Syntax (SPat (..), STm (..), uniqueSLams)
 import Value
   ( Closure,
     PRen (..),
@@ -218,6 +219,10 @@ unify l t1 t2 = do
     (VLit a, t') -> unifyLit l a t'
     (VGlobal (CtorGlob c) sp, VGlobal (CtorGlob c') sp') | c == c' -> unifySpines l sp sp'
     (VGlobal (DataGlob d) sp, VGlobal (DataGlob d') sp') | d == d' -> unifySpines l sp sp'
+    (VGlobal (PrimGlob f) sp, VGlobal (PrimGlob f') sp') ->
+      if f == f'
+        then unifySpines l sp sp'
+        else return $ Maybe mempty
     (VGlobal (DefGlob f) sp, VGlobal (DefGlob f') sp') ->
       if f == f'
         then do

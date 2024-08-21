@@ -40,14 +40,17 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
+import Control.Arrow ((***))
 import Control.Monad (foldM)
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.List.Extra (firstJust)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
+import Debug.Trace (trace, traceM)
 import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
 import Meta (HasMetas (..))
+import Printing (Pretty (..))
 import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
 import Value
   ( Closure (..),
@@ -79,12 +82,13 @@ vAppNeu (VReprApp m h us) u = VNeu (VReprApp m h (us >< u))
 vAppNeu (VCaseApp dat c cls us) u = VNeu (VCaseApp dat c cls (us >< u))
 
 vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
+vApp a Empty = return a
 vApp (VLam _ _ c) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
 vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
 vApp (VNeu n) u = return $ vAppNeu n u
-vApp _ _ = error "impossible"
+vApp a b = error $ "impossible " ++ show a ++ " AND " ++ show b
 
 uniqueVLams :: (Eval m) => [PiMode] -> Closure -> m VTm
 uniqueVLams ms t = do
@@ -92,7 +96,8 @@ uniqueVLams ms t = do
   vLams sp t
 
 vLams :: (Eval m) => Spine Name -> Closure -> m VTm
-vLams Empty t = t $$ []
+vLams Empty t = do
+  t $$ []
 vLams (Arg m x :<| sp) t = do
   let inner = sLams sp t.body
   return $ VLam m x (Closure (t.numVars + 1) t.env inner)
@@ -238,20 +243,21 @@ eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
-eval _ (SGlobal g) = return $ VGlobal g Empty
-eval env (SVar (Idx i)) = return $ env !! i
+eval _ (SGlobal g) = do
+  return $ VGlobal g Empty
+eval env (SVar (Idx i)) =  return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
   vRepr (envQuoteLvl env) m t'
 
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (env, binds) of
-  ([], []) -> return v
+  (_, []) -> return v
   (x : env', Bound : binds') -> do
-    v' <- vApp v (S.singleton (Arg Explicit x))
-    vAppBinds env' v' binds'
+    v' <- vAppBinds env' v binds'
+    vApp v' (S.singleton (Arg Explicit x))
   (_ : env', Defined : binds') -> vAppBinds env' v binds'
-  _ -> error "impossible"
+  ([], _) -> error "impossible"
 
 vMeta :: (Eval m) => MetaVar -> m VTm
 vMeta m = do

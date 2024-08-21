@@ -30,9 +30,9 @@ import Presyntax (PTm (..))
 
 type STy = STm
 
-data SPat = SPat { asTm :: STm, binds :: [Name] }
+data SPat = SPat { asTm :: STm, binds :: [Name] } deriving (Show)
 
-data BoundState = Bound | Defined
+data BoundState = Bound | Defined deriving (Eq, Show)
 
 type Bounds = [BoundState]
 
@@ -48,6 +48,7 @@ data STm
   | SVar Idx
   | SLit (Lit STm)
   | SRepr Times STm
+  deriving (Show)
 
 toPSpine :: PTm -> (PTm, Spine PTm)
 toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)

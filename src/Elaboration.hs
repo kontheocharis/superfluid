@@ -37,7 +37,7 @@ import Common
     pat,
     unMetaVar,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, MetaVar,
   )
 import Control.Monad (unless, zipWithM, zipWithM_)
 import qualified Data.IntMap as IM
@@ -353,12 +353,21 @@ freshMetaHere = newMetaHere Nothing
 
 insertFull :: (Elab m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
+  traceM " Here"
+  getCtx >>= pretty >>= traceM
+  -- tm' <- pretty tm
+  -- ty' <- pretty ty
+  -- ty' <- pretty ty
+  -- traceM $ "Inserting " ++ ty'
   f <- force ty
+  traceM $ "Forced"
   case f of
     VPi Implicit _ _ b -> do
       meta <- freshMetaHere
       vmeta <- evalHere meta
       ty' <- b $$ [vmeta]
+      -- vm <- pretty $ vmeta
+      -- traceM $ "The result is "  ++ vm
       insertFull (SApp Implicit tm meta, ty')
     _ -> return (tm, ty)
 
@@ -411,6 +420,9 @@ closeHere n t = do
 forcePiType :: (Elab m) => PiMode -> VTy -> m (VTy, Closure)
 forcePiType m ty = do
   ty' <- force ty
+  traceM $ "ATTEMPT Forcing " ++ show ty
+  ty'' <- pretty ty'
+  traceM $ "Forcing " ++ ty''
   case ty' of
     VPi m' _ a b -> do
       if m == m'
@@ -419,22 +431,33 @@ forcePiType m ty = do
     _ -> do
       a <- freshMetaHere >>= evalHere
       v <- uniqueName
-      b <- closeHere 1 =<< enterCtx (bind v a) freshMetaHere
+      b <- enterCtx (bind v a) freshMetaHere >>= closeHere 1
       unifyHere ty (VPi m v a b)
       return (a, b)
 
-inferSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
-inferSpine (t, ty) Empty = return (t, ty)
-inferSpine (t, ty) (Arg m u :<| sp) = do
+checkSpine :: (Elab m) => (STm, VTy) -> Spine PTm -> m (STm, VTy)
+checkSpine (t, ty) Empty = return (t, ty)
+checkSpine (t, ty) (Arg m u :<| sp) = do
+  traceM " Here"
   (t', ty') <- case m of
     Implicit -> return (t, ty)
     Explicit -> insertFull (t, ty)
     Instance -> error "unimplemented"
+  traceM "HEREE"
   (a, b) <- forcePiType m ty'
   u' <- check u a
   uv <- evalHere u'
   b' <- b $$ [uv]
-  inferSpine (SApp m t' u', b') sp
+  xs <- pretty $ SApp m t' u'
+  bs <- pretty b'
+
+  traceM $ "checked spine: " ++ xs ++ bs
+
+  -- bp <- pretty =<< evalInOwnCtxHere b
+
+  -- traceM $ "the type of the subject is " ++ bp
+
+  checkSpine (SApp m t' u', b') sp
 
 lastIdx :: STm
 lastIdx = SVar (Idx 0)
@@ -555,7 +578,7 @@ infer term = case term of
   PApp {} -> do
     let (subject, sp) = toPSpine term
     (s, sTy) <- infer subject
-    inferSpine (s, sTy) sp
+    checkSpine (s, sTy) sp
   PU -> forbidPat term >> return (SU, VU)
   PPi m x a b -> do
     forbidPat term
@@ -672,20 +695,48 @@ check term typ = do
       ifInPat
         (uniqueName >>= (`checkPatBind` ty))
         (checkMetaHere Nothing ty)
+    (PCase s cs, ty) -> do
+      forbidPat term
+      (ss, vsTy) <- infer s
+      vs <- evalHere ss
+      d <- ifIsData vsTy return (elabError $ InvalidCaseSubject s)
+      scs <-
+        mapM
+          ( \case
+              Possible p t -> do
+                sp <- enterPat (InPossiblePat []) $ checkPatAgainstSubject p vs vsTy
+                st <- check t ty
+                return $ Possible sp st
+              Impossible p -> do
+                sp <- enterPat InImpossiblePat $ checkPatAgainstSubject p vs vsTy
+                return $ Impossible sp
+          )
+          cs
+      return (SCase d ss scs)
     (te, ty) -> do
       (te', ty') <- infer te >>= insert
       unifyHere ty ty'
       return te'
 
+unelabMeta :: (HasMetas m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
+unelabMeta _ m [] = do
+  n <- lookupMetaVarName m
+  case n of
+    Just n' -> return (PHole n', [])
+    Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
+unelabMeta (n:ns) m (Bound : bs) = do
+  (t, ts) <- unelabMeta ns m bs
+  return (t, Arg Explicit (PName n) : ts)
+unelabMeta (_:ns) m (Defined : bs) = unelabMeta ns m bs
+unelabMeta _ _ _ = error "impossible"
+
 unelab :: (HasMetas m) => [Name] -> STm -> m PTm
 unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
 unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
 unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
-unelab _ (SMeta m _) = do
-  n <- lookupMetaVarName m
-  case n of
-    Just n' -> return $ PHole n'
-    Nothing -> return $ PHole (Name $ "m" ++ show m.unMetaVar)
+unelab ns (SMeta m bs) = do
+  (t, ts) <- unelabMeta ns m bs
+  return $ pApp t ts
 unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
 unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
 unelab ns (SCase _ t cs) =
