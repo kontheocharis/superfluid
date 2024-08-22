@@ -177,9 +177,9 @@ data Either : Type -> Type -> Type {
   right : [A : Type, B : Type] -> B -> Either A B
 }
 
--- data Equal : [A : Type] -> A -> A -> Type {
---   refl : [A : Type] -> [x : A] -> Equal x x
--- }
+data Equal : [A : Type] -> A -> A -> Type {
+  refl : [A : Type] -> [x : A] -> Equal x x
+}
 
 data Nat : Type {
   z : Nat,
@@ -191,10 +191,10 @@ data List : Type -> Type {
   cons : [A : Type] -> A -> List A -> List A
 }
 
--- data Fin : Nat -> Type {
---   fz : [n : Nat] -> Fin (s n),
---   fs : [n : Nat] -> Fin n -> Fin (s n)
--- }
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n)
+}
 
 data Empty : Type {}
 

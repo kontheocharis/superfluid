@@ -27,7 +27,7 @@ import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
-import Debug.Trace (traceM)
+import Debug.Trace (trace, traceM)
 import Evaluation (Eval, eval, evalInOwnCtx, force, vApp, ($$))
 import Globals (HasSig (accessSig), KnownGlobal (..), knownCtor, knownData, unfoldDef)
 import Literals (unfoldLit)
@@ -44,6 +44,7 @@ import Value
     VTm (..),
     liftPRen,
     liftPRenN,
+    numVars,
     subbing,
     pattern VGl,
     pattern VVar,
@@ -75,7 +76,7 @@ invertSpine l (sp' :|> Arg _ t) = do
   (PRen dom cod ren) <- invertSpine l sp'
   f <- lift $ force t
   case f of
-    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen dom (nextLvl cod) (IM.insert l' cod ren)
+    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' dom ren)
     _ -> throwError InvertError
 
 renameSp :: (Unify m) => MetaVar -> PRen -> STm -> Spine VTm -> ExceptT UnifyError m STm
@@ -84,6 +85,17 @@ renameSp m pren t (sp :|> Arg i u) = do
   xs <- renameSp m pren t sp
   ys <- rename m pren u
   return $ SApp i xs ys
+
+renameClosure :: (Unify m) => MetaVar -> PRen -> Closure -> ExceptT UnifyError m STm
+renameClosure m pren cl = do
+  vt <- lift $ evalInOwnCtx cl
+  rename m (liftPRenN cl.numVars pren) vt
+
+renamePat :: (Unify m) => MetaVar -> PRen -> VPatB -> ExceptT UnifyError m SPat
+renamePat m pren (VPatB p binds) = do
+  let n = length binds
+  p' <- rename m (liftPRenN n pren) p
+  return $ SPat p' binds
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
 rename :: (Unify m) => MetaVar -> PRen -> VTm -> ExceptT UnifyError m STm
@@ -95,34 +107,20 @@ rename m pren tm = do
       | otherwise -> renameSp m pren (SMeta m' []) sp
     VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
       Nothing -> throwError RenameError -- scope error ("escaping variable" error)
-      Just x' -> renameSp m pren (SVar $ lvlToIdx pren.domSize x') sp
+      Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (VNeu (VApp h Empty))
       renameSp m pren (SRepr n t') sp
     VNeu (VCaseApp dat v cs sp) -> do
       v' <- rename m pren (VNeu v)
-      cs' <-
-        mapM
-          ( \pt -> do
-              let n = length pt.pat.binds
-              bitraverse
-                (\p -> SPat <$> rename m pren p.vPat <*> return p.binds)
-                ( \t' -> do
-                    a <- lift $ t' $$ map (VNeu . VVar) [pren.codSize .. nextLvls pren.codSize n] -- @@Todo: right??
-                    rename m (liftPRenN n pren) a
-                )
-                pt
-          )
-          cs
+      cs' <- mapM (bitraverse (renamePat m pren) (renameClosure m pren)) cs
       renameSp m pren (SCase dat v' cs') sp
     VLam i x t -> do
-      vt <- lift $ t $$ [VNeu (VVar pren.codSize)]
-      t' <- rename m (liftPRen pren) vt
+      t' <- renameClosure m pren t
       return $ SLam i x t'
     VPi i x a b -> do
       a' <- rename m pren a
-      vb <- lift $ b $$ [VNeu (VVar pren.codSize)]
-      b' <- rename m (liftPRen pren) vb
+      b' <- renameClosure m pren b
       return $ SPi i x a' b'
     VU -> return SU
     VGlobal g sp -> renameSp m pren (SGlobal g) sp
@@ -142,20 +140,20 @@ unifyClauses l (c : cs) (c' : cs') = do
   (a /\) <$> unifyClauses l cs cs'
 unifyClauses _ _ _ = return $ No []
 
+unifyPat :: (Unify m) => Lvl -> VPatB -> VPatB -> m CanUnify
+unifyPat l (VPatB p binds) (VPatB p' binds') = do
+  let n = length binds
+  let n' = length binds'
+  if n == n'
+    then unify (nextLvls l n) p p'
+    else return $ No []
+
 unifyClause :: (Unify m) => Lvl -> Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
 unifyClause l (Possible p t) (Possible p' t') = do
-  let n = length p.binds
-  let n' = length p'.binds
-  assert (n == n') (return ())
-  a <- unify (nextLvls l n) p.vPat p'.vPat
-  x <- evalInOwnCtx l t
-  x' <- evalInOwnCtx l t'
-  (a /\) <$> unify (nextLvls l n) x x'
-unifyClause l (Impossible p) (Impossible p') = do
-  let n = length p.binds
-  let n' = length p'.binds
-  assert (n == n') (return ())
-  unify (nextLvls l n) p.vPat p'.vPat
+  a <- unifyPat l p p'
+  b <- unifyClosure l t t'
+  return $ a /\ b
+unifyClause l (Impossible p) (Impossible p') = unifyPat l p p'
 unifyClause _ _ _ = return $ No []
 
 handleUnifyError :: (Unify m) => ExceptT UnifyError m () -> m CanUnify
@@ -179,8 +177,11 @@ unifyRigid _ _ _ _ = return $ Maybe mempty
 unfoldDefAndUnify :: (Unify m) => Lvl -> DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify l g sp t' = do
   gu <- accessSig (unfoldDef g)
-  t <- vApp gu sp
-  unify l t t'
+  case gu of
+    Nothing -> return $ Maybe mempty
+    Just gu' -> do
+      t <- vApp gu' sp
+      unify l t t'
 
 unifyLit :: (Unify m) => Lvl -> Lit VTm -> VTm -> m CanUnify
 unifyLit l a t = case t of
@@ -192,6 +193,20 @@ unifyLit l a t = case t of
     _ -> return $ No []
   _ -> unify l (unfoldLit a) t
 
+unifyClosure :: (Unify m) => Lvl -> Closure -> Closure -> m CanUnify
+unifyClosure l cl1 cl2 = do
+  t1 <- evalInOwnCtx cl1
+  t2 <- evalInOwnCtx cl2
+  if cl1.numVars == cl2.numVars
+    then unify (nextLvls l cl1.numVars) t1 t2
+    else return $ No []
+
+etaConvert :: (Unify m) => Lvl -> VTm -> PiMode -> Closure -> m CanUnify
+etaConvert l t m c = do
+  x <- evalInOwnCtx c
+  x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
+  unify (nextLvl l) x x'
+
 unify :: (Unify m) => Lvl -> VTm -> VTm -> m CanUnify
 unify l t1 t2 = do
   t1' <- force t1
@@ -199,21 +214,11 @@ unify l t1 t2 = do
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
       a <- unify l t t'
-      x <- evalInOwnCtx l c
-      x' <- evalInOwnCtx l c'
-      (a /\) <$> unify (nextLvl l) x x'
-    (VLam m _ c, VLam m' _ c') | m == m' -> do
-      x <- evalInOwnCtx l c
-      x' <- evalInOwnCtx l c'
-      unify (nextLvl l) x x'
-    (t, VLam m' _ c') -> do
-      x <- vApp t (S.singleton (Arg m' (VNeu (VVar l))))
-      x' <- evalInOwnCtx l c'
-      unify (nextLvl l) x x'
-    (VLam m _ c, t) -> do
-      x <- evalInOwnCtx l c
-      x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
-      unify (nextLvl l) x x'
+      b <- unifyClosure l c c'
+      return $ a /\ b
+    (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure l c c'
+    (t, VLam m' _ c') -> etaConvert l t m' c'
+    (VLam m _ c, t) -> etaConvert l t m c
     (VU, VU) -> return Yes
     (t, VLit a') -> unifyLit l a' t
     (VLit a, t') -> unifyLit l a t'

@@ -12,6 +12,7 @@ module Globals
     getCtorGlobal,
     getDefGlobal,
     unfoldDef,
+    modifyDefItem,
     HasSig (..),
     getDataRepr,
     getGlobalRepr,
@@ -39,7 +40,7 @@ data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataG
 
 data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal]}
 
-data DefGlobalInfo = DefGlobalInfo {ty :: VTy, tm :: VTm}
+data DefGlobalInfo = DefGlobalInfo {ty :: VTy, tm :: Maybe VTm} -- might not be set yet if
 
 data PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
 
@@ -59,6 +60,9 @@ addItem n i s = s {contents = M.insert n i s.contents}
 
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
 modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}
+
+modifyDefItem :: DefGlobal -> (DefGlobalInfo -> DefGlobalInfo) -> Sig -> Sig
+modifyDefItem def f s = s {contents = M.insert def.globalName (DefInfo (f (getDefGlobal def s))) s.contents}
 
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of
@@ -88,7 +92,7 @@ globalInfoToTm n i = case i of
   CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
   PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
-unfoldDef :: DefGlobal -> Sig -> VTm
+unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).tm
 
 getDataRepr :: DataGlobal -> Sig -> VTm

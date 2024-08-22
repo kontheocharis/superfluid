@@ -204,12 +204,14 @@ close n env t = do
       return $ Closure n env t'
     else return $ Closure n env t
 
+closureArgs :: Closure -> [VTm]
+closureArgs (Closure n env _) = map (VNeu . VVar . Lvl . (+ length env)) [0 .. n - 1]
+
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
 extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
 
-evalInOwnCtx :: (Eval m) => Lvl -> Closure -> m VTm
-evalInOwnCtx lvl cl = do
-  cl $$ map (VNeu . VVar . nextLvls lvl) (reverse [0 .. cl.numVars - 1])
+evalInOwnCtx :: (Eval m) => Closure -> m VTm
+evalInOwnCtx cl = cl $$ closureArgs cl
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
@@ -245,7 +247,7 @@ eval env (SMeta m bds) = do
   vAppBinds env m' bds
 eval _ (SGlobal g) = do
   return $ VGlobal g Empty
-eval env (SVar (Idx i)) =  return $ env !! i
+eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
   vRepr (envQuoteLvl env) m t'
@@ -287,18 +289,27 @@ quoteHead :: Lvl -> VHead -> STm
 quoteHead _ (VFlex m) = SMeta m []
 quoteHead l (VRigid l') = SVar (lvlToIdx l l')
 
+quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
+quoteClosure l cl = do
+  a <- evalInOwnCtx cl
+  quote (nextLvls l cl.numVars) a
+
+quotePat :: (Eval m) => Lvl -> VPatB -> m SPat
+quotePat l (VPatB p binds) = do
+  let n = length binds
+  p' <- quote (nextLvls l n) p
+  return $ SPat p' binds
+
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
   vt' <- force vt
   case vt' of
     VLam m x t -> do
-      a <- t $$ [VNeu (VVar l)]
-      t' <- quote (nextLvl l) a
+      t' <- quoteClosure l t
       return $ SLam m x t'
     VPi m x ty t -> do
       ty' <- quote l ty
-      a <- t $$ [VNeu (VVar l)]
-      t' <- quote (nextLvl l) a
+      t' <- quoteClosure l t
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> SLit <$> traverse (quote l) lit
@@ -307,19 +318,7 @@ quote l vt = do
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
     VNeu (VCaseApp dat v cs sp) -> do
       v' <- quote l (VNeu v)
-      cs' <-
-        mapM
-          ( \pt -> do
-              let n = length pt.pat.binds
-              bitraverse
-                (\p -> SPat <$> quote (nextLvls l n) p.vPat <*> return p.binds)
-                ( \t -> do
-                    a <- evalInOwnCtx l t
-                    quote (nextLvls l n) a
-                )
-                pt
-          )
-          cs
+      cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
       quoteSpine l (SCase dat v' cs') sp
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
@@ -335,7 +334,7 @@ isTypeFamily l t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx l b
+      b' <- evalInOwnCtx b
       isTypeFamily (nextLvl l) b'
     VU -> return True
     _ -> return False
@@ -345,7 +344,7 @@ isCtorTy l d t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx l b
+      b' <- evalInOwnCtx b
       isCtorTy (nextLvl l) d b'
     (VGlobal (DataGlob d') _) -> return $ d == d'
     _ -> return False

@@ -431,6 +431,7 @@ varOrHoleOrU :: Parser PTm
 varOrHoleOrU =
   locatedTerm $
     (symbol "Type" >> return PU)
+      <|> (symbol "_" >> return PWild)
       <|> do
         hole <- optionMaybe $ reservedOp "?"
         v <- var

@@ -40,13 +40,14 @@ import Criterion.Main.Options (MatchType (Glob))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
+import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
+import Data.List (intercalate)
 import Data.Sequence (Seq)
+import Data.Set (Set)
+import Debug.Trace (trace)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
-import Data.Set (Set)
-import Data.List (intercalate)
-import Data.Foldable (toList)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -304,7 +305,7 @@ instance (HasProjectFiles m) => Pretty m Loc where
     -- Fetch the contents of the file
     contents' <- getProjectFileContents f
     case contents' of
-      Nothing -> return "<unknown file>"
+      Nothing -> return $ "<unknown file " ++ f ++ ">"
       Just contents -> do
         let contentLines = lines contents
 
@@ -319,7 +320,7 @@ instance (HasProjectFiles m) => Pretty m Loc where
             underline = replicate (startCol + length (show startLine) + 2 - 1) ' ' ++ replicate (endCol - startCol) '^'
 
         -- Combine the relevant lines with the underline
-        let numberedLines = unlines $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines
-        let highlightedCode = numberedLines ++ "\n" ++ underline
+        let numberedLines = intercalate "\n" $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines
+        let highlightedCode = intercalate "\n" ["at " ++ f, numberedLines, underline]
 
         return highlightedCode
