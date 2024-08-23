@@ -218,19 +218,18 @@ close n env t = do
       return $ Closure n env t'
     else return $ Closure n env t
 
-closureArgs :: Closure -> [VTm]
-closureArgs (Closure n env _) = map (VNeu . VVar . Lvl . (+ length env)) [0 .. n - 1]
+closureArgs :: Int -> Int -> [VTm]
+closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) [0 .. n - 1]
 
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
-extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 .. n - 1]) ++ env
+extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
 
 evalInOwnCtx :: (Eval m) => Closure -> m VTm
-evalInOwnCtx cl = cl $$ closureArgs cl
+evalInOwnCtx cl = cl $$ closureArgs cl.numVars (length cl.env)
 
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do
-  let n = length pat.binds
-  pat' <- eval (extendEnvByNVars n env) pat.asTm
+  pat' <- eval (extendEnvByNVars (length pat.binds) env) pat.asTm
   return (VPatB pat' pat.binds)
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
@@ -300,6 +299,7 @@ quoteSpine l t (sp :|> Arg m u) = do
 quoteHead :: Lvl -> VHead -> STm
 quoteHead _ (VFlex m) = SMeta m []
 quoteHead l (VRigid l') = SVar (lvlToIdx l l')
+quoteHead _ (VGlobal g) = SGlobal g
 
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
@@ -405,7 +405,10 @@ unelab ns (SRepr m t) = PRepr m <$> unelab ns t
 instance (Eval m, Has m [Name]) => Pretty m VTm where
   pretty v = do
     n <- view
-    quote (Lvl (length n)) v >>= unelab n >>= pretty
+    traceM $ show (v, n)
+    q <-  quote (Lvl (length n)) v
+    traceM $ show q
+    return q >>= unelab n >>= pretty
 
 instance (Eval m, Has m [Name]) => Pretty m STm where
   pretty t = do

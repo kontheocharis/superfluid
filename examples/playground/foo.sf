@@ -165,16 +165,27 @@ def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
 --   }) p tt
 -- }
 
-def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
-  \m p => m (sym p)
+data Pair : Type -> Type -> Type {
+  mk-pair : [A : Type, B : Type] -> A -> B -> Pair A B,
 }
 
--- @@Fixme : this can prove that any f : A -> B is injective!!
-def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
-  \e => case e {
-    refl => ?h1
+def foo : Pair Unit Unit -> Unit {
+  \p => {
+    let x = case p { mk-pair x y => ?h1 };
+    tt
   }
 }
+
+-- def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
+--   \m p => m (sym p)
+-- }
+
+-- @@Fixme : this can prove that any f : A -> B is injective!!
+-- def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
+--   \e => case e {
+--     refl => ?h1
+--   }
+-- }
 
 -- def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
 --   \m p => m (s-inj p)

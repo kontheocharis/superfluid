@@ -488,9 +488,6 @@ checkSpine (t, ty) (Arg m u :<| sp) = do
   b' <- b $$ [uv]
   checkSpine (SApp m t' u', b') sp
 
-lastIdx :: STm
-lastIdx = SVar (Idx 0)
-
 forbidPat :: (Elab m) => PTm -> m ()
 forbidPat p = ifInPat (elabError $ InvalidPattern p) (return ())
 
@@ -508,7 +505,7 @@ checkPatBind x ty = do
         InPossiblePat ns -> setInPat (InPossiblePat (x : ns))
         _ -> return ()
     )
-  return lastIdx
+  return $ SVar (Idx 0)
 
 ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
