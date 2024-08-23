@@ -1,5 +1,6 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Compiler (runCli) where
 
@@ -13,32 +14,34 @@ module Compiler (runCli) where
 
 -- import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 
-import Common (HasNameSupply (..), HasProjectFiles (getProjectFileContents), Name (..))
+import Common (Has, HasNameSupply (..), HasProjectFiles (getProjectFileContents), Loc (..), Modify (..), Name (..), View (view))
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State (MonadState (get, put), StateT (..))
 import Control.Monad.State.Class (gets, modify)
+import qualified Control.Monad.State.Class as ST
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.String
 import Data.Text.IO (hPutStrLn)
-import Elaboration (Ctx, Elab (..), ElabError, emptyCtx, checkProgram)
+import Debug.Trace (trace, traceStack)
+import Elaboration (Ctx, Elab (..), ElabError, InPat (NotInPat), checkProgram, emptyCtx)
 import Evaluation (Eval (..))
-import Globals (HasSig (..), Sig, emptySig)
+import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
 import Options.Applicative (execParser, (<**>), (<|>))
 import Options.Applicative.Builder (fullDesc, header, help, info, long, progDesc, short, strOption, switch)
 import Options.Applicative.Common (Parser)
 import Options.Applicative.Extra (helper)
 import Parsing (parseProgram)
+import Persistence (preludePath)
 import Presyntax (PProgram)
 import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Unification (Unify)
-import Persistence (preludePath)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -123,7 +126,8 @@ data Compiler = Compiler
     solvedMetas :: SolvedMetas,
     ctx :: Ctx,
     sig :: Sig,
-    inPat :: Bool,
+    inPat :: InPat,
+    currentLoc :: Loc,
     reduceUnderBinders :: Bool,
     lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool
@@ -138,34 +142,63 @@ instance Pretty Comp CompilerError where
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
   deriving (Functor, Applicative, Monad, MonadState Compiler, MonadError CompilerError, MonadIO)
 
-instance HasMetas Comp where
-  solvedMetas = gets (\c -> c.solvedMetas)
-  modifySolvedMetas f = modify (\s -> s {solvedMetas = f s.solvedMetas})
+instance View Comp SolvedMetas where
+  view = gets (\c -> c.solvedMetas)
 
-instance HasSig Comp where
-  getSig = gets (\c -> c.sig)
-  modifySig f = modify (\s -> s {sig = f s.sig})
+instance Modify Comp SolvedMetas where
+  modify f = ST.modify (\s -> s {solvedMetas = f s.solvedMetas})
+
+instance Has Comp SolvedMetas
+
+instance View Comp Sig where
+  view = gets (\c -> c.sig)
+
+instance Modify Comp Sig where
+  modify f = ST.modify (\s -> s {sig = f s.sig})
+
+instance Has Comp Sig
 
 instance HasNameSupply Comp where
   uniqueName = do
     n <- gets (\c -> c.lastNameIdx)
-    modify (\s -> s {lastNameIdx = n + 1})
+    ST.modify (\s -> s {lastNameIdx = n + 1})
     return . Name $ "x" ++ show n
 
 instance Eval Comp where
   reduceUnderBinders = gets (\c -> c.reduceUnderBinders)
-  setReduceUnderBinders b = modify (\s -> s {reduceUnderBinders = b})
+  setReduceUnderBinders b = ST.modify (\s -> s {reduceUnderBinders = b})
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
-  setReduceUnfoldDefs b = modify (\s -> s {reduceUnfoldDefs = b})
+  setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
 
 instance Unify Comp
 
 instance Elab Comp where
-  getCtx = gets (\c -> c.ctx)
-  setCtx ctx = modify (\s -> s {ctx = ctx})
-  elabError e = throwError $ ElabCompilerError e
-
+  elabError = throwError . ElabCompilerError
   showMessage = msg
+
+instance View Comp Ctx where
+  view = gets (\c -> c.ctx)
+
+instance Modify Comp Ctx where
+  modify f = ST.modify (\s -> s {ctx = f s.ctx})
+
+instance Has Comp Ctx
+
+instance View Comp InPat where
+  view = gets (\c -> c.inPat)
+
+instance Modify Comp InPat where
+  modify f = ST.modify (\s -> s {inPat = f s.inPat})
+
+instance Has Comp InPat
+
+instance View Comp Loc where
+  view = gets (\c -> c.currentLoc)
+
+instance Modify Comp Loc where
+  modify f = ST.modify (\s -> s {currentLoc = f s.currentLoc})
+
+instance Has Comp Loc
 
 instance HasProjectFiles Comp where
   getProjectFileContents f = do
@@ -179,7 +212,8 @@ emptyCompiler =
       solvedMetas = emptySolvedMetas,
       ctx = emptyCtx,
       sig = emptySig,
-      inPat = False,
+      currentLoc = NoLoc,
+      inPat = NotInPat,
       reduceUnderBinders = False,
       lastNameIdx = 0,
       reduceUnfoldDefs = False
@@ -212,12 +246,13 @@ compile args = do
       printed <- pretty parsed
       when flags.dump . msg $ printed
     Args (RepresentFile file) flags -> error "unimplemented"
-      -- represented <- andPotentiallyNormalise flags <$> representFile file
-      -- when flags.verbose $ msg "\nTypechecked and represented program successfully"
+    -- represented <- andPotentiallyNormalise flags <$> representFile file
+    -- when flags.verbose $ msg "\nTypechecked and represented program successfully"
     -- when flags.dump $ msg $ printVal represented
     Args (GenerateCode file) flags -> error "unimplemented"
-      -- code <- generateCode file
-      -- when flags.verbose $ msg "Generated code successfully"
+
+-- code <- generateCode file
+-- when flags.verbose $ msg "Generated code successfully"
 
 -- when flags.dump $ msg $ renderJsProg code
 
@@ -230,7 +265,7 @@ parseAndCheckPrelude = do
 parseFile :: String -> Comp PProgram
 parseFile file = do
   contents <- liftIO $ readFile file
-  modify (\c -> c {files = M.insert file contents c.files})
+  ST.modify (\c -> c {files = M.insert file contents c.files})
   case parseProgram file contents of
     Left e -> throwError $ ParseCompilerError e
     Right p -> return p

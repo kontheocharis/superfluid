@@ -13,7 +13,6 @@ module Globals
     getDefGlobal,
     unfoldDef,
     modifyDefItem,
-    HasSig (..),
     getDataRepr,
     getGlobalRepr,
     getCaseRepr,
@@ -125,13 +124,6 @@ getGlobalRepr (DataGlob g) = getDataRepr g
 getGlobalRepr (CtorGlob g) = getCtorRepr g
 getGlobalRepr (DefGlob g) = getDefRepr g
 getGlobalRepr (PrimGlob g) = getPrimRepr g
-
-class (Monad m) => HasSig m where
-  getSig :: m Sig
-  modifySig :: (Sig -> Sig) -> m ()
-
-  accessSig :: (Sig -> a) -> m a
-  accessSig f = f <$> getSig
 
 data KnownGlobal a where
   KnownSigma :: KnownGlobal DataGlobal

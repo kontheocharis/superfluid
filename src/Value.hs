@@ -20,30 +20,36 @@ module Value
     pattern VHead,
     pattern VRepr,
     pattern VGl,
+    pattern VGlob,
     pattern VCase,
   )
 where
 
-import Common (Arg (..), Clause, DataGlobal, Glob, HasNameSupply (..), Lit, Lvl (..), MetaVar, Name, PiMode, Spine, Times, nextLvl, unLvl, WithNames (..))
+import Common (Arg (..), Clause, DataGlobal, Glob, HasNameSupply (..), Lit, Lvl (..), MetaVar, Name, PiMode, Spine, Times, WithNames (..), nextLvl, unLvl)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Sequence (Seq (..), fromList)
-import Syntax (STm, sLams)
 import Printing (Pretty (..))
+import Syntax (STm, sLams)
 
-newtype Sub = Sub {vars :: IntMap VTm}
+data Sub = Sub {lvl :: Lvl, vars :: IntMap VTm} deriving (Show)
 
 isEmptySub :: Sub -> Bool
 isEmptySub s = IM.null s.vars
 
 emptySub :: Sub
-emptySub = Sub IM.empty
+emptySub = Sub (Lvl 0) IM.empty
 
-subbing :: Lvl -> VTm -> Sub
-subbing l v = Sub (IM.singleton l.unLvl v)
+subbing :: Lvl -> Lvl -> VTm -> Sub
+subbing l x v = Sub l (IM.singleton x.unLvl v)
 
 instance Semigroup Sub where
-  Sub v1 <> Sub v2 = Sub (IM.union v1 v2)
+  Sub l1 v1 <> Sub l2 v2
+    | l1 > l2 = Sub l1 (IM.union v1 v2)
+    | otherwise = Sub l2 (IM.union v1 v2)
+
+instance Monoid Sub where
+  mempty = emptySub
 
 data PRen = PRen
   { domSize :: Lvl,
@@ -57,9 +63,6 @@ liftPRen = liftPRenN 1
 liftPRenN :: Int -> PRen -> PRen
 liftPRenN n (PRen dom cod ren) = PRen (Lvl (dom.unLvl + n)) (Lvl (cod.unLvl + n)) (IM.map (\c -> Lvl (c.unLvl + n)) ren)
 
-instance Monoid Sub where
-  mempty = emptySub
-
 type VPat = VTm
 
 data VPatB = VPatB {vPat :: VPat, binds :: [Name]} deriving (Show)
@@ -70,7 +73,7 @@ type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
 
-data VHead = VFlex MetaVar | VRigid Lvl deriving (Show, Eq)
+data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob deriving (Show, Eq)
 
 data VNeu
   = VApp VHead (Spine VTm)
@@ -82,7 +85,6 @@ data VTm
   = VPi PiMode Name VTy Closure
   | VLam PiMode Name Closure
   | VU
-  | VGlobal Glob (Spine VTm)
   | VLit (Lit VTm)
   | VNeu VNeu
   deriving (Show)
@@ -103,4 +105,7 @@ pattern VRepr :: Times -> VHead -> VNeu
 pattern VRepr m t = VReprApp m t Empty
 
 pattern VGl :: Glob -> VTm
-pattern VGl g = VGlobal g Empty
+pattern VGl g = VNeu (VHead (VGlobal g))
+
+pattern VGlob :: Glob -> Spine VTm -> VTm
+pattern VGlob g sp = VNeu (VApp (VGlobal g) sp)

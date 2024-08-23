@@ -215,15 +215,8 @@ instance (Monad m) => Pretty m PTm where
   pretty l@(PLet {}) = prettyLets (pLetToList l)
   pretty (PCase t cs) = do
     pt <- pretty t
-    pcs <-
-      mapM
-        ( \(Clause p c) -> do
-            pp <- pretty p
-            pc <- maybe (return "impossible") pretty c
-            return $ pp ++ " => " ++ pc
-        )
-        cs
-    return $ "case " ++ pt ++ " " ++ curlies (intercalate ",\n" pcs)
+    pcs <- pretty cs
+    return $ "case " ++ pt ++ " " ++ curlies pcs
   pretty PU = return "Type"
   pretty PWild = return "_"
   pretty (PName n) = pretty n

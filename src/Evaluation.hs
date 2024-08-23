@@ -1,13 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Evaluation
   ( Eval (..),
     quote,
     nf,
+    resolve,
     force,
     eval,
     isTypeFamily,
     isCtorTy,
+    unelab,
     ($$),
     vApp,
     vRepr,
@@ -24,47 +27,58 @@ import Common
     CtorGlobal (..),
     DataGlobal,
     Glob (..),
+    Has (..),
     HasNameSupply (..),
     Idx (..),
     Lvl (..),
     MetaVar,
-    Name,
+    Name (..),
     PiMode (..),
     Spine,
     Times (..),
+    View (..),
+    globName,
     inv,
     lvlToIdx,
     mapSpineM,
     nextLvl,
     nextLvls,
+    unMetaVar,
     pattern Impossible,
     pattern Possible,
   )
 import Control.Arrow ((***))
 import Control.Monad (foldM)
+import Control.Monad.State.Class (gets)
+import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.List.Extra (firstJust)
+import qualified Data.IntMap as IM
+import Data.List.Extra (firstJust, intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Debug.Trace (trace, traceM)
-import Globals (HasSig (accessSig), getCaseRepr, getGlobalRepr)
-import Meta (HasMetas (..))
+import Globals (Sig, getCaseRepr, getGlobalRepr)
+import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
+import Presyntax (PTm (..), pApp)
 import Printing (Pretty (..))
 import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
+    Sub,
     VHead (..),
     VNeu (..),
     VPat,
     VPatB (..),
     VTm (..),
+    vars,
+    pattern VGl,
     pattern VMeta,
     pattern VVar,
   )
 
-class (HasMetas m, HasSig m, HasNameSupply m) => Eval m where
+class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   reduceUnderBinders :: m Bool
   setReduceUnderBinders :: Bool -> m ()
 
@@ -86,7 +100,6 @@ vApp a Empty = return a
 vApp (VLam _ _ c) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
-vApp (VGlobal g us) u = return $ VGlobal g (us >< u)
 vApp (VNeu n) u = return $ vAppNeu n u
 vApp a b = error $ "impossible " ++ show a ++ " AND " ++ show b
 
@@ -104,7 +117,7 @@ vLams (Arg m x :<| sp) t = do
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
-vMatch (VGlobal (CtorGlob (CtorGlobal c)) ps) (VGlobal (CtorGlob (CtorGlobal c')) xs)
+vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) ps)) (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c'))) xs))
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -115,27 +128,28 @@ vMatch (VGlobal (CtorGlob (CtorGlobal c)) ps) (VGlobal (CtorGlob (CtorGlobal c')
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => DataGlobal -> VNeu -> [Clause VPatB Closure] -> m VTm
+vCase :: (Eval m) => DataGlobal -> VTm -> [Clause VPatB Closure] -> m VTm
 vCase dat v cs =
-  fromMaybe
-    (return $ VNeu (VCaseApp dat v cs Empty))
-    ( firstJust
-        ( \clause -> do
-            case clause of
-              Possible p t -> case vMatch p.vPat (VNeu v) of
-                Just env -> Just $ t $$ env
-                Nothing -> Nothing
-              Impossible _ -> Nothing
-        )
-        cs
-    )
+  case v of
+    VNeu n -> return $ VNeu (VCaseApp dat n cs Empty)
+    _ ->
+      fromMaybe (return . error $ "Expected neutral, got " ++ show v) $
+        firstJust
+          ( \clause -> do
+              case clause of
+                Possible p t -> case vMatch p.vPat v of
+                  Just env -> Just $ t $$ env
+                  Nothing -> Nothing
+                Impossible _ -> Nothing
+          )
+          cs
 
 evalToNeu :: (Eval m) => Env VTm -> STm -> m VNeu
 evalToNeu env t = do
   t' <- eval env t
   case t' of
     VNeu n -> return n
-    _ -> error "impossible"
+    _ -> error $ "expected neutral term, got " ++ show t'
 
 postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
 postCompose f (Closure n env t) = return $ Closure n env (f t)
@@ -173,12 +187,12 @@ vRepr l m (VLam e v t) = do
   return $ VLam e v t'
 vRepr l _ VU = return VU
 vRepr l _ (VLit i) = return $ VLit i
-vRepr l m (VGlobal g sp) = do
-  g' <- accessSig (getGlobalRepr g)
+vRepr l m (VNeu (VApp (VGlobal g) sp)) = do
+  g' <- access (getGlobalRepr g)
   sp' <- mapSpineM (vRepr l m) sp
   vApp g' sp'
 vRepr l m (VNeu (VCaseApp dat v cs sp)) = do
-  f <- accessSig (getCaseRepr dat)
+  f <- access (getCaseRepr dat)
   cssp <- caseToSpine v cs
   cssp' <- mapSpineM (vRepr l m) cssp
   a <- vApp f cssp'
@@ -213,6 +227,12 @@ extendEnvByNVars n env = map (VNeu . VVar . Lvl . (+ length env)) (reverse [0 ..
 evalInOwnCtx :: (Eval m) => Closure -> m VTm
 evalInOwnCtx cl = cl $$ closureArgs cl
 
+evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
+evalPat env pat = do
+  let n = length pat.binds
+  pat' <- eval (extendEnvByNVars n env) pat.asTm
+  return (VPatB pat' pat.binds)
+
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
   ty1' <- eval env ty1
@@ -229,16 +249,8 @@ eval env (SApp m t1 t2) = do
   t2' <- eval env t2
   vApp t1' (S.singleton (Arg m t2'))
 eval env (SCase dat t cs) = do
-  t' <- evalToNeu env t
-  cs' <-
-    mapM
-      ( \p -> do
-          let pat = p.pat
-          let n = length pat.binds
-          pat' <- eval (extendEnvByNVars n env) pat.asTm
-          bitraverse (const $ return (VPatB pat' pat.binds)) (close n env) p
-      )
-      cs
+  t' <- eval env t
+  cs' <- mapM (\p -> do bitraverse (evalPat env) (close (length p.pat.binds) env) p) cs
   vCase dat t' cs'
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
@@ -246,11 +258,11 @@ eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
 eval _ (SGlobal g) = do
-  return $ VGlobal g Empty
+  return $ VGl g
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
-  vRepr (envQuoteLvl env) m t'
+  vRepr (envLvl env) m t'
 
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (env, binds) of
@@ -313,7 +325,7 @@ quote l vt = do
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> SLit <$> traverse (quote l) lit
-    VGlobal g sp -> quoteSpine l (SGlobal g) sp
+    VNeu (VApp (VGlobal g) sp) -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
     VNeu (VCaseApp dat v cs sp) -> do
@@ -324,10 +336,15 @@ quote l vt = do
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do
   t' <- eval env t
-  quote (envQuoteLvl env) t'
+  quote (envLvl env) t'
 
-envQuoteLvl :: Env VTm -> Lvl
-envQuoteLvl env = Lvl (length env)
+resolve :: (Eval m) => Env VTm -> VTm -> m VTm
+resolve env t = do
+  t' <- quote (envLvl env) t
+  eval env t'
+
+envLvl :: Env VTm -> Lvl
+envLvl env = Lvl (length env)
 
 isTypeFamily :: (Eval m) => Lvl -> VTm -> m Bool
 isTypeFamily l t = do
@@ -346,5 +363,72 @@ isCtorTy l d t = do
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx b
       isCtorTy (nextLvl l) d b'
-    (VGlobal (DataGlob d') _) -> return $ d == d'
+    (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
     _ -> return False
+
+unelabMeta :: (HasMetas m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
+unelabMeta _ m [] = do
+  n <- lookupMetaVarName m
+  case n of
+    Just n' -> return (PHole n', [])
+    Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
+unelabMeta (n : ns) m (Bound : bs) = do
+  (t, ts) <- unelabMeta ns m bs
+  return (t, Arg Explicit (PName n) : ts)
+unelabMeta (_ : ns) m (Defined : bs) = unelabMeta ns m bs
+unelabMeta _ _ _ = error "impossible"
+
+unelab :: (HasMetas m) => [Name] -> STm -> m PTm
+unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
+unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
+unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+unelab ns (SMeta m bs) = do
+  (t, ts) <- unelabMeta ns m bs
+  return $ pApp t ts
+unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
+unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
+unelab ns (SCase _ t cs) =
+  PCase
+    <$> unelab ns t
+    <*> mapM
+      ( \c ->
+          Clause
+            <$> unelab (c.pat.binds ++ ns) c.pat.asTm
+            <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
+      )
+      cs
+unelab _ SU = return PU
+unelab _ (SGlobal g) = return $ PName (globName g)
+unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
+unelab ns (SRepr m t) = PRepr m <$> unelab ns t
+
+instance (Eval m, Has m [Name]) => Pretty m VTm where
+  pretty v = do
+    n <- view
+    quote (Lvl (length n)) v >>= unelab n >>= pretty
+
+instance (Eval m, Has m [Name]) => Pretty m STm where
+  pretty t = do
+    n <- view
+    unelab n t >>= pretty
+
+instance (Eval m, Has m [Name]) => Pretty m Closure where
+  pretty cl = do
+    cl' <- evalInOwnCtx cl
+    pretty cl'
+
+instance (Eval m, Has m [Name]) => Pretty m VPatB where
+  pretty (VPatB pat names) = enter (\n -> names ++ n) $ pretty pat
+
+instance (Eval m, Has m [Name]) => Pretty m Sub where
+  pretty sub = do
+    let l = IM.size sub.vars
+    vars <-
+      mapM
+        ( \(x, v) -> do
+            l' <- pretty (VNeu (VVar (Lvl x)))
+            v' <- pretty v
+            return $ l' <> " = " <> v'
+        )
+        (IM.toList sub.vars)
+    return $ intercalate ", " vars

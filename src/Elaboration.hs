@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Elaboration
   ( Elab (..),
@@ -8,7 +10,7 @@ module Elaboration
     infer,
     checkProgram,
     check,
-    unelab,
+    InPat (..),
   )
 where
 
@@ -20,6 +22,7 @@ import Common
     DataGlobal (..),
     DefGlobal (..),
     Glob (..),
+    Has (..),
     HasNameSupply (..),
     HasProjectFiles,
     Idx (..),
@@ -27,10 +30,12 @@ import Common
     Loc (NoLoc),
     Lvl (..),
     MetaVar,
+    Modify (modify),
     Name (..),
     PiMode (..),
     Spine,
     Times,
+    View (..),
     globName,
     inv,
     lvlToIdx,
@@ -42,44 +47,75 @@ import Common
     pattern Possible,
   )
 import Control.Monad (unless, zipWithM, zipWithM_)
+import Control.Monad.Trans (MonadTrans (..))
 import qualified Data.IntMap as IM
-import Data.List (intercalate, zipWith4)
+import Data.Kind (Constraint)
+import Data.List (intercalate, zipWith4, zipWith5)
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Debug.Trace (traceM)
-import Evaluation (Eval (..), close, eval, evalInOwnCtx, force, isCtorTy, isTypeFamily, quote, vApp, vRepr, ($$))
-import Globals (CtorGlobalInfo (..), DataGlobalInfo (..), DefGlobalInfo (..), GlobalInfo (..), HasSig (accessSig, modifySig), KnownGlobal (..), PrimGlobalInfo (PrimGlobalInfo), addItem, globalInfoToTm, knownCtor, knownData, lookupGlobal, modifyDataItem, modifyDefItem)
-import Meta (HasMetas (freshMetaVar, lookupMetaVarName))
+import Debug.Trace (traceM, traceStack)
+import Evaluation
+  ( Eval (..),
+    close,
+    eval,
+    evalInOwnCtx,
+    force,
+    isCtorTy,
+    isTypeFamily,
+    quote,
+    unelab,
+    vApp,
+    vRepr,
+    ($$), resolve,
+  )
+import Globals
+  ( CtorGlobalInfo (..),
+    DataGlobalInfo (..),
+    DefGlobalInfo (..),
+    GlobalInfo (..),
+    KnownGlobal (..),
+    PrimGlobalInfo (PrimGlobalInfo),
+    addItem,
+    globalInfoToTm,
+    knownCtor,
+    knownData,
+    lookupGlobal,
+    modifyDataItem,
+    modifyDefItem,
+  )
+import Meta (freshMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (..), PData (..), PDef (..), PItem (..), PPat, PPrim (..), PProgram (..), PTm (..), PTy, pApp)
-import Printing (Pretty (..), indentedFst)
+import Printing (Pretty (..), indented, indentedFst)
 import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), toPSpine)
-import Unification (CanUnify (..), Unify (), unify)
+import Unification (CanUnify (..), Unify (), UnifyError, unify, unifyErrorIsMetaRelated)
 import Value
   ( Closure (..),
     Env,
     Sub,
     VHead (..),
     VNeu (..),
+    VPatB (..),
     VTm (..),
     VTy,
     isEmptySub,
     vars,
     pattern VHead,
     pattern VRepr,
-    pattern VVar,
+    pattern VVar, pattern VGlob,
   )
 
 data ElabError
-  = Mismatch VTm VTm
+  = Mismatch [UnifyError]
   | PotentialMismatch VTm VTm
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern PTm
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
-  | ImpossibleCase VTm
+  | ImpossibleCase VTm [UnifyError]
   | InvalidCaseSubject PTm
   | InvalidDataFamily VTy
   | InvalidCtorType VTy
@@ -88,46 +124,16 @@ data ElabError
 
 data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
 
-instance Show InPat where
-  show NotInPat = "not in pat"
-  show (InPossiblePat ns) = "in possible pat with " ++ show ns
-  show InImpossiblePat = "in impossible pat"
-
-instance (Elab m) => Pretty m VTm where
-  pretty v = do
-    n <- accessCtx (\c -> c.nameList)
-    quote (Lvl (length n)) v >>= unelab n >>= pretty
-
-instance (Elab m) => Pretty m STm where
-  pretty t = do
-    n <- accessCtx (\c -> c.nameList)
-    unelab n t >>= pretty
-
-instance (Elab m) => Pretty m Sub where
-  pretty sub = do
-    let l = IM.size sub.vars
-    vars <-
-      mapM
-        ( \(x, v) -> do
-            l' <- pretty (VNeu (VVar (Lvl x)))
-            v' <- pretty v
-            return $ l' <> " = " <> v'
-        )
-        (IM.toList sub.vars)
-    return $ intercalate ", " vars
-
 instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
   pretty e = do
-    loc <- accessCtx (\c -> c.currentLoc)
-    loc' <- pretty loc
+    loc <- (view :: m Loc) >>= pretty
     err' <- err
-    return $ loc' <> "\n" <> err'
+    return $ loc <> "\n" <> err'
     where
       err = case e of
-        Mismatch t1 t2 -> do
-          t1' <- pretty t1
-          t2' <- pretty t2
-          return $ "Mismatch: " <> t1' <> " and " <> t2'
+        Mismatch us -> do
+          us' <- mapM pretty us
+          return $ intercalate "\n" us'
         PotentialMismatch t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -154,9 +160,10 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
                 s' <- pretty s
                 return $ "\nThis could happen if " ++ s'
           return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
-        ImpossibleCase t -> do
-          t' <- pretty t
-          return $ "Impossible case: " <> t'
+        ImpossibleCase p t -> do
+          p' <- pretty p
+          t' <- intercalate "\n" <$> mapM pretty t
+          return $ "Impossible case: " <> p' <> "\n" <> indentedFst t'
         InvalidCaseSubject t -> do
           t' <- pretty t
           return $ "Invalid case subject: " <> t'
@@ -173,26 +180,41 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
           es' <- mapM pretty es
           return $ unlines es'
 
-class (Eval m, Unify m) => Elab m where
-  getCtx :: m Ctx
-  setCtx :: Ctx -> m ()
-  elabError :: ElabError -> m a
+instance Show InPat where
+  show NotInPat = "not in pat"
+  show (InPossiblePat ns) = "in possible pat with " ++ show ns
+  show InImpossiblePat = "in impossible pat"
 
+class (Eval m, Unify m, Has m Loc, Has m InPat, Has m Ctx) => Elab m where
+  getCtx :: m Ctx
+  getCtx = view
+
+  setCtx :: Ctx -> m ()
+  setCtx = modify . const
+
+  modifyCtx :: (Ctx -> Ctx) -> m ()
+  modifyCtx = modify
+
+  accessCtx :: (Ctx -> a) -> m a
+  accessCtx f = f <$> getCtx
+
+  enterCtx :: (Ctx -> Ctx) -> m a -> m a
+  enterCtx = enter
+
+  elabError :: ElabError -> m a
   showMessage :: String -> m ()
 
   inPat :: m InPat
-  inPat = accessCtx (\c -> c.inPat)
+  inPat = view
 
-  setInPat :: InPat -> m ()
-  setInPat p = modifyCtx (\c -> c {inPat = p})
+  enterLoc :: Loc -> m a -> m a
+  enterLoc = enter . const
 
   enterPat :: InPat -> m a -> m a
-  enterPat p a = do
-    b <- inPat
-    setInPat p
-    a' <- a
-    setInPat b
-    return a'
+  enterPat = enter . const
+
+  setInPat :: InPat -> m ()
+  setInPat = modify . const
 
   whenInPat :: (InPat -> m a) -> m a
   whenInPat f = do
@@ -204,50 +226,27 @@ class (Eval m, Unify m) => Elab m where
     NotInPat -> b
     _ -> a
 
-  accessCtx :: (Ctx -> a) -> m a
-  accessCtx f = f <$> getCtx
-
-  modifyCtx :: (Ctx -> Ctx) -> m ()
-  modifyCtx f = do
-    ctx <- getCtx
-    setCtx (f ctx)
-
-  enterCtx :: (Ctx -> Ctx) -> m a -> m a
-  enterCtx f a = do
-    ctx <- getCtx
-    setCtx (f ctx)
-    a' <- a
-    setCtx ctx
-    return a'
-
 data Ctx = Ctx
   { env :: Env VTm,
     lvl :: Lvl,
-    inPat :: InPat,
     types :: [VTy],
     bounds :: Bounds,
     nameList :: [Name],
-    names :: Map Name Lvl,
-    currentLoc :: Loc
+    names :: Map Name Lvl
   }
 
-con :: Ctx -> [(Name, VTy, Maybe VTm)]
-con c =
-  zipWith4
-    ( \n t b e ->
-        ( n,
-          t,
-          case b of
-            Bound -> Nothing
-            Defined -> Just e
-        )
-    )
-    c.nameList
-    c.types
-    c.bounds
-    c.env
+instance (Elab m) => View m [Name] where
+  view = accessCtx (\c -> c.nameList)
 
-instance (Elab m) => Pretty m Ctx where
+instance (Elab m) => Modify m [Name] where
+  modify f = modifyCtx (\c -> c {nameList = f c.nameList})
+
+instance (Elab m) => Has m [Name]
+
+instance (Elab m) => View m Lvl where
+  view = accessCtx (\c -> c.lvl)
+
+instance (Eval m, Has m [Name]) => Pretty m Ctx where
   pretty c =
     intercalate "\n"
       <$> mapM
@@ -259,34 +258,57 @@ instance (Elab m) => Pretty m Ctx where
               Nothing -> return ""
             return $ n' ++ " : " ++ ty' ++ tm'
         )
-        (reverse $ con c)
+        (reverse con)
+    where
+      con :: [(Name, VTy, Maybe VTm)]
+      con =
+        zipWith4
+          ( \i n t e ->
+              ( n,
+                t,
+                case e of
+                  VNeu (VVar x) | x == Lvl i -> Nothing
+                  _ -> Just e
+              )
+          )
+          [c.lvl.unLvl - 1, c.lvl.unLvl - 2 .. 0]
+          c.nameList
+          c.types
+          c.env
 
 emptyCtx :: Ctx
 emptyCtx =
   Ctx
     { env = [],
       lvl = Lvl 0,
-      inPat = NotInPat,
       types = [],
       bounds = [],
       nameList = [],
-      names = M.empty,
-      currentLoc = NoLoc
+      names = M.empty
     }
 
 applySubToCtx :: (Elab m) => Sub -> m ()
 applySubToCtx sub = do
-  ctx <- getCtx
-  env' <-
-    mapM
-      ( \t -> case t of
-          VNeu (VApp (VRigid i) sp) -> case IM.lookup i.unLvl sub.vars of
-            Just t' -> vApp t' sp
-            Nothing -> return t
-          _ -> return t
-      )
-      ctx.env
-  modifyCtx $ \c -> c {env = env'}
+  c <- getCtx
+  let (env', bounds') = replaceVars (c.lvl.unLvl - 1) (c.env, c.bounds)
+
+  -- for each level i = 0 to l-1 of env', evaluate (env' !! i) in context [0..i-1]
+  -- gather the results in env''
+  -- env'' <- mapM (\i -> resolve (take i env') (env' !! i)) [0..(c.lvl.unLvl - 1)]
+
+  modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
+  where
+    replaceVars :: Int -> (Env VTm, Bounds) -> (Env VTm, Bounds)
+    replaceVars _ ([], []) = ([], [])
+    replaceVars startingAt (v : vs, b : bs) =
+      let (vs', bs') = replaceVars (startingAt - 1) (vs, bs)
+       in let res = IM.lookup startingAt sub.vars
+           in ( fromMaybe v res : vs',
+                case res of
+                  Just _ -> Defined : bs'
+                  Nothing -> b : bs'
+              )
+    replaceVars _ _ = error "impossible"
 
 bind :: Name -> VTy -> Ctx -> Ctx
 bind x ty ctx =
@@ -297,6 +319,21 @@ bind x ty ctx =
       bounds = Bound : ctx.bounds,
       names = M.insert x ctx.lvl ctx.names,
       nameList = x : ctx.nameList
+    }
+
+pop :: Ctx -> Ctx
+pop = popN 1
+
+popN :: Int -> Ctx -> Ctx
+popN 0 ctx = ctx
+popN n ctx =
+  ctx
+    { env = drop n ctx.env,
+      lvl = Lvl (ctx.lvl.unLvl - n),
+      types = drop n ctx.types,
+      bounds = drop n ctx.bounds,
+      names = M.fromList $ zip (drop n ctx.nameList) (map Lvl [0 ..]),
+      nameList = drop n ctx.nameList
     }
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
@@ -317,9 +354,6 @@ lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
 lookupName n ctx = case M.lookup n ctx.names of
   Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
   Nothing -> Nothing
-
-located :: Loc -> Ctx -> Ctx
-located l ctx = ctx {currentLoc = l}
 
 inferMetaHere :: (Elab m) => Maybe Name -> m (STm, VTy)
 inferMetaHere n = do
@@ -353,15 +387,21 @@ newMetaHere n = do
 freshMetaHere :: (Elab m) => m STm
 freshMetaHere = newMetaHere Nothing
 
+freshMetaOrPatBind :: (Elab m) => m STm
+freshMetaOrPatBind =
+  ifInPat
+    (fst <$> (uniqueName >>= inferPatBind))
+    freshMetaHere
+
 insertFull :: (Elab m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- force ty
   case f of
     VPi Implicit _ _ b -> do
-      meta <- freshMetaHere
-      vmeta <- evalHere meta
-      ty' <- b $$ [vmeta]
-      insertFull (SApp Implicit tm meta, ty')
+      a <- freshMetaOrPatBind
+      va <- evalHere a
+      ty' <- b $$ [va]
+      insertFull (SApp Implicit tm a, ty')
     _ -> return (tm, ty)
 
 insert :: (Elab m) => (STm, VTy) -> m (STm, VTy)
@@ -377,27 +417,34 @@ evalHere t = do
 handleUnification :: (Elab m) => VTm -> VTm -> CanUnify -> m ()
 handleUnification t1 t2 r = do
   p <- inPat
-  -- t1' <- pretty t1
-  -- t2' <- pretty t2
-  -- traceM $ t1' ++ " =? " ++ t2'
   case p of
     InImpossiblePat -> case r of
       Yes -> elabError $ ImpossibleCaseIsPossible t1 t2
       Maybe s -> elabError $ ImpossibleCaseMightBePossible t1 t2 s
-      No _ -> return ()
+      No errs | not $ any unifyErrorIsMetaRelated errs -> return ()
+      No errs -> elabError $ Mismatch errs
     InPossiblePat _ -> case r of
       Yes -> return ()
       Maybe s -> applySubToCtx s
-      No _ -> elabError $ ImpossibleCase t1
+      No errs -> elabError $ ImpossibleCase t1 errs
     NotInPat -> case r of
       Yes -> return ()
       Maybe _ -> elabError $ PotentialMismatch t1 t2
-      No _ -> elabError $ Mismatch t1 t2
+      No errs -> elabError $ Mismatch errs
+
+
 
 canUnifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
 canUnifyHere t1 t2 = do
   l <- accessCtx (\c -> c.lvl)
-  unify l t1 t2
+  t1' <- resolveHere t1
+  t2' <- resolveHere t2
+  unify l t1' t2'
+
+resolveHere :: (Elab m) => VTm -> m VTm
+resolveHere t = do
+  l <- accessCtx (\c -> c.env)
+  resolve l t
 
 unifyHere :: (Elab m) => VTm -> VTm -> m ()
 unifyHere t1 t2 = canUnifyHere t1 t2 >>= handleUnification t1 t2
@@ -451,22 +498,14 @@ inferPatBind :: (Elab m) => Name -> m (STm, VTy)
 inferPatBind x = do
   ty <- freshMetaHere >>= evalHere
   x' <- checkPatBind x ty
-  ns <- currentPatBinds
-  traceM $ "CCurrent pat bindings " ++ show ns
   return (x', ty)
 
 checkPatBind :: (Elab m) => Name -> VTy -> m STm
 checkPatBind x ty = do
-  traceM $ "PRE MOD"
-  getCtx >>= pretty >>= showMessage
   modifyCtx (bind x ty)
-  traceM $ "AFTER MOD"
-  getCtx >>= pretty >>= showMessage
   whenInPat
     ( \case
-        InPossiblePat ns -> do
-          traceM $ "HERE"
-          setInPat (InPossiblePat (x : ns))
+        InPossiblePat ns -> setInPat (InPossiblePat (x : ns))
         _ -> return ()
     )
   return lastIdx
@@ -475,7 +514,7 @@ ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
 ifIsData v a b = do
   v' <- force v
   case v' of
-    VGlobal (DataGlob g@(DataGlobal _)) _ -> a g
+    VGlob (DataGlob g@(DataGlobal _)) _ -> a g
     _ -> b
 
 reprHere :: (Elab m) => Times -> VTm -> m VTm
@@ -484,35 +523,31 @@ reprHere m t = do
   vRepr l m t
 
 inferName :: (Elab m) => Name -> m (STm, VTy)
-inferName n = do
-  y <-
-    ifInPat
-      ( do
-          l <- accessSig (lookupGlobal n)
-          case l of
-            Just c@(CtorInfo _) -> return (globalInfoToTm n c)
-            _ -> inferPatBind n
-      )
-      ( do
-          r <- accessCtx (lookupName n)
-          case r of
-            Just (i, t) -> return (SVar i, t)
-            Nothing -> do
-              l <- accessSig (lookupGlobal n)
-              case l of
-                Just x -> return (globalInfoToTm n x)
-                Nothing -> elabError $ UnresolvedVariable n
-      )
-  ns <- currentPatBinds
-  traceM $ "CUurrent pat bindings " ++ show ns
-  return y
+inferName n =
+  ifInPat
+    ( do
+        l <- access (lookupGlobal n)
+        case l of
+          Just c@(CtorInfo _) -> return (globalInfoToTm n c)
+          _ -> inferPatBind n
+    )
+    ( do
+        r <- accessCtx (lookupName n)
+        case r of
+          Just (i, t) -> return (SVar i, t)
+          Nothing -> do
+            l <- access (lookupGlobal n)
+            case l of
+              Just x -> return (globalInfoToTm n x)
+              Nothing -> elabError $ UnresolvedVariable n
+    )
 
 checkDef :: (Elab m) => PDef -> m ()
 checkDef def = do
   ty' <- check def.ty VU >>= evalHere
-  modifySig (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing)))
+  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing)))
   tm' <- check def.tm ty' >>= evalHere
-  modifySig (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just tm'}))
+  modify (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just tm'}))
   return ()
 
 checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()
@@ -520,8 +555,8 @@ checkCtor dat idx ctor = do
   ty' <- check ctor.ty VU >>= evalHere
   i <- getLvl >>= (\l -> isCtorTy l dat ty')
   unless i (elabError $ InvalidCtorType ty')
-  modifySig (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)))
-  modifySig (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
+  modify (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)))
+  modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
 
 getLvl :: (Elab m) => m Lvl
 getLvl = accessCtx (\c -> c.lvl)
@@ -531,13 +566,13 @@ checkData dat = do
   ty' <- check dat.ty VU >>= evalHere
   i <- getLvl >>= (`isTypeFamily` ty')
   unless i (elabError $ InvalidDataFamily ty')
-  modifySig (addItem dat.name (DataInfo (DataGlobalInfo ty' [])))
+  modify (addItem dat.name (DataInfo (DataGlobalInfo ty' [])))
   zipWithM_ (checkCtor (DataGlobal dat.name)) [0 ..] dat.ctors
 
 checkPrim :: (Elab m) => PPrim -> m ()
 checkPrim prim = do
   ty' <- check prim.ty VU >>= evalHere
-  modifySig (addItem prim.name (PrimInfo (PrimGlobalInfo ty')))
+  modify (addItem prim.name (PrimInfo (PrimGlobalInfo ty')))
   return ()
 
 checkItem :: (Elab m) => PItem -> m ()
@@ -547,14 +582,14 @@ checkItem = \case
   PPrim prim -> checkPrim prim
   PDataRep {} -> return () -- @@Todo
   PDefRep {} -> return () -- @@Todo
-  PLocatedItem l i -> enterCtx (located l) $ checkItem i
+  PLocatedItem l i -> enterLoc l $ checkItem i
 
 checkProgram :: (Elab m) => PProgram -> m ()
 checkProgram (PProgram items) = mapM_ checkItem items
 
 infer :: (Elab m) => PTm -> m (STm, VTy)
 infer term = case term of
-  PLocated l t -> enterCtx (located l) $ infer t
+  PLocated l t -> enterLoc l $ infer t
   PName x -> inferName x
   PSigma x a b ->
     infer $
@@ -612,10 +647,10 @@ infer term = case term of
       CharLit c -> return (CharLit c, KnownChar, Empty)
       NatLit n -> return (NatLit n, KnownNat, Empty)
       FinLit f bound -> do
-        bound' <- check bound (VGlobal (DataGlob (knownData KnownNat)) Empty)
+        bound' <- check bound (VGlob (DataGlob (knownData KnownNat)) Empty)
         vbound' <- evalHere bound'
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
-    return (SLit l', VGlobal (DataGlob (knownData ty)) args)
+    return (SLit l', VGlob (DataGlob (knownData ty)) args)
 
 checkCase :: (Elab m) => PTm -> [Clause PTm PTm] -> VTy -> m STm
 checkCase s cs retTy = do
@@ -636,29 +671,25 @@ checkCase s cs retTy = do
       cs
   return (SCase d ss scs)
 
-currentPatBinds :: (Elab m) => m [Name]
-currentPatBinds = do
-  p <- accessCtx (\c -> c.inPat)
-  case p of
-    InPossiblePat ns -> return ns
-    _ -> return []
+inPatNames :: InPat -> [Name]
+inPatNames (InPossiblePat ns) = ns
+inPatNames _ = []
 
 checkPatAgainstSubject :: (Elab m) => PPat -> VTm -> VTy -> m SPat
 checkPatAgainstSubject p vs vsTy = do
-  (sp, spTy) <- infer p
-  ns <- currentPatBinds
-  traceM $ "Current pat bindings " ++ show ns
+  (sp, spTy) <- infer p >>= insert
+  ns <- inPat
   a <- canUnifyHere vsTy spTy
   vp <- evalHere sp
   b <- canUnifyHere vp vs
   handleUnification vp vs (a /\ b)
-  return $ SPat sp ns
+  return $ SPat sp (inPatNames ns)
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
   typ' <- force typ
   case (term, typ') of
-    (PLocated l t, ty) -> enterCtx (located l) $ check t ty
+    (PLocated l t, ty) -> enterLoc l $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
       forbidPat term
       vb <- evalInOwnCtx b
@@ -696,39 +727,3 @@ check term typ = do
       (te', ty') <- infer te >>= insert
       unifyHere ty ty'
       return te'
-
-unelabMeta :: (HasMetas m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
-unelabMeta _ m [] = do
-  n <- lookupMetaVarName m
-  case n of
-    Just n' -> return (PHole n', [])
-    Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
-unelabMeta (n : ns) m (Bound : bs) = do
-  (t, ts) <- unelabMeta ns m bs
-  return (t, Arg Explicit (PName n) : ts)
-unelabMeta (_ : ns) m (Defined : bs) = unelabMeta ns m bs
-unelabMeta _ _ _ = error "impossible"
-
-unelab :: (HasMetas m) => [Name] -> STm -> m PTm
-unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
-unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
-unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
-unelab ns (SMeta m bs) = do
-  (t, ts) <- unelabMeta ns m bs
-  return $ pApp t ts
-unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
-unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
-unelab ns (SCase _ t cs) =
-  PCase
-    <$> unelab ns t
-    <*> mapM
-      ( \c ->
-          Clause
-            <$> unelab (c.pat.binds ++ ns) c.pat.asTm
-            <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
-      )
-      cs
-unelab _ SU = return PU
-unelab _ (SGlobal g) = return $ PName (globName g)
-unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
-unelab ns (SRepr m t) = PRepr m <$> unelab ns t

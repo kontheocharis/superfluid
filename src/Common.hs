@@ -1,3 +1,6 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Common
   ( Name (..),
     PiMode (..),
@@ -33,9 +36,14 @@ module Common
     DefGlobal (..),
     HasNameSupply (..),
     HasProjectFiles (..),
+    Has (..),
+    View (..),
+    Modify (..),
   )
 where
 
+import Control.Monad.State (MonadState, State, StateT, MonadTrans (..))
+import qualified Control.Monad.State as MS
 import Criterion.Main.Options (MatchType (Glob))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
@@ -43,7 +51,7 @@ import Data.Bitraversable (Bitraversable (..))
 import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
 import Data.List (intercalate)
-import Data.Sequence (Seq)
+import Data.Sequence (Seq (..))
 import Data.Set (Set)
 import Debug.Trace (trace)
 import Numeric.Natural (Natural)
@@ -190,9 +198,9 @@ locProjectFileName (Loc f _ _) = Just f
 
 -- De Brujin indices and levels
 
-newtype Idx = Idx {unIdx :: Int} deriving (Eq, Show)
+newtype Idx = Idx {unIdx :: Int} deriving (Eq, Show, Ord)
 
-newtype Lvl = Lvl {unLvl :: Int} deriving (Eq, Show)
+newtype Lvl = Lvl {unLvl :: Int} deriving (Eq, Show, Ord)
 
 instance Enum Lvl where
   toEnum = Lvl
@@ -261,6 +269,28 @@ instance Show Tag where
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name
 
+class (Functor m) => View m a where
+  view :: m a
+
+  access :: (a -> b) -> m b
+  access f = f <$> view
+
+class (Monad m, View m a) => Modify m a where
+  modify :: (a -> a) -> m ()
+
+class (View m a, Modify m a) => Has m a where
+  enter :: (a -> a) -> m c -> m c
+  enter f m = do
+    c <- view :: m a
+    modify f
+    a <- m
+    modify (\(_ :: a) -> c)
+    return a
+
+-- instance () => Has (With a m) a
+
+
+
 -- Printing
 
 instance (Monad m) => Pretty m Name where
@@ -293,6 +323,23 @@ instance (Pretty m a) => Pretty m (Lit a) where
   pretty (FinLit n t) = do
     t' <- pretty t
     return $ show n ++ " % " ++ t'
+
+instance (Pretty m a) => Pretty m (Spine a) where
+  pretty Empty = return ""
+  pretty (a :<| Empty) = pretty a
+  pretty (a :<| sp) = do
+    a' <- pretty a
+    sp' <- pretty sp
+    return $ a' ++ " " ++ sp'
+
+instance (Pretty m p, Pretty m t) => Pretty m [Clause p t] where
+  pretty cl = intercalate ",\n" <$> mapM pretty cl
+
+instance (Pretty m p, Pretty m t) => Pretty m (Clause p t) where
+  pretty (Clause p c) = do
+    pp <- pretty p
+    pc <- maybe (return "impossible") pretty c
+    return $ pp ++ " => " ++ pc
 
 -- Files
 
