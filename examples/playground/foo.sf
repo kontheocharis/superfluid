@@ -172,7 +172,7 @@ data Pair : Type -> Type -> Type {
 def foo : Pair Unit Unit -> Unit {
   \p => {
     let x = case p { mk-pair x y => ?h1 };
-    tt
+    ?h2
   }
 }
 

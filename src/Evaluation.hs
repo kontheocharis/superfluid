@@ -49,7 +49,8 @@ import Common
   )
 import Control.Arrow ((***))
 import Control.Monad (foldM)
-import Control.Monad.State.Class (gets)
+import Control.Monad.State (StateT (..), modify)
+import Control.Monad.State.Class (MonadState (..), gets)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import qualified Data.IntMap as IM
@@ -227,10 +228,28 @@ extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
 evalInOwnCtx :: (Eval m) => Closure -> m VTm
 evalInOwnCtx cl = cl $$ closureArgs cl.numVars (length cl.env)
 
+-- evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
+-- evalPat env pat = do
+--   pat' <- eval (extendEnvByNVars (length pat.binds) env) pat.asTm
+--   return (VPatB pat' pat.binds)
+
+type NumPatBinds = Int
+
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do
-  pat' <- eval (extendEnvByNVars (length pat.binds) env) pat.asTm
-  return (VPatB pat' pat.binds)
+  (n, _) <- runStateT (evalPat' env pat.asTm) (length env)
+  return $ VPatB n pat.binds
+  where
+    evalPat' :: (Eval m) => Env VTm -> STm -> StateT NumPatBinds m VTm
+    evalPat' e pat' = case pat' of
+      (SGlobal (CtorGlob (CtorGlobal c))) -> do
+        return $ VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) Empty)
+      (SApp m a b) -> do
+        a' <- evalPat' e a
+        b' <- evalPat' e b
+        lift $ vApp a' (S.singleton (Arg m b'))
+      (SVar (Idx 0)) -> state (\s -> (VNeu (VVar (Lvl s)), s + 1))
+      _ -> error "impossible"
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do
@@ -307,10 +326,19 @@ quoteClosure l cl = do
   quote (nextLvls l cl.numVars) a
 
 quotePat :: (Eval m) => Lvl -> VPatB -> m SPat
-quotePat l (VPatB p binds) = do
-  let n = length binds
-  p' <- quote (nextLvls l n) p
-  return $ SPat p' binds
+quotePat l p = do
+  p' <- quotePat' l p.vPat
+  return $ SPat p' p.binds
+  where
+    quotePat' :: (Eval m) => Lvl -> VTm -> m STm
+    quotePat' l' (VNeu (VApp vh sp)) = do
+      sp' <- mapSpineM (quotePat' l') sp
+      return $ sAppSpine (quotePatHead l' vh) sp'
+    quotePat' _ _ = error "impossible"
+    quotePatHead :: Lvl -> VHead -> STm
+    quotePatHead _ (VFlex _) = error "impossible"
+    quotePatHead _ (VRigid _) = SVar (Idx 0)
+    quotePatHead _ (VGlobal g) = SGlobal g
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
@@ -325,7 +353,6 @@ quote l vt = do
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> SLit <$> traverse (quote l) lit
-    VNeu (VApp (VGlobal g) sp) -> quoteSpine l (SGlobal g) sp
     VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
     VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
     VNeu (VCaseApp dat v cs sp) -> do
@@ -378,6 +405,27 @@ unelabMeta (n : ns) m (Bound : bs) = do
 unelabMeta (_ : ns) m (Defined : bs) = unelabMeta ns m bs
 unelabMeta _ _ _ = error "impossible"
 
+unelabPat :: (HasMetas m) => [Name] -> SPat -> m PTm
+unelabPat ns pat = do
+  (n, _) <- runStateT (unelabPat' pat.asTm) (pat.binds ++ ns)
+  return n
+  where
+    unelabPat' :: (HasMetas m) => STm -> StateT [Name] m PTm
+    unelabPat' pat' = case pat' of
+      (SGlobal (CtorGlob (CtorGlobal c))) -> do
+        return $ PName c
+      (SApp m a b) -> do
+        a' <- unelabPat' a
+        b' <- unelabPat' b
+        return $ pApp a' [Arg m b']
+      (SVar (Idx 0)) ->
+        state
+          ( \case
+              (v : vs) -> (PName v, vs)
+              [] -> error "impossible"
+          )
+      _ -> error "impossible"
+
 unelab :: (HasMetas m) => [Name] -> STm -> m PTm
 unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
 unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
@@ -393,7 +441,7 @@ unelab ns (SCase _ t cs) =
     <*> mapM
       ( \c ->
           Clause
-            <$> unelab (c.pat.binds ++ ns) c.pat.asTm
+            <$> unelabPat ns c.pat
             <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
       )
       cs
@@ -406,7 +454,7 @@ instance (Eval m, Has m [Name]) => Pretty m VTm where
   pretty v = do
     n <- view
     traceM $ show (v, n)
-    q <-  quote (Lvl (length n)) v
+    q <- quote (Lvl (length n)) v
     traceM $ show q
     return q >>= unelab n >>= pretty
 

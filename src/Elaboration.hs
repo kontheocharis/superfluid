@@ -502,7 +502,7 @@ checkPatBind x ty = do
   modifyCtx (bind x ty)
   whenInPat
     ( \case
-        InPossiblePat ns -> setInPat (InPossiblePat (x : ns))
+        InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [x]))
         _ -> return ()
     )
   return $ SVar (Idx 0)
@@ -678,6 +678,7 @@ checkPatAgainstSubject p vs vsTy = do
   ns <- inPat
   a <- canUnifyHere vsTy spTy
   vp <- evalHere sp
+  traceM $ "VP IS " ++ show vp
   b <- canUnifyHere vp vs
   handleUnification vp vs (a /\ b)
   return $ SPat sp (inPatNames ns)
