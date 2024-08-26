@@ -48,6 +48,7 @@ import Common
   )
 import Control.Monad (unless, zipWithM, zipWithM_)
 import Control.Monad.Trans (MonadTrans (..))
+import Data.Foldable (Foldable (..))
 import qualified Data.IntMap as IM
 import Data.Kind (Constraint)
 import Data.List (intercalate, zipWith4, zipWith5)
@@ -93,7 +94,18 @@ import Meta (freshMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (..), PData (..), PDef (..), PItem (..), PPat, PPrim (..), PProgram (..), PTm (..), PTy, pApp)
 import Printing (Pretty (..), indented, indentedFst)
 import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), toPSpine)
-import Unification (CanUnify (..), Unify (), UnifyError, unify, unifyErrorIsMetaRelated)
+import Unification
+  ( CanUnify (..),
+    Problem (Problem),
+    SolveError (..),
+    Unify (),
+    UnifyError (..),
+    getProblems,
+    loc,
+    prevError,
+    unify,
+    unifyErrorIsMetaRelated,
+  )
 import Value
   ( Closure (..),
     Env,
@@ -117,6 +129,7 @@ data ElabError
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern PTm
+  | RemainingProblems [(SolveError, Loc)]
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm [UnifyError]
@@ -181,6 +194,16 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
         DuplicateItem n -> do
           n' <- pretty n
           return $ "Duplicate item: " <> n'
+        RemainingProblems ps -> do
+          ps' <-
+            mapM
+              ( \(l, c) -> do
+                  l' <- pretty l
+                  c' <- pretty c
+                  return $ c' ++ "\n" ++ l'
+              )
+              ps
+          return $ "Cannot solve some metavariables:\n" ++ indentedFst (intercalate "\n" ps')
         Chain es -> do
           es' <- mapM pretty es
           return $ unlines es'
@@ -291,6 +314,15 @@ emptyCtx =
       nameList = [],
       names = M.empty
     }
+
+ensureAllProblemsSolved :: (Elab m) => m ()
+ensureAllProblemsSolved = do
+  ps <- getProblems
+  if S.null ps
+    then return ()
+    else do
+      let ps' = fmap (\p -> (p.prevError, p.loc)) ps
+      elabError $ RemainingProblems (toList ps')
 
 applySubToCtx :: (Elab m) => Sub -> m ()
 applySubToCtx sub = do
@@ -588,13 +620,16 @@ checkPrim prim = do
   return ()
 
 checkItem :: (Elab m) => PItem -> m ()
-checkItem = \case
-  PDef def -> checkDef def
-  PData dat -> checkData dat
-  PPrim prim -> checkPrim prim
-  PDataRep {} -> return () -- @@Todo
-  PDefRep {} -> return () -- @@Todo
-  PLocatedItem l i -> enterLoc l $ checkItem i
+checkItem i = do
+  r <- case i of
+    PDef def -> checkDef def
+    PData dat -> checkData dat
+    PPrim prim -> checkPrim prim
+    PDataRep {} -> return () -- @@Todo
+    PDefRep {} -> return () -- @@Todo
+    PLocatedItem l i' -> enterLoc l $ checkItem i'
+  ensureAllProblemsSolved
+  return r
 
 checkProgram :: (Elab m) => PProgram -> m ()
 checkProgram (PProgram items) = mapM_ checkItem items

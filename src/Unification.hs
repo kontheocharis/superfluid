@@ -1,7 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Unification (Unify (..), unify, CanUnify (..), UnifyError (..), unifyErrorIsMetaRelated) where
+module Unification
+  ( unifyErrorIsMetaRelated,
+    Unify (..),
+    unify,
+    CanUnify (..),
+    SolveError (..),
+    Problem (..),
+    UnifyError (..),
+    getProblems,
+  )
+where
 
 import Algebra.Lattice (Lattice (..))
 import Common
@@ -11,13 +22,15 @@ import Common
     Glob (..),
     Has,
     Lit (..),
+    Loc,
     Lvl (..),
     MetaVar,
+    Modify (modify),
     Name,
     PiMode (..),
     Spine,
     Times,
-    View (access),
+    View (..),
     lvlToIdx,
     nextLvl,
     nextLvls,
@@ -25,12 +38,14 @@ import Common
     pattern Possible,
   )
 import Control.Exception (assert)
+import Control.Monad (zipWithM, zipWithM_)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.Either (fromRight)
-import Data.Foldable (toList)
+import Data.Either (fromRight, isRight)
+import Data.Foldable (Foldable (fold), toList)
 import qualified Data.IntMap as IM
+import Data.List (intercalate)
 import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
 import Debug.Trace (trace, traceM)
@@ -57,22 +72,23 @@ import Value
     pattern VGlob,
     pattern VVar,
   )
-import Data.List (intercalate)
 
 data UnifyError
-  = InvertError (Spine VTm)
-  | DifferentSpineLengths (Spine VTm) (Spine VTm)
+  = DifferentSpineLengths (Spine VTm) (Spine VTm)
   | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
-  | OccursError MetaVar VTm
-  | EscapingVariable Lvl VTm
   | Mismatching VTm VTm
+  | SolveError SolveError
   deriving (Show)
 
 unifyErrorIsMetaRelated :: UnifyError -> Bool
-unifyErrorIsMetaRelated (InvertError _) = True
-unifyErrorIsMetaRelated (OccursError _ _) = True
-unifyErrorIsMetaRelated (EscapingVariable _ _) = True
+unifyErrorIsMetaRelated (SolveError _) = True
 unifyErrorIsMetaRelated _ = False
+
+data SolveError
+  = InvertError (Spine VTm)
+  | OccursError MetaVar VTm
+  | EscapingVariable Lvl VTm
+  deriving (Show)
 
 data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
 
@@ -85,18 +101,10 @@ instance (Eval m, Has m [Name]) => Pretty m CanUnify where
     s' <- pretty s
     return $ "can only unify if: " ++ s'
 
-instance (Eval m, Has m [Name]) => Pretty m UnifyError where
+instance (Eval m, Has m [Name]) => Pretty m SolveError where
   pretty (InvertError s) = do
     s' <- pretty s
     return $ "the arguments " ++ s' ++ " contain non-variables"
-  pretty (DifferentSpineLengths s s') = do
-    s'' <- pretty s
-    s''' <- pretty s'
-    return $ "the arguments " ++ s'' ++ " and " ++ s''' ++ " have different lengths"
-  pretty (DifferentClauses cs cs') = do
-    cs'' <- pretty cs
-    cs''' <- pretty cs'
-    return $ "the clauses " ++ cs'' ++ " and " ++ cs''' ++ " are different"
   pretty (OccursError m t) = do
     t' <- pretty t
     m' <- pretty (SMeta m [])
@@ -105,6 +113,17 @@ instance (Eval m, Has m [Name]) => Pretty m UnifyError where
     t' <- pretty t
     l' <- pretty (VNeu (VVar l))
     return $ "the variable " ++ l' ++ " in " ++ t' ++ " escapes its scope"
+
+instance (Eval m, Has m [Name]) => Pretty m UnifyError where
+  pretty (SolveError e) = pretty e
+  pretty (DifferentSpineLengths s s') = do
+    s'' <- pretty s
+    s''' <- pretty s'
+    return $ "the arguments " ++ s'' ++ " and " ++ s''' ++ " have different lengths"
+  pretty (DifferentClauses cs cs') = do
+    cs'' <- pretty cs
+    cs''' <- pretty cs'
+    return $ "the clauses " ++ cs'' ++ " and " ++ cs''' ++ " are different"
   pretty (Mismatching t t') = do
     t'' <- pretty t
     t''' <- pretty t'
@@ -124,9 +143,11 @@ instance Lattice CanUnify where
   _ /\ No xs = No xs
   Maybe x /\ Maybe y = Maybe (x <> y)
 
-class (Eval m) => Unify m
+class (Eval m, Has m (Seq Problem), Has m Loc) => Unify m
 
-invertSpine :: (Unify m) => Lvl -> Spine VTm -> ExceptT UnifyError m PRen
+type SolveT = ExceptT SolveError
+
+invertSpine :: (Unify m) => Lvl -> Spine VTm -> SolveT m PRen
 invertSpine l Empty = return $ PRen (Lvl 0) l mempty
 invertSpine l s@(sp' :|> Arg _ t) = do
   (PRen dom cod ren) <- invertSpine l sp'
@@ -135,26 +156,26 @@ invertSpine l s@(sp' :|> Arg _ t) = do
     VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' dom ren)
     _ -> throwError $ InvertError s
 
-renameSp :: (Unify m) => MetaVar -> PRen -> STm -> Spine VTm -> ExceptT UnifyError m STm
+renameSp :: (Unify m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
 renameSp m pren t Empty = return t
 renameSp m pren t (sp :|> Arg i u) = do
   xs <- renameSp m pren t sp
   ys <- rename m pren u
   return $ SApp i xs ys
 
-renameClosure :: (Unify m) => MetaVar -> PRen -> Closure -> ExceptT UnifyError m STm
+renameClosure :: (Unify m) => MetaVar -> PRen -> Closure -> SolveT m STm
 renameClosure m pren cl = do
   vt <- lift $ evalInOwnCtx pren.codSize cl
   rename m (liftPRenN cl.numVars pren) vt
 
-renamePat :: (Unify m) => MetaVar -> PRen -> VPatB -> ExceptT UnifyError m SPat
+renamePat :: (Unify m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
 renamePat m pren (VPatB p binds) = do
   let n = length binds
   p' <- rename m (liftPRenN n pren) p
   return $ SPat p' binds
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
-rename :: (Unify m) => MetaVar -> PRen -> VTm -> ExceptT UnifyError m STm
+rename :: (Unify m) => MetaVar -> PRen -> VTm -> SolveT m STm
 rename m pren tm = do
   f <- lift $ force tm
   case f of
@@ -212,15 +233,59 @@ unifyClause l (Possible p t) (Possible p' t') = do
 unifyClause l (Impossible p) (Impossible p') = unifyPat l p p'
 unifyClause _ a b = return $ No [DifferentClauses [a] [b]]
 
-handleUnifyError :: (Unify m) => ExceptT UnifyError m () -> m CanUnify
-handleUnifyError f = do
+data Problem = Problem
+  { lvl :: Lvl,
+    meta :: MetaVar,
+    spine :: Spine VTm,
+    term :: VTm,
+    loc :: Loc,
+    prevError :: SolveError
+  }
+
+addProblem :: (Unify m) => Problem -> m Int
+addProblem p = do
+  v <- getProblems
+  modify (S.|> p)
+  return $ S.length v
+
+modifyProblem :: (Unify m) => Int -> (Problem -> Problem) -> m ()
+modifyProblem i f = modify (\(p :: Seq Problem) -> S.adjust' f i p)
+
+removeProblem :: (Unify m) => Int -> m ()
+removeProblem i = modify (\(p :: Seq Problem) -> S.deleteAt i p)
+
+indexProblem :: Int -> Seq Problem -> Problem
+indexProblem i ps = S.index ps i
+
+getProblems :: (Unify m) => m (Seq Problem)
+getProblems = view
+
+solveRemainingProblems :: (Unify m) => m CanUnify
+solveRemainingProblems = do
+  ps <- getProblems
+  _ <- S.traverseWithIndex
+    ( \i p -> do
+        c <- runExceptT $ solveProblem p.lvl p.meta p.spine p.term
+        case c of
+          Left e -> return $ No [SolveError e]
+          Right () -> removeProblem i >> return Yes
+    )
+    ps
+  return Yes
+
+runSolveT :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
+runSolveT l m sp t f = do
   f' <- runExceptT f
+  loc <- view
   case f' of
-    Left e -> return $ No [e]
-    Right () -> return Yes
+    Left e -> addProblem (Problem l m sp t loc e) >> return Yes
+    Right () -> solveRemainingProblems >> return Yes
 
 unifyFlex :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-unifyFlex l m sp t = handleUnifyError $ do
+unifyFlex l m sp t = do runSolveT l m sp t $ solveProblem l m sp t
+
+solveProblem :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m ()
+solveProblem l m sp t = do
   pren <- invertSpine l sp
   rhs <- rename m pren t
   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []

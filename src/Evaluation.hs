@@ -337,6 +337,7 @@ quote l vt = do
   case vt' of
     VLam m x t -> do
       t' <- quoteClosure l t
+      traceM $ "quoted closure " ++ show t ++ " to " ++ show t'
       return $ SLam m x t'
     VPi m x ty t -> do
       ty' <- quote l ty

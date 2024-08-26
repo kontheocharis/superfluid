@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use >=>" #-}
 
 module Compiler (runCli) where
 
@@ -23,6 +25,7 @@ import Control.Monad.State.Class (gets, modify)
 import qualified Control.Monad.State.Class as ST
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Debug.Trace (trace, traceStack)
@@ -41,7 +44,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Unification (Unify)
+import Unification (Problem, Unify)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -130,7 +133,8 @@ data Compiler = Compiler
     currentLoc :: Loc,
     reduceUnderBinders :: Bool,
     lastNameIdx :: Int,
-    reduceUnfoldDefs :: Bool
+    reduceUnfoldDefs :: Bool,
+    problems :: Seq Problem
   }
 
 data CompilerError = ElabCompilerError ElabError | ParseCompilerError String
@@ -169,6 +173,14 @@ instance Eval Comp where
   setReduceUnderBinders b = ST.modify (\s -> s {reduceUnderBinders = b})
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
   setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
+
+instance View Comp (Seq Problem) where
+  view = gets (\c -> c.problems)
+
+instance Modify Comp (Seq Problem) where
+  modify f = ST.modify (\s -> s {problems = f s.problems})
+
+instance Has Comp (Seq Problem)
 
 instance Unify Comp
 
@@ -216,17 +228,13 @@ emptyCompiler =
       inPat = NotInPat,
       reduceUnderBinders = False,
       lastNameIdx = 0,
-      reduceUnfoldDefs = False
+      reduceUnfoldDefs = False,
+      problems = mempty
     }
 
 runComp :: Comp a -> Compiler -> IO ()
 runComp c s = do
-  let c' = do
-        void c
-          `catchError` ( \e -> do
-                           e' <- pretty e
-                           err e'
-                       )
+  let c' = void c `catchError` (\e -> pretty e >>= err)
   (_, _) <- runStateT (runExceptT c'.unComp) s
   return ()
 
@@ -235,6 +243,7 @@ compile :: Args -> Comp ()
 compile args = do
   case args of
     Args (CheckFile file) flags -> do
+      when flags.normalise $ setReduceUnderBinders True
       parseAndCheckPrelude
       parsed <- parseFile file
       checkProgram parsed
