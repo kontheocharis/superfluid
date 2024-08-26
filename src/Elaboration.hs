@@ -386,7 +386,6 @@ newMetaHere :: (Elab m) => Maybe Name -> m STm
 newMetaHere n = do
   bs <- accessCtx (\c -> c.bounds)
   m <- freshMetaVar n
-  traceM $ "bs for " ++ show n ++ " = " ++ show bs
   return (SMeta m bs)
 
 freshMetaHere :: (Elab m) => m STm
@@ -698,6 +697,11 @@ checkPatAgainstSubject p vs vsTy = do
   handleUnification vp.vPat vs (a /\ b)
   return $ SPat sp ns
 
+evalInOwnCtxHere :: (Elab m) => Closure -> m VTm
+evalInOwnCtxHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  evalInOwnCtx l t
+
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
   typ' <- force typ
@@ -705,10 +709,10 @@ check term typ = do
     (PLocated l t, ty) -> enterLoc l $ check t ty
     (PLam m x t, VPi m' _ a b) | m == m' -> do
       forbidPat term
-      vb <- evalInOwnCtx b
+      vb <- evalInOwnCtxHere b
       SLam m x <$> enterCtx (bind x a) (check t vb)
     (t, VPi Implicit x' a b) -> do
-      vb <- evalInOwnCtx b
+      vb <- evalInOwnCtxHere b
       SLam Implicit x' <$> enterCtx (insertedBind x' a) (check t vb)
     (PLet x a t u, ty) -> do
       forbidPat term

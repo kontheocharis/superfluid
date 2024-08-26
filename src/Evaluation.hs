@@ -226,8 +226,8 @@ closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) (reverse [0 .. n - 1
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
 extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
 
-evalInOwnCtx :: (Eval m) => Closure -> m VTm
-evalInOwnCtx cl = cl $$ closureArgs cl.numVars (length cl.env)
+evalInOwnCtx :: (Eval m) => Lvl -> Closure -> m VTm
+evalInOwnCtx l cl = cl $$ closureArgs cl.numVars l.unLvl
 
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do
@@ -280,7 +280,7 @@ eval env (SRepr m t) = do
   vRepr (envLvl env) m t'
 
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
-vAppBinds env v binds = case (env, binds) of
+vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
   (_, []) -> return v
   (x : env', Bound : binds') -> do
     v' <- vAppBinds env' v binds'
@@ -319,8 +319,9 @@ quoteHead _ (VGlobal g) = SGlobal g
 
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
-  a <- evalInOwnCtx cl
-  quote (nextLvls l cl.numVars) a
+  a <- evalInOwnCtx l cl
+  cl' <- quote (nextLvls l cl.numVars) a
+  return cl'
 
 quotePat :: (Eval m) => Lvl -> VPatB -> m SPat
 quotePat l p = do
@@ -375,7 +376,7 @@ isTypeFamily l t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx b
+      b' <- evalInOwnCtx l b
       isTypeFamily (nextLvl l) b'
     VU -> return True
     _ -> return False
@@ -385,22 +386,23 @@ isCtorTy l d t = do
   t' <- force t
   case t' of
     (VPi _ _ _ b) -> do
-      b' <- evalInOwnCtx b
+      b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
     (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
     _ -> return False
 
 unelabMeta :: (HasMetas m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
-unelabMeta _ m [] = do
-  n <- lookupMetaVarName m
-  case n of
-    Just n' -> return (PHole n', [])
-    Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
-unelabMeta (n : ns) m (Bound : bs) = do
-  (t, ts) <- unelabMeta ns m bs
-  return (t, Arg Explicit (PName n) : ts)
-unelabMeta (_ : ns) m (Defined : bs) = unelabMeta ns m bs
-unelabMeta _ _ _ = error "impossible"
+unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
+  (_, []) -> do
+    n <- lookupMetaVarName m
+    case n of
+      Just n' -> return (PHole n', [])
+      Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
+  (n : ns', Bound : bs') -> do
+    (t, ts) <- unelabMeta ns' m bs'
+    return (t, Arg Explicit (PName n) : ts)
+  (_ : ns', Defined : bs') -> unelabMeta ns' m bs'
+  _ -> error "impossible"
 
 unelabPat :: (HasMetas m) => [Name] -> SPat -> m PTm
 unelabPat _ pat = do
@@ -428,9 +430,7 @@ unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
 unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
 unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
 unelab ns (SMeta m bs) = do
-  traceM $ "unelab " ++ show ns ++ show m ++ " " ++ show bs
   (t, ts) <- unelabMeta ns m bs
-  traceM $ "unelabresult " ++ show (t, ts)
   return $ pApp t ts
 unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
 unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
@@ -462,7 +462,8 @@ instance (Eval m, Has m [Name]) => Pretty m STm where
 
 instance (Eval m, Has m [Name]) => Pretty m Closure where
   pretty cl = do
-    cl' <- evalInOwnCtx cl
+    n <- view
+    cl' <- evalInOwnCtx (Lvl (length (n :: [Name]))) cl
     pretty cl'
 
 instance (Eval m, Has m [Name]) => Pretty m VPatB where

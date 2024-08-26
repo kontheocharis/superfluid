@@ -17,11 +17,12 @@ import Common
     PiMode (..),
     Spine,
     Times,
+    View (access),
     lvlToIdx,
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, View (access),
+    pattern Possible,
   )
 import Control.Exception (assert)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
@@ -53,7 +54,8 @@ import Value
     numVars,
     subbing,
     pattern VGl,
-    pattern VVar, pattern VGlob,
+    pattern VGlob,
+    pattern VVar,
   )
 
 data UnifyError
@@ -130,7 +132,7 @@ renameSp m pren t (sp :|> Arg i u) = do
 
 renameClosure :: (Unify m) => MetaVar -> PRen -> Closure -> ExceptT UnifyError m STm
 renameClosure m pren cl = do
-  vt <- lift $ evalInOwnCtx cl
+  vt <- lift $ evalInOwnCtx pren.codSize cl
   rename m (liftPRenN cl.numVars pren) vt
 
 renamePat :: (Unify m) => MetaVar -> PRen -> VPatB -> ExceptT UnifyError m SPat
@@ -165,7 +167,7 @@ rename m pren tm = do
       b' <- renameClosure m pren b
       return $ SPi i x a' b'
     VU -> return SU
-    VGlob g sp -> renameSp m pren (SGlobal g) sp
+    VNeu (VApp (VGlobal g) sp) -> renameSp m pren (SGlobal g) sp
     VLit lit -> SLit <$> traverse (rename m pren) lit
 
 unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
@@ -237,15 +239,15 @@ unifyLit l a t = case t of
 
 unifyClosure :: (Unify m) => Lvl -> Closure -> Closure -> m CanUnify
 unifyClosure l cl1 cl2 = do
-  t1 <- evalInOwnCtx cl1
-  t2 <- evalInOwnCtx cl2
+  t1 <- evalInOwnCtx l cl1
+  t2 <- evalInOwnCtx l cl2
   if cl1.numVars == cl2.numVars
     then unify (nextLvls l cl1.numVars) t1 t2
     else error "unifyClosure: different number of variables"
 
 etaConvert :: (Unify m) => Lvl -> VTm -> PiMode -> Closure -> m CanUnify
 etaConvert l t m c = do
-  x <- evalInOwnCtx c
+  x <- evalInOwnCtx l c
   x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
   unify (nextLvl l) x x'
 
