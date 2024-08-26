@@ -42,7 +42,7 @@ data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataG
 
 data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal]}
 
-data DefGlobalInfo = DefGlobalInfo {ty :: VTy, tm :: Maybe VTm} -- might not be set yet if
+data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet if
 
 newtype PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
 
@@ -112,7 +112,7 @@ globalInfoToTm n i = case i of
   PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
-unfoldDef g sig = (getDefGlobal g sig).tm
+unfoldDef g sig = (getDefGlobal g sig).vtm
 
 getDataRepr :: DataGlobal -> Sig -> VTm
 getDataRepr g sig = case M.lookup g.globalName sig.repr of

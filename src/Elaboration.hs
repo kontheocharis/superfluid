@@ -102,8 +102,9 @@ import Unification
     UnifyError (..),
     getProblems,
     loc,
+    prevErrorString,
     unify,
-    unifyErrorIsMetaRelated, prevErrorString,
+    unifyErrorIsMetaRelated,
   )
 import Value
   ( Closure (..),
@@ -573,9 +574,12 @@ inferName n =
 checkDef :: (Elab m) => PDef -> m ()
 checkDef def = do
   ty' <- check def.ty VU >>= evalHere
-  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing)) def.tags)
-  tm' <- check def.tm ty' >>= evalHere
-  modify (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just tm'}))
+  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing Nothing)) def.tags)
+  tm' <- check def.tm ty'
+  vtm <- evalHere tm'
+  b <- normaliseProgram
+  stm <- if b then quote (Lvl 0) vtm else return tm'
+  modify (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just stm, vtm = Just vtm}))
   return ()
 
 checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()

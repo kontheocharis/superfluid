@@ -75,8 +75,8 @@ import Value
   )
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
-  reduceUnderBinders :: m Bool
-  setReduceUnderBinders :: Bool -> m ()
+  normaliseProgram :: m Bool
+  setNormaliseProgram :: Bool -> m ()
 
   reduceUnfoldDefs :: m Bool
   setReduceUnfoldDefs :: Bool -> m ()
@@ -379,20 +379,26 @@ isCtorTy l d t = do
     (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
     _ -> return False
 
-unelabMeta :: (HasMetas m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
+unelabMeta :: (Eval m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
 unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
   (_, []) -> do
-    n <- lookupMetaVarName m
-    case n of
-      Just n' -> return (PHole n', [])
-      Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
+    mt <- lookupMetaVar m
+    case mt of
+      Just t -> do
+        t' <- quote (Lvl (length ns)) t >>= unelab ns
+        return (t', [])
+      Nothing -> do
+        n <- lookupMetaVarName m
+        case n of
+          Just n' -> return (PHole n', [])
+          Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
   (n : ns', Bound : bs') -> do
     (t, ts) <- unelabMeta ns' m bs'
     return (t, Arg Explicit (PName n) : ts)
   (_ : ns', Defined : bs') -> unelabMeta ns' m bs'
   _ -> error "impossible"
 
-unelabPat :: (HasMetas m) => [Name] -> SPat -> m PTm
+unelabPat :: (Eval m) => [Name] -> SPat -> m PTm
 unelabPat _ pat = do
   (n, _) <- runStateT (unelabPat' pat.asTm) pat.binds
   return n
@@ -413,10 +419,10 @@ unelabPat _ pat = do
           )
       _ -> error "impossible"
 
-unelabValue :: (Eval m, HasMetas m) => [Name] -> VTm -> m PTm
+unelabValue :: (Eval m) => [Name] -> VTm -> m PTm
 unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns
 
-unelab :: (HasMetas m) => [Name] -> STm -> m PTm
+unelab :: (Eval m) => [Name] -> STm -> m PTm
 unelab ns = \case
   (SPi m x a b) -> PPi m x <$> unelab ns a <*> unelab (x : ns) b
   (SLam m x t) -> PLam m x <$> unelab (x : ns) t
@@ -469,7 +475,7 @@ unelabSig = do
     unelabDef :: (Eval m) => Name -> DefGlobalInfo -> Set Tag -> m PDef
     unelabDef n d ts = do
       ty' <- unelabValue [] d.ty
-      body' <- traverse (unelabValue []) d.tm
+      body' <- traverse (unelab []) d.tm
       return $ MkPDef n ty' (fromMaybe PWild body') ts
 
     unelabPrim :: (Eval m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim

@@ -131,7 +131,7 @@ data Compiler = Compiler
     sig :: Sig,
     inPat :: InPat,
     currentLoc :: Loc,
-    reduceUnderBinders :: Bool,
+    normaliseProgram :: Bool,
     lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool,
     problems :: Seq Problem
@@ -169,8 +169,8 @@ instance HasNameSupply Comp where
     return . Name $ "x" ++ show n
 
 instance Eval Comp where
-  reduceUnderBinders = gets (\c -> c.reduceUnderBinders)
-  setReduceUnderBinders b = ST.modify (\s -> s {reduceUnderBinders = b})
+  normaliseProgram = gets (\c -> c.normaliseProgram)
+  setNormaliseProgram b = ST.modify (\s -> s {normaliseProgram = b})
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
   setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
 
@@ -226,7 +226,7 @@ emptyCompiler =
       sig = emptySig,
       currentLoc = NoLoc,
       inPat = NotInPat,
-      reduceUnderBinders = False,
+      normaliseProgram = False,
       lastNameIdx = 0,
       reduceUnfoldDefs = False,
       problems = mempty
@@ -243,7 +243,7 @@ compile :: Args -> Comp ()
 compile args = do
   case args of
     Args (CheckFile file) flags -> do
-      when flags.normalise $ setReduceUnderBinders True
+      when flags.normalise $ setNormaliseProgram True
       parseAndCheckPrelude
       parsed <- parseFile file
       checkProgram parsed
