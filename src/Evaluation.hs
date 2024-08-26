@@ -15,6 +15,7 @@ module Evaluation
     vApp,
     vRepr,
     evalPat,
+    unelabSig,
     vLams,
     uniqueVLams,
     evalInOwnCtx,
@@ -22,32 +23,7 @@ module Evaluation
   )
 where
 
-import Common
-  ( Arg (..),
-    Clause (..),
-    CtorGlobal (..),
-    DataGlobal,
-    Glob (..),
-    Has (..),
-    HasNameSupply (..),
-    Idx (..),
-    Lvl (..),
-    MetaVar,
-    Name (..),
-    PiMode (..),
-    Spine,
-    Times (..),
-    View (..),
-    globName,
-    inv,
-    lvlToIdx,
-    mapSpineM,
-    nextLvl,
-    nextLvls,
-    unMetaVar,
-    pattern Impossible,
-    pattern Possible,
-  )
+import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), Glob (..), Has (..), HasNameSupply (..), Idx (..), Lvl (..), MetaVar, Name (..), PiMode (..), Spine, Tag, Times (..), View (..), globName, inv, lvlToIdx, mapSpineM, nextLvl, nextLvls, unMetaVar, pattern Impossible, pattern Possible)
 import Control.Arrow ((***))
 import Control.Monad (foldM)
 import Control.Monad.Extra (concatMapM)
@@ -57,13 +33,29 @@ import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import qualified Data.IntMap as IM
 import Data.List.Extra (firstJust, intercalate)
-import Data.Maybe (fromMaybe)
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Map as M
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
+import Data.Set (Set)
 import Debug.Trace (trace, traceM)
-import Globals (Sig, getCaseRepr, getGlobalRepr)
+import Globals
+  ( CtorGlobalInfo (..),
+    DataGlobalInfo (..),
+    DefGlobalInfo (..),
+    GlobalInfo (..),
+    PrimGlobalInfo (..),
+    Sig (..),
+    getCaseRepr,
+    getCtorGlobal,
+    getGlobal,
+    getGlobalRepr,
+    getGlobalTags,
+    lookupGlobal,
+  )
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
-import Presyntax (PTm (..), pApp)
+import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
 import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
 import Value
@@ -80,7 +72,6 @@ import Value
     pattern VMeta,
     pattern VVar,
   )
-import qualified Data.List.NonEmpty as NE
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   reduceUnderBinders :: m Bool
@@ -427,6 +418,9 @@ unelabPat _ pat = do
           )
       _ -> error "impossible"
 
+unelabValue :: (Eval m, HasMetas m) => [Name] -> VTm -> m PTm
+unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns
+
 unelab :: (HasMetas m) => [Name] -> STm -> m PTm
 unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
 unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
@@ -450,6 +444,55 @@ unelab _ SU = return PU
 unelab _ (SGlobal g) = return $ PName (globName g)
 unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
 unelab ns (SRepr m t) = PRepr m <$> unelab ns t
+
+unelabSig :: (Eval m) => m PProgram
+unelabSig = do
+  s <- view
+  unelabSig' s
+  where
+    unelabData :: (Eval m) => Name -> DataGlobalInfo -> Set Tag -> m PData
+    unelabData n d ts = do
+      sig <- view
+      ty' <- unelabValue [] d.ty
+      ctors' <-
+        mapM
+          ( \n' ->
+              unelabCtor
+                n'.globalName
+                (getCtorGlobal n' sig)
+                (getGlobalTags n'.globalName sig)
+          )
+          d.ctors
+      return $ MkPData n ty' ctors' ts
+
+    unelabCtor :: (Eval m) => Name -> CtorGlobalInfo -> Set Tag -> m PCtor
+    unelabCtor n c ts = do
+      ty' <- unelabValue [] c.ty
+      return $ MkPCtor n ty' ts
+
+    unelabDef :: (Eval m) => Name -> DefGlobalInfo -> Set Tag -> m PDef
+    unelabDef n d ts = do
+      ty' <- unelabValue [] d.ty
+      body' <- traverse (unelabValue []) d.tm
+      return $ MkPDef n ty' (fromMaybe PWild body') ts
+
+    unelabPrim :: (Eval m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
+    unelabPrim n p ts = do
+      ty' <- unelabValue [] p.ty
+      return $ MkPPrim n ty' ts
+
+    unelabSig' :: (Eval m) => Sig -> m PProgram
+    unelabSig' s =
+      PProgram
+        <$> concatMapM
+          ( \n -> do
+              case (getGlobal n s, getGlobalTags n s) of
+                (DataInfo d, ts) -> (: []) . PData <$> unelabData n d ts
+                (DefInfo d, ts) -> (: []) . PDef <$> unelabDef n d ts
+                (CtorInfo _, _) -> return []
+                (PrimInfo p, ts) -> (: []) . PPrim <$> unelabPrim n p ts
+          )
+          s.nameOrder
 
 instance (Eval m, Has m [Name]) => Pretty m VTm where
   pretty v = do

@@ -12,6 +12,8 @@ module Globals
     getCtorGlobal,
     getDefGlobal,
     unfoldDef,
+    getGlobal,
+    getGlobalTags,
     modifyDefItem,
     getDataRepr,
     getGlobalRepr,
@@ -29,9 +31,10 @@ module Globals
   )
 where
 
-import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal (DefGlobal), Glob (..), Name (..), PrimGlobal (..), globalName)
+import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal (DefGlobal), Glob (..), Name (..), PrimGlobal (..), Tag, globalName)
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Set
 import Syntax (STm (..))
 import Value (VTm (..), VTy)
 
@@ -41,21 +44,28 @@ data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal]}
 
 data DefGlobalInfo = DefGlobalInfo {ty :: VTy, tm :: Maybe VTm} -- might not be set yet if
 
-data PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
+newtype PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
 
 data GlobalInfo = DataInfo DataGlobalInfo | CtorInfo CtorGlobalInfo | DefInfo DefGlobalInfo | PrimInfo PrimGlobalInfo
 
 data Sig = Sig
   { contents :: Map Name GlobalInfo,
+    nameOrder :: [Name],
+    tags :: Map Name (Set Tag),
     repr :: Map Name VTm,
     reprCase :: Map Name VTm
   }
 
 emptySig :: Sig
-emptySig = Sig M.empty M.empty M.empty
+emptySig = Sig M.empty [] M.empty M.empty M.empty
 
-addItem :: Name -> GlobalInfo -> Sig -> Sig
-addItem n i s = s {contents = M.insert n i s.contents}
+addItem :: Name -> GlobalInfo -> Set Tag -> Sig -> Sig
+addItem n i ts s =
+  s
+    { contents = M.insert n i s.contents,
+      nameOrder = s.nameOrder ++ [n],
+      tags = M.insert n ts s.tags
+    }
 
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
 modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}
@@ -80,6 +90,16 @@ getDefGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (DefInfo info) -> info
   Just _ -> error "getDefGlobal: not a def global"
   _ -> error "getDefGlobal: not a global"
+
+getGlobal :: Name -> Sig -> GlobalInfo
+getGlobal n sig = case M.lookup n sig.contents of
+  Just i -> i
+  Nothing -> error $ "getGlobal: no global named " ++ show n
+
+getGlobalTags :: Name -> Sig -> Set Tag
+getGlobalTags n sig = case M.lookup n sig.tags of
+  Just t -> t
+  Nothing -> error $ "getGlobalTags: no tags for global " ++ show n
 
 lookupGlobal :: Name -> Sig -> Maybe GlobalInfo
 lookupGlobal n sig = M.lookup n sig.contents

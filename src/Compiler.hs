@@ -27,7 +27,7 @@ import Data.String
 import Data.Text.IO (hPutStrLn)
 import Debug.Trace (trace, traceStack)
 import Elaboration (Ctx, Elab (..), ElabError, InPat (NotInPat), checkProgram, emptyCtx)
-import Evaluation (Eval (..))
+import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
 import Options.Applicative (execParser, (<**>), (<|>))
@@ -239,7 +239,8 @@ compile args = do
       parsed <- parseFile file
       checkProgram parsed
       when flags.verbose $ msg "\nTypechecked program successfully"
-    -- when flags.dump $ msg $ printVal checked
+      prog <- unelabSig >>= pretty
+      when flags.dump $ msg prog
     Args (ParseFile file) flags -> do
       parsed <- parseFile file
       when flags.verbose $ msg $ "Parsing file " ++ file

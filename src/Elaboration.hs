@@ -557,7 +557,7 @@ inferName n =
 checkDef :: (Elab m) => PDef -> m ()
 checkDef def = do
   ty' <- check def.ty VU >>= evalHere
-  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing)))
+  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing)) def.tags)
   tm' <- check def.tm ty' >>= evalHere
   modify (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just tm'}))
   return ()
@@ -567,7 +567,7 @@ checkCtor dat idx ctor = do
   ty' <- check ctor.ty VU >>= evalHere
   i <- getLvl >>= (\l -> isCtorTy l dat ty')
   unless i (elabError $ InvalidCtorType ty')
-  modify (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)))
+  modify (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)) ctor.tags)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
 
 getLvl :: (Elab m) => m Lvl
@@ -578,13 +578,13 @@ checkData dat = do
   ty' <- check dat.ty VU >>= evalHere
   i <- getLvl >>= (`isTypeFamily` ty')
   unless i (elabError $ InvalidDataFamily ty')
-  modify (addItem dat.name (DataInfo (DataGlobalInfo ty' [])))
+  modify (addItem dat.name (DataInfo (DataGlobalInfo ty' [])) dat.tags)
   zipWithM_ (checkCtor (DataGlobal dat.name)) [0 ..] dat.ctors
 
 checkPrim :: (Elab m) => PPrim -> m ()
 checkPrim prim = do
   ty' <- check prim.ty VU >>= evalHere
-  modify (addItem prim.name (PrimInfo (PrimGlobalInfo ty')))
+  modify (addItem prim.name (PrimInfo (PrimGlobalInfo ty')) prim.tags)
   return ()
 
 checkItem :: (Elab m) => PItem -> m ()
