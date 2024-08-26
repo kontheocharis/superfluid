@@ -238,9 +238,8 @@ unifyClause _ a b = return $ No [DifferentClauses [a] [b]]
 data Problem = Problem
   { lvl :: Lvl,
     names :: [Name],
-    meta :: MetaVar,
-    spine :: Spine VTm,
-    term :: VTm,
+    lhs :: VTm,
+    rhs :: VTm,
     loc :: Loc,
     prevErrorString :: String
   }
@@ -269,10 +268,11 @@ solveRemainingProblems = do
   _ <-
     S.traverseWithIndex
       ( \i p -> do
-          c <- runExceptT $ solveProblem p.lvl p.meta p.spine p.term
+          c <- unify p.lvl p.lhs p.rhs
           case c of
-            Left _ -> return $ No [PrevError p.prevErrorString]
-            Right () -> removeProblem i >> return Yes
+            No e | all unifyErrorIsMetaRelated e -> return $ Yes
+            No _ -> return $ No [PrevError p.prevErrorString] -- @@Todo: keep new error
+            Yes -> removeProblem i >> return Yes
       )
       ps
   return Yes
@@ -285,13 +285,12 @@ runSolveT l m sp t f = do
   case f' of
     Left e -> do
       e' <- pretty e
-      addProblem
+      addProblem -- not if it is there already ??
         ( Problem
             { lvl = l,
               names = ns,
-              meta = m,
-              spine = sp,
-              term = t,
+              lhs = VNeu (VApp (VFlex m) sp),
+              rhs = t,
               loc = loc,
               prevErrorString = e' -- this is a hack
             }
@@ -300,14 +299,18 @@ runSolveT l m sp t f = do
     Right () -> solveRemainingProblems >> return Yes
 
 unifyFlex :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-unifyFlex l m sp t = runSolveT l m sp t $ solveProblem l m sp t
-
-solveProblem :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m ()
-solveProblem l m sp t = do
+unifyFlex l m sp t = runSolveT l m sp t $ do
   pren <- invertSpine l sp
   rhs <- rename m pren t
   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
+
+-- solveProblem :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
+-- solveProblem l m sp t = do
+--   pren <- invertSpine l sp
+--   rhs <- rename m pren t
+--   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
+--   lift $ solveMetaVar m solution
 
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid l x Empty t = return $ Maybe (subbing l x t)
