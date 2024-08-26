@@ -102,9 +102,8 @@ import Unification
     UnifyError (..),
     getProblems,
     loc,
-    prevError,
     unify,
-    unifyErrorIsMetaRelated,
+    unifyErrorIsMetaRelated, prevErrorString,
   )
 import Value
   ( Closure (..),
@@ -129,7 +128,7 @@ data ElabError
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern PTm
-  | RemainingProblems [(SolveError, Loc)]
+  | RemainingProblems [(UnifyError, Loc)]
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm [UnifyError]
@@ -321,7 +320,7 @@ ensureAllProblemsSolved = do
   if S.null ps
     then return ()
     else do
-      let ps' = fmap (\p -> (p.prevError, p.loc)) ps
+      let ps' = fmap (\p -> (PrevError p.prevErrorString, p.loc)) ps
       elabError $ RemainingProblems (toList ps')
 
 applySubToCtx :: (Elab m) => Sub -> m ()
@@ -355,21 +354,6 @@ bind x ty ctx =
       bounds = Bound : ctx.bounds,
       names = M.insert x ctx.lvl ctx.names,
       nameList = x : ctx.nameList
-    }
-
-pop :: Ctx -> Ctx
-pop = popN 1
-
-popN :: Int -> Ctx -> Ctx
-popN 0 ctx = ctx
-popN n ctx =
-  ctx
-    { env = drop n ctx.env,
-      lvl = Lvl (ctx.lvl.unLvl - n),
-      types = drop n ctx.types,
-      bounds = drop n ctx.bounds,
-      names = M.fromList $ zip (drop n ctx.nameList) (map Lvl [0 ..]),
-      nameList = drop n ctx.nameList
     }
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx

@@ -20,7 +20,7 @@ import Common
     Clause (..),
     DefGlobal,
     Glob (..),
-    Has,
+    Has (..),
     Lit (..),
     Loc,
     Lvl (..),
@@ -32,6 +32,7 @@ import Common
     Times,
     View (..),
     lvlToIdx,
+    mapSpineM,
     nextLvl,
     nextLvls,
     pattern Impossible,
@@ -49,7 +50,7 @@ import Data.List (intercalate)
 import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
 import Debug.Trace (trace, traceM)
-import Evaluation (Eval, eval, evalInOwnCtx, force, vApp, ($$))
+import Evaluation (Eval, eval, evalInOwnCtx, force, quote, quoteSpine, vApp, ($$))
 import Globals (KnownGlobal (..), knownCtor, knownData, unfoldDef)
 import Literals (unfoldLit)
 import Meta (solveMetaVar)
@@ -78,6 +79,7 @@ data UnifyError
   | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
   | Mismatching VTm VTm
   | SolveError SolveError
+  | PrevError String
   deriving (Show)
 
 unifyErrorIsMetaRelated :: UnifyError -> Bool
@@ -87,7 +89,7 @@ unifyErrorIsMetaRelated _ = False
 data SolveError
   = InvertError (Spine VTm)
   | OccursError MetaVar VTm
-  | EscapingVariable Lvl VTm
+  | EscapingVariable VTm
   deriving (Show)
 
 data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
@@ -109,10 +111,9 @@ instance (Eval m, Has m [Name]) => Pretty m SolveError where
     t' <- pretty t
     m' <- pretty (SMeta m [])
     return $ "the meta-variable " ++ m' ++ " occurs in " ++ t'
-  pretty (EscapingVariable l t) = do
+  pretty (EscapingVariable t) = do
     t' <- pretty t
-    l' <- pretty (VNeu (VVar l))
-    return $ "the variable " ++ l' ++ " in " ++ t' ++ " escapes its scope"
+    return $ "a variable is missing from " ++ t'
 
 instance (Eval m, Has m [Name]) => Pretty m UnifyError where
   pretty (SolveError e) = pretty e
@@ -128,6 +129,7 @@ instance (Eval m, Has m [Name]) => Pretty m UnifyError where
     t'' <- pretty t
     t''' <- pretty t'
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
+  pretty (PrevError e) = return e
 
 instance Lattice CanUnify where
   Yes \/ _ = Yes
@@ -143,7 +145,7 @@ instance Lattice CanUnify where
   _ /\ No xs = No xs
   Maybe x /\ Maybe y = Maybe (x <> y)
 
-class (Eval m, Has m (Seq Problem), Has m Loc) => Unify m
+class (Eval m, Has m (Seq Problem), Has m Loc, Has m [Name]) => Unify m
 
 type SolveT = ExceptT SolveError
 
@@ -157,7 +159,7 @@ invertSpine l s@(sp' :|> Arg _ t) = do
     _ -> throwError $ InvertError s
 
 renameSp :: (Unify m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
-renameSp m pren t Empty = return t
+renameSp _ _ t Empty = return t
 renameSp m pren t (sp :|> Arg i u) = do
   xs <- renameSp m pren t sp
   ys <- rename m pren u
@@ -183,7 +185,7 @@ rename m pren tm = do
       | m == m' -> throwError $ OccursError m tm
       | otherwise -> renameSp m pren (SMeta m' []) sp
     VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
-      Nothing -> throwError $ EscapingVariable (Lvl x) tm
+      Nothing -> throwError $ EscapingVariable tm
       Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (VNeu (VApp h Empty))
@@ -235,11 +237,12 @@ unifyClause _ a b = return $ No [DifferentClauses [a] [b]]
 
 data Problem = Problem
   { lvl :: Lvl,
+    names :: [Name],
     meta :: MetaVar,
     spine :: Spine VTm,
     term :: VTm,
     loc :: Loc,
-    prevError :: SolveError
+    prevErrorString :: String
   }
 
 addProblem :: (Unify m) => Problem -> m Int
@@ -263,26 +266,41 @@ getProblems = view
 solveRemainingProblems :: (Unify m) => m CanUnify
 solveRemainingProblems = do
   ps <- getProblems
-  _ <- S.traverseWithIndex
-    ( \i p -> do
-        c <- runExceptT $ solveProblem p.lvl p.meta p.spine p.term
-        case c of
-          Left e -> return $ No [SolveError e]
-          Right () -> removeProblem i >> return Yes
-    )
-    ps
+  _ <-
+    S.traverseWithIndex
+      ( \i p -> do
+          c <- runExceptT $ solveProblem p.lvl p.meta p.spine p.term
+          case c of
+            Left _ -> return $ No [PrevError p.prevErrorString]
+            Right () -> removeProblem i >> return Yes
+      )
+      ps
   return Yes
 
 runSolveT :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT l m sp t f = do
   f' <- runExceptT f
+  ns <- view
   loc <- view
   case f' of
-    Left e -> addProblem (Problem l m sp t loc e) >> return Yes
+    Left e -> do
+      e' <- pretty e
+      addProblem
+        ( Problem
+            { lvl = l,
+              names = ns,
+              meta = m,
+              spine = sp,
+              term = t,
+              loc = loc,
+              prevErrorString = e' -- this is a hack
+            }
+        )
+        >> return Yes
     Right () -> solveRemainingProblems >> return Yes
 
 unifyFlex :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
-unifyFlex l m sp t = do runSolveT l m sp t $ solveProblem l m sp t
+unifyFlex l m sp t = runSolveT l m sp t $ solveProblem l m sp t
 
 solveProblem :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m ()
 solveProblem l m sp t = do

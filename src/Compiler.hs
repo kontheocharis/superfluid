@@ -248,13 +248,11 @@ compile args = do
       parsed <- parseFile file
       checkProgram parsed
       when flags.verbose $ msg "\nTypechecked program successfully"
-      prog <- unelabSig >>= pretty
-      when flags.dump $ msg prog
+      when flags.dump $ unelabSig >>= pretty >>= msg
     Args (ParseFile file) flags -> do
       parsed <- parseFile file
       when flags.verbose $ msg $ "Parsing file " ++ file
-      printed <- pretty parsed
-      when flags.dump . msg $ printed
+      when flags.dump $ pretty parsed >>= msg
     Args (RepresentFile file) flags -> error "unimplemented"
     -- represented <- andPotentiallyNormalise flags <$> representFile file
     -- when flags.verbose $ msg "\nTypechecked and represented program successfully"

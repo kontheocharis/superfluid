@@ -209,8 +209,8 @@ instance (Monad m) => Pretty m PTm where
     return $ "(" ++ pt1 ++ ", " ++ pt2 ++ ")"
   pretty t@(PApp {}) = do
     let (x, xs) = pAppToList t
-    px <- pretty x
-    pxs <- mapM pretty xs
+    px <- singlePretty x
+    pxs <- mapM singlePretty xs
     return $ px ++ " " ++ intercalate " " pxs
   pretty l@(PLet {}) = prettyLets (pLetToList l)
   pretty (PCase t cs) = do

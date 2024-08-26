@@ -15,6 +15,7 @@ module Evaluation
     vApp,
     vRepr,
     evalPat,
+    quoteSpine,
     unelabSig,
     vLams,
     uniqueVLams,
@@ -205,13 +206,7 @@ vRepr l m (VNeu (VReprApp m' v sp)) = do
       return $ VNeu (VReprApp mm' v sp')
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
-close n env t = do
-  b <- reduceUnderBinders
-  if b
-    then do
-      t' <- nf (extendEnvByNVars n env) t
-      return $ Closure n env t'
-    else return $ Closure n env t
+close n env t = return $ Closure n env t
 
 closureArgs :: Int -> Int -> [VTm]
 closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) (reverse [0 .. n - 1])
@@ -337,7 +332,6 @@ quote l vt = do
   case vt' of
     VLam m x t -> do
       t' <- quoteClosure l t
-      traceM $ "quoted closure " ++ show t ++ " to " ++ show t'
       return $ SLam m x t'
     VPi m x ty t -> do
       ty' <- quote l ty
@@ -423,28 +417,29 @@ unelabValue :: (Eval m, HasMetas m) => [Name] -> VTm -> m PTm
 unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns
 
 unelab :: (HasMetas m) => [Name] -> STm -> m PTm
-unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
-unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
-unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
-unelab ns (SMeta m bs) = do
-  (t, ts) <- unelabMeta ns m bs
-  return $ pApp t ts
-unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
-unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
-unelab ns (SCase _ t cs) =
-  PCase
-    <$> unelab ns t
-    <*> mapM
-      ( \c ->
-          Clause
-            <$> unelabPat ns c.pat
-            <*> traverse (unelab (reverse c.pat.binds ++ ns)) c.branch
-      )
-      cs
-unelab _ SU = return PU
-unelab _ (SGlobal g) = return $ PName (globName g)
-unelab ns (SLit l) = PLit <$> traverse (unelab ns) l
-unelab ns (SRepr m t) = PRepr m <$> unelab ns t
+unelab ns = \case
+  (SPi m x a b) -> PPi m x <$> unelab ns a <*> unelab (x : ns) b
+  (SLam m x t) -> PLam m x <$> unelab (x : ns) t
+  (SLet x ty t u) -> PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+  (SMeta m bs) -> do
+    (t, ts) <- unelabMeta ns m bs
+    return $ pApp t ts
+  (SVar i) -> return $ PName (ns !! i.unIdx)
+  (SApp m t u) -> PApp m <$> unelab ns t <*> unelab ns u
+  (SCase _ t cs) ->
+    PCase
+      <$> unelab ns t
+      <*> mapM
+        ( \c ->
+            Clause
+              <$> unelabPat ns c.pat
+              <*> traverse (unelab (reverse c.pat.binds ++ ns)) c.branch
+        )
+        cs
+  SU -> return PU
+  (SGlobal g) -> return $ PName (globName g)
+  (SLit l) -> PLit <$> traverse (unelab ns) l
+  (SRepr m t) -> PRepr m <$> unelab ns t
 
 unelabSig :: (Eval m) => m PProgram
 unelabSig = do
@@ -499,7 +494,7 @@ instance (Eval m, Has m [Name]) => Pretty m VTm where
   pretty v = do
     n <- view
     q <- quote (Lvl (length n)) v
-    return q >>= unelab n >>= pretty
+    unelab n q >>= pretty
 
 instance (Eval m, Has m [Name]) => Pretty m STm where
   pretty t = do

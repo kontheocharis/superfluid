@@ -22,9 +22,11 @@
 --   }
 -- }
 
+
+
 def main : Unit -> Unit {
-  let y = tt;
-  \_ => (\x => x) y
+  let y : Nat -> Sigma Nat (\_ => Nat) = (\x => pair [Nat] [?h2] x x);
+  \_ => tt
 }
 
 
