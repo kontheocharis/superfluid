@@ -50,6 +50,7 @@ import Common
   )
 import Control.Arrow ((***))
 import Control.Monad (foldM)
+import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT (..), modify)
 import Control.Monad.State.Class (MonadState (..), gets)
 import Control.Monad.Trans (MonadTrans (..))
@@ -79,6 +80,7 @@ import Value
     pattern VMeta,
     pattern VVar,
   )
+import qualified Data.List.NonEmpty as NE
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   reduceUnderBinders :: m Bool
@@ -473,11 +475,11 @@ instance (Eval m, Has m [Name]) => Pretty m Sub where
   pretty sub = do
     let l = IM.size sub.vars
     vars <-
-      mapM
+      concatMapM
         ( \(x, v) -> do
             l' <- pretty (VNeu (VVar (Lvl x)))
-            v' <- pretty v
-            return $ l' <> " = " <> v'
+            v' <- mapM pretty (NE.toList v)
+            return $ map (\v'' -> l' <> " = " <> v'') v'
         )
         (IM.toList sub.vars)
     return $ intercalate ", " vars

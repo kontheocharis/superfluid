@@ -51,6 +51,7 @@ import Control.Monad.Trans (MonadTrans (..))
 import qualified Data.IntMap as IM
 import Data.Kind (Constraint)
 import Data.List (intercalate, zipWith4, zipWith5)
+import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
@@ -119,7 +120,7 @@ data ElabError
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm [UnifyError]
-  | InvalidCaseSubject PTm
+  | InvalidCaseSubject PTm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType VTy
   | DuplicateItem Name
@@ -167,9 +168,10 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
           p' <- pretty p
           t' <- intercalate "\n" <$> mapM pretty t
           return $ "Impossible case: " <> p' <> "\n" <> indentedFst t'
-        InvalidCaseSubject t -> do
+        InvalidCaseSubject t ty -> do
           t' <- pretty t
-          return $ "Invalid case subject: " <> t'
+          ty' <- pretty ty
+          return $ "Invalid case subject: " <> t' <> " : " <> ty'
         InvalidDataFamily t -> do
           t' <- pretty t
           return $ "Invalid data family type: " <> t'
@@ -293,25 +295,23 @@ emptyCtx =
 applySubToCtx :: (Elab m) => Sub -> m ()
 applySubToCtx sub = do
   c <- getCtx
-  let (env', bounds') = replaceVars (c.lvl.unLvl - 1) (c.env, c.bounds)
-
-  -- for each level i = 0 to l-1 of env', evaluate (env' !! i) in context [0..i-1]
-  -- gather the results in env''
-  -- env'' <- mapM (\i -> resolve (take i env') (env' !! i)) [0..(c.lvl.unLvl - 1)]
-
-  -- modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
+  let (env', bounds', ss) = replaceVars (c.lvl.unLvl - 1) (c.env, c.bounds)
   modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
+  sequence_ ss
   where
-    replaceVars :: Int -> (Env VTm, Bounds) -> (Env VTm, Bounds)
-    replaceVars _ ([], []) = ([], [])
+    replaceVars :: (Elab m) => Int -> (Env VTm, Bounds) -> (Env VTm, Bounds, [m ()])
+    replaceVars _ ([], []) = ([], [], [])
     replaceVars startingAt (v : vs, b : bs) =
-      let (vs', bs') = replaceVars (startingAt - 1) (vs, bs)
+      let (vs', bs', ss) = replaceVars (startingAt - 1) (vs, bs)
        in let res = IM.lookup startingAt sub.vars
-           in ( fromMaybe v res : vs',
-                case res of
-                  Just _ -> Defined : bs'
-                  Nothing -> b : bs'
-              )
+           in case res of
+                Nothing -> (v : vs', b : bs', ss)
+                Just v' ->
+                  ( NE.head v' : vs',
+                    Defined : bs',
+                    ss
+                      ++ map (unifyHere v) (NE.toList v')
+                  )
     replaceVars _ _ = error "impossible"
 
 bind :: Name -> VTy -> Ctx -> Ctx
@@ -366,10 +366,10 @@ inferMetaHere n = do
   m <- checkMetaHere n vty
   return (m, vty)
 
-prettyGoal :: (Elab m) => Name -> VTy -> m String
+prettyGoal :: (Elab m) => STm -> VTy -> m String
 prettyGoal n ty = do
   c <- getCtx >>= pretty
-  n' <- pretty (PHole n)
+  n' <- pretty n
   ty' <- pretty ty
   let g = n' ++ " : " ++ ty'
   return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
@@ -378,7 +378,7 @@ checkMetaHere :: (Elab m) => Maybe Name -> VTy -> m STm
 checkMetaHere n ty = do
   m <- newMetaHere n
   case n of
-    Just n' -> prettyGoal n' ty >>= showMessage
+    Just _ -> prettyGoal m ty >>= showMessage
     Nothing -> return ()
   return m
 
@@ -668,7 +668,7 @@ checkCase :: (Elab m) => PTm -> [Clause PTm PTm] -> VTy -> m STm
 checkCase s cs retTy = do
   (ss, vsTy) <- infer s
   vs <- evalHere ss
-  d <- ifIsData vsTy return (elabError $ InvalidCaseSubject s)
+  d <- ifIsData vsTy return (elabError $ InvalidCaseSubject s vsTy)
   scs <-
     mapM
       ( \c -> enterCtx id $ case c of

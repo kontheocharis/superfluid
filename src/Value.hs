@@ -28,11 +28,13 @@ where
 import Common (Arg (..), Clause, DataGlobal, Glob, HasNameSupply (..), Lit, Lvl (..), MetaVar, Name, PiMode, Spine, Times, WithNames (..), nextLvl, unLvl)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
 import Printing (Pretty (..))
 import Syntax (STm, sLams)
 
-data Sub = Sub {lvl :: Lvl, vars :: IntMap VTm} deriving (Show)
+data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 
 isEmptySub :: Sub -> Bool
 isEmptySub s = IM.null s.vars
@@ -41,12 +43,10 @@ emptySub :: Sub
 emptySub = Sub (Lvl 0) IM.empty
 
 subbing :: Lvl -> Lvl -> VTm -> Sub
-subbing l x v = Sub l (IM.singleton x.unLvl v)
+subbing l x v = Sub l (IM.singleton x.unLvl (NE.singleton v))
 
 instance Semigroup Sub where
-  Sub l1 v1 <> Sub l2 v2
-    | l1 > l2 = Sub l1 (IM.union v1 v2)
-    | otherwise = Sub l2 (IM.union v1 v2)
+  Sub l1 v1 <> Sub l2 v2 = Sub (max l1 l2) (IM.unionWith (<>) v1 v2)
 
 instance Monoid Sub where
   mempty = emptySub

@@ -57,6 +57,7 @@ import Value
     pattern VGlob,
     pattern VVar,
   )
+import Data.List (intercalate)
 
 data UnifyError
   = InvertError (Spine VTm)
@@ -75,6 +76,15 @@ unifyErrorIsMetaRelated _ = False
 
 data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
 
+instance (Eval m, Has m [Name]) => Pretty m CanUnify where
+  pretty Yes = return "can unify"
+  pretty (No xs) = do
+    xs' <- intercalate ", " <$> mapM pretty xs
+    return $ "cannot unify: " ++ xs'
+  pretty (Maybe s) = do
+    s' <- pretty s
+    return $ "can only unify if: " ++ s'
+
 instance (Eval m, Has m [Name]) => Pretty m UnifyError where
   pretty (InvertError s) = do
     s' <- pretty s
@@ -89,10 +99,12 @@ instance (Eval m, Has m [Name]) => Pretty m UnifyError where
     return $ "the clauses " ++ cs'' ++ " and " ++ cs''' ++ " are different"
   pretty (OccursError m t) = do
     t' <- pretty t
-    return $ "the meta-variable " ++ show m ++ " occurs in " ++ t'
+    m' <- pretty (SMeta m [])
+    return $ "the meta-variable " ++ m' ++ " occurs in " ++ t'
   pretty (EscapingVariable l t) = do
     t' <- pretty t
-    return $ "the variable " ++ show l ++ " in " ++ t' ++ " escapes its scope"
+    l' <- pretty (VNeu (VVar l))
+    return $ "the variable " ++ l' ++ " in " ++ t' ++ " escapes its scope"
   pretty (Mismatching t t') = do
     t'' <- pretty t
     t''' <- pretty t'
