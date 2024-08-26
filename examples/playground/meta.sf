@@ -19,7 +19,7 @@ data Sigma : (I : Type, S : I -> Type) -> Type {
   pair : [I : Type, S : I -> Type] -> (i : I) -> S i -> Sigma I S
 }
 
-def rec Interp : Desc -> Type -> Type {
+def Interp : Desc -> Type -> Type {
   \d X => case d {
     var => X,
     one => Unit,
@@ -29,7 +29,7 @@ def rec Interp : Desc -> Type -> Type {
   }
 }
 
-def rec IInterp : [I : Type] -> IDesc I -> (I -> Type) -> (I -> Type) {
+def IInterp : [I : Type] -> IDesc I -> (I -> Type) -> (I -> Type) {
   \[I] d X i => case d {
     ask i' => X i',
     give i' =>  Equal i i',
@@ -77,30 +77,30 @@ data IRep : [I : Type] -> IDesc I -> Type {
     -> IRep d
 }
 
-data ListE : Type {
-  list-nil : ListE,
-  list-cons : ListE,
-}
+-- data ListE : Type {
+--   list-nil : ListE,
+--   list-cons : ListE,
+-- }
 
-data ConsE : Type {
-  cons-x : ConsE,
-  cons-xs : ConsE,
-}
+-- data ConsE : Type {
+--   cons-x : ConsE,
+--   cons-xs : ConsE,
+-- }
 
-def list-d : Type -> Desc {
-  \T => choice ListE (\x => case x {
-    list-nil => one,
-    list-cons => prod ConsE (\a => case a {
-      cons-x => foreign T,
-      cons-xs => var,
-    })
-  })
-}
+-- def list-d : Type -> Desc {
+--   \T => choice ListE (\x => case x {
+--     list-nil => one,
+--     list-cons => prod ConsE (\a => case a {
+--       cons-x => foreign T,
+--       cons-xs => var,
+--     })
+--   })
+-- }
 
-def List' : Type -> Type {
-  \T => Mu (list-d T)
-}
+-- def List' : Type -> Type {
+--   \T => Mu (list-d T)
+-- }
 
-def nil' : [T : Type] -> List' T {
-  \[T] => mu [list-d T] (list-nil, ?h1)
-}
+-- def nil' : [T : Type] -> List' T {
+--   \[T] => mu [list-d T] (list-nil, ?h1)
+-- }

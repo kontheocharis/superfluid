@@ -158,12 +158,12 @@ def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
   }
 }
 
--- def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
---   \p => subst [Nat] (\n => case n {
---     z => Unit,
---     s _ => Empty,
---   }) p tt
--- }
+def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
+  \p => subst [Nat] (\n => case n {
+    z => Unit,
+    s _ => Empty,
+  }) p tt
+}
 
 data Pair : Type -> Type -> Type {
   mk-pair : [A : Type, B : Type] -> A -> B -> Pair A B,

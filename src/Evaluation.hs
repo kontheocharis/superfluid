@@ -14,6 +14,7 @@ module Evaluation
     ($$),
     vApp,
     vRepr,
+    evalPat,
     vLams,
     uniqueVLams,
     evalInOwnCtx,
@@ -132,9 +133,8 @@ vMatch _ _ = Nothing
 vCase :: (Eval m) => DataGlobal -> VTm -> [Clause VPatB Closure] -> m VTm
 vCase dat v cs =
   case v of
-    VNeu n -> return $ VNeu (VCaseApp dat n cs Empty)
-    _ ->
-      fromMaybe (return . error $ "Expected neutral, got " ++ show v) $
+    VNeu n ->
+      fromMaybe (return $ VNeu (VCaseApp dat n cs Empty)) $
         firstJust
           ( \clause -> do
               case clause of
@@ -144,6 +144,7 @@ vCase dat v cs =
                 Impossible _ -> Nothing
           )
           cs
+    _ -> error "impossible"
 
 evalToNeu :: (Eval m) => Env VTm -> STm -> m VNeu
 evalToNeu env t = do
@@ -220,7 +221,7 @@ close n env t = do
     else return $ Closure n env t
 
 closureArgs :: Int -> Int -> [VTm]
-closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) [0 .. n - 1]
+closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) (reverse [0 .. n - 1])
 
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
 extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
@@ -228,19 +229,12 @@ extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
 evalInOwnCtx :: (Eval m) => Closure -> m VTm
 evalInOwnCtx cl = cl $$ closureArgs cl.numVars (length cl.env)
 
--- evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
--- evalPat env pat = do
---   pat' <- eval (extendEnvByNVars (length pat.binds) env) pat.asTm
---   return (VPatB pat' pat.binds)
-
-type NumPatBinds = Int
-
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do
-  (n, _) <- runStateT (evalPat' env pat.asTm) (length env)
+  (n, _) <- runStateT (evalPat' env pat.asTm) (length env - length pat.binds)
   return $ VPatB n pat.binds
   where
-    evalPat' :: (Eval m) => Env VTm -> STm -> StateT NumPatBinds m VTm
+    evalPat' :: (Eval m) => Env VTm -> STm -> StateT Int m VTm
     evalPat' e pat' = case pat' of
       (SGlobal (CtorGlob (CtorGlobal c))) -> do
         return $ VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) Empty)
@@ -248,7 +242,10 @@ evalPat env pat = do
         a' <- evalPat' e a
         b' <- evalPat' e b
         lift $ vApp a' (S.singleton (Arg m b'))
-      (SVar (Idx 0)) -> state (\s -> (VNeu (VVar (Lvl s)), s + 1))
+      (SVar (Idx 0)) -> do
+        s <- get
+        put (s + 1)
+        return $ VNeu (VVar (Lvl s))
       _ -> error "impossible"
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
@@ -268,7 +265,7 @@ eval env (SApp m t1 t2) = do
   vApp t1' (S.singleton (Arg m t2'))
 eval env (SCase dat t cs) = do
   t' <- eval env t
-  cs' <- mapM (\p -> do bitraverse (evalPat env) (close (length p.pat.binds) env) p) cs
+  cs' <- mapM (\p -> do bitraverse (evalPat (extendEnvByNVars (length p.pat.binds) env)) (close (length p.pat.binds) env) p) cs
   vCase dat t' cs'
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
@@ -406,8 +403,8 @@ unelabMeta (_ : ns) m (Defined : bs) = unelabMeta ns m bs
 unelabMeta _ _ _ = error "impossible"
 
 unelabPat :: (HasMetas m) => [Name] -> SPat -> m PTm
-unelabPat ns pat = do
-  (n, _) <- runStateT (unelabPat' pat.asTm) (pat.binds ++ ns)
+unelabPat _ pat = do
+  (n, _) <- runStateT (unelabPat' pat.asTm) pat.binds
   return n
   where
     unelabPat' :: (HasMetas m) => STm -> StateT [Name] m PTm
@@ -431,7 +428,9 @@ unelab ns (SPi m x a b) = PPi m x <$> unelab ns a <*> unelab (x : ns) b
 unelab ns (SLam m x t) = PLam m x <$> unelab (x : ns) t
 unelab ns (SLet x ty t u) = PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
 unelab ns (SMeta m bs) = do
+  traceM $ "unelab " ++ show ns ++ show m ++ " " ++ show bs
   (t, ts) <- unelabMeta ns m bs
+  traceM $ "unelabresult " ++ show (t, ts)
   return $ pApp t ts
 unelab ns (SVar i) = return $ PName (ns !! i.unIdx)
 unelab ns (SApp m t u) = PApp m <$> unelab ns t <*> unelab ns u
@@ -442,7 +441,7 @@ unelab ns (SCase _ t cs) =
       ( \c ->
           Clause
             <$> unelabPat ns c.pat
-            <*> traverse (unelab (c.pat.binds ++ ns)) c.branch
+            <*> traverse (unelab (reverse c.pat.binds ++ ns)) c.branch
       )
       cs
 unelab _ SU = return PU
@@ -453,9 +452,7 @@ unelab ns (SRepr m t) = PRepr m <$> unelab ns t
 instance (Eval m, Has m [Name]) => Pretty m VTm where
   pretty v = do
     n <- view
-    traceM $ show (v, n)
     q <- quote (Lvl (length n)) v
-    traceM $ show q
     return q >>= unelab n >>= pretty
 
 instance (Eval m, Has m [Name]) => Pretty m STm where

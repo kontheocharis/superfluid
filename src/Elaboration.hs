@@ -62,14 +62,16 @@ import Evaluation
     close,
     eval,
     evalInOwnCtx,
+    evalPat,
     force,
     isCtorTy,
     isTypeFamily,
     quote,
+    resolve,
     unelab,
     vApp,
     vRepr,
-    ($$), resolve,
+    ($$),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -102,9 +104,10 @@ import Value
     VTy,
     isEmptySub,
     vars,
+    pattern VGlob,
     pattern VHead,
     pattern VRepr,
-    pattern VVar, pattern VGlob,
+    pattern VVar,
   )
 
 data ElabError
@@ -296,6 +299,7 @@ applySubToCtx sub = do
   -- gather the results in env''
   -- env'' <- mapM (\i -> resolve (take i env') (env' !! i)) [0..(c.lvl.unLvl - 1)]
 
+  -- modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
   modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
   where
     replaceVars :: Int -> (Env VTm, Bounds) -> (Env VTm, Bounds)
@@ -382,24 +386,33 @@ newMetaHere :: (Elab m) => Maybe Name -> m STm
 newMetaHere n = do
   bs <- accessCtx (\c -> c.bounds)
   m <- freshMetaVar n
+  traceM $ "bs for " ++ show n ++ " = " ++ show bs
   return (SMeta m bs)
 
 freshMetaHere :: (Elab m) => m STm
 freshMetaHere = newMetaHere Nothing
 
-freshMetaOrPatBind :: (Elab m) => m STm
+freshMetaOrPatBind :: (Elab m) => m (STm, VTm)
 freshMetaOrPatBind =
   ifInPat
-    (fst <$> (uniqueName >>= inferPatBind))
-    freshMetaHere
+    ( do
+        n <- uniqueName
+        (n', _) <- inferPatBind n
+        vn <- evalPatHere (SPat n' [n])
+        return (n', vn.vPat)
+    )
+    ( do
+        n' <- freshMetaHere
+        vn <- evalHere n'
+        return (n', vn)
+    )
 
 insertFull :: (Elab m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- force ty
   case f of
     VPi Implicit _ _ b -> do
-      a <- freshMetaOrPatBind
-      va <- evalHere a
+      (a, va) <- freshMetaOrPatBind
       ty' <- b $$ [va]
       insertFull (SApp Implicit tm a, ty')
     _ -> return (tm, ty)
@@ -413,6 +426,11 @@ evalHere :: (Elab m) => STm -> m VTm
 evalHere t = do
   e <- accessCtx (\c -> c.env)
   eval e t
+
+evalPatHere :: (Elab m) => SPat -> m VPatB
+evalPatHere t = do
+  e <- accessCtx (\c -> c.env)
+  evalPat e t
 
 handleUnification :: (Elab m) => VTm -> VTm -> CanUnify -> m ()
 handleUnification t1 t2 r = do
@@ -431,8 +449,6 @@ handleUnification t1 t2 r = do
       Yes -> return ()
       Maybe _ -> elabError $ PotentialMismatch t1 t2
       No errs -> elabError $ Mismatch errs
-
-
 
 canUnifyHere :: (Elab m) => VTm -> VTm -> m CanUnify
 canUnifyHere t1 t2 = do
@@ -675,13 +691,12 @@ inPatNames _ = []
 checkPatAgainstSubject :: (Elab m) => PPat -> VTm -> VTy -> m SPat
 checkPatAgainstSubject p vs vsTy = do
   (sp, spTy) <- infer p >>= insert
-  ns <- inPat
+  ns <- inPatNames <$> inPat
   a <- canUnifyHere vsTy spTy
-  vp <- evalHere sp
-  traceM $ "VP IS " ++ show vp
-  b <- canUnifyHere vp vs
-  handleUnification vp vs (a /\ b)
-  return $ SPat sp (inPatNames ns)
+  vp <- evalPatHere (SPat sp ns)
+  b <- canUnifyHere vp.vPat vs
+  handleUnification vp.vPat vs (a /\ b)
+  return $ SPat sp ns
 
 check :: (Elab m) => PTm -> VTy -> m STm
 check term typ = do
