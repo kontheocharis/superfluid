@@ -271,8 +271,9 @@ vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
   (_, []) -> return v
   (x : env', Bound : binds') -> do
-    v' <- vAppBinds env' v binds'
-    vApp v' (S.singleton (Arg Explicit x))
+    -- v' <- vAppBinds env' v binds'
+    v' <- vApp v (S.singleton (Arg Explicit x))
+    vAppBinds env' v' binds'
   (_ : env', Defined : binds') -> vAppBinds env' v binds'
   ([], _) -> error "impossible"
 

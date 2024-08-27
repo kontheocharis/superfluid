@@ -480,7 +480,8 @@ resolveHere t = do
   resolve l t
 
 unifyHere :: (Elab m) => VTm -> VTm -> m ()
-unifyHere t1 t2 = canUnifyHere t1 t2 >>= handleUnification t1 t2
+unifyHere t1 t2 = do
+  canUnifyHere t1 t2 >>= handleUnification t1 t2
 
 closeValHere :: (Elab m) => Int -> VTm -> m Closure
 closeValHere n t = do
@@ -728,9 +729,8 @@ checkPatAgainstSubject p vs vsTy = do
   (sp, spTy) <- infer p >>= insert
   ns <- inPatNames <$> inPat
   vp <- evalPatHere (SPat sp ns)
-  a <- canUnifyHere vsTy spTy
-  b <- canUnifyHere vp.vPat vs
-  handleUnification vp.vPat vs (a /\ b)
+  u <- canUnifyHere vsTy spTy /\ canUnifyHere vp.vPat vs
+  handleUnification vp.vPat vs u
   return $ SPat sp ns
 
 evalInOwnCtxHere :: (Elab m) => Closure -> m VTm

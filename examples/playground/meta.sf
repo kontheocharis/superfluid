@@ -65,16 +65,16 @@ data Rep : Desc -> Type {
     -> Rep d
 }
 
--- data IRep : [I : Type] -> IDesc I -> Type {
---   mk-irep :
---     [I : Type, d : IDesc I]
---     -> (
---       R : I -> Type,
---       represent : [i : I] -> IInterp [I] d R i -> R i,
---       view : [i : I] -> (r : R i) -> IMu (iorn [I] [_] [i] d represent) (i, r), -- TODO: Better inference!
---     )
---     -> IRep d
--- }
+data IRep : [I : Type] -> IDesc I -> Type {
+  mk-irep :
+    [I : Type, d : IDesc I]
+    -> (
+      R : I -> Type,
+      represent : [i : I] -> IInterp d R i -> R i,
+      view : [i : I] -> (r : R i) -> IMu (iorn d (represent [i])) (i, r),
+    )
+    -> IRep d
+}
 
 -- data ListE : Type {
 --   list-nil : ListE,

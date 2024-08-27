@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -41,6 +42,7 @@ import Common
 import Control.Exception (assert)
 import Control.Monad (zipWithM, zipWithM_)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Identity (Identity (runIdentity))
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Either (fromRight, isRight)
@@ -49,7 +51,7 @@ import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Sequence (Seq (..), ViewR (..))
 import qualified Data.Sequence as S
-import Debug.Trace (trace, traceM)
+import Debug.Trace (trace, traceM, traceStack)
 import Evaluation (Eval, eval, evalInOwnCtx, force, quote, quoteSpine, vApp, ($$))
 import Globals (KnownGlobal (..), knownCtor, knownData, unfoldDef)
 import Literals (unfoldLit)
@@ -131,19 +133,39 @@ instance (Eval m, Has m [Name]) => Pretty m UnifyError where
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
   pretty (PrevError e) = return e
 
-instance Lattice CanUnify where
-  Yes \/ _ = Yes
-  _ \/ Yes = Yes
-  No _ \/ a = a
-  a \/ No _ = a
-  Maybe _ \/ Maybe _ = Maybe mempty
+instance (Eval m) => Lattice (m CanUnify) where
+  a \/ b = do
+    a' <- a
+    case a' of
+      Yes -> a
+      No _ -> b
+      Maybe _ -> do
+        b' <- b
+        case b' of
+          Yes -> return Yes
+          No _ -> a
+          Maybe _ -> return $ Maybe mempty
 
-  Yes /\ a = a
-  a /\ Yes = a
-  No xs /\ No ys = No (xs ++ ys)
-  No xs /\ _ = No xs
-  _ /\ No xs = No xs
-  Maybe x /\ Maybe y = Maybe (x <> y)
+  a /\ b = do
+    a' <- a
+    case a' of
+      Yes -> b
+      No xs -> do
+        b' <- b
+        case b' of
+          Yes -> a
+          No ys -> return $ No (xs ++ ys)
+          Maybe _ -> return $ No xs
+      Maybe xs -> do
+        b' <- b
+        case b' of
+          Yes -> return $ Maybe xs
+          No ys -> return $ No ys
+          Maybe ys -> return $ Maybe (xs <> ys)
+
+-- instance Lattice CanUnify where
+-- a \/ b = runIdentity $
+-- a /\ b = runIdentity $
 
 class (Eval m, Has m (Seq Problem), Has m Loc, Has m [Name]) => Unify m
 
@@ -207,16 +229,12 @@ rename m pren tm = do
 
 unifySpines :: (Unify m) => Lvl -> Spine VTm -> Spine VTm -> m CanUnify
 unifySpines _ Empty Empty = return Yes
-unifySpines l (sp :|> Arg _ u) (sp' :|> Arg _ u') = do
-  x <- unifySpines l sp sp'
-  (x /\) <$> unify l u u'
+unifySpines l (sp :|> Arg _ u) (sp' :|> Arg _ u') = unifySpines l sp sp' /\ unify l u u'
 unifySpines _ sp sp' = return $ No [DifferentSpineLengths sp sp']
 
 unifyClauses :: (Unify m) => Lvl -> [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
 unifyClauses l [] [] = return Yes
-unifyClauses l (c : cs) (c' : cs') = do
-  a <- unifyClause l c c'
-  (a /\) <$> unifyClauses l cs cs'
+unifyClauses l (c : cs) (c' : cs') = unifyClause l c c' /\ unifyClauses l cs cs'
 unifyClauses _ a b = return $ No [DifferentClauses a b]
 
 unifyPat :: (Unify m) => Lvl -> VPatB -> VPatB -> m CanUnify
@@ -228,10 +246,7 @@ unifyPat l (VPatB p binds) (VPatB p' binds') = do
     else return $ No []
 
 unifyClause :: (Unify m) => Lvl -> Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
-unifyClause l (Possible p t) (Possible p' t') = do
-  a <- unifyPat l p p'
-  b <- unifyClosure l t t'
-  return $ a /\ b
+unifyClause l (Possible p t) (Possible p' t') = unifyPat l p p' /\ unifyClosure l t t'
 unifyClause l (Impossible p) (Impossible p') = unifyPat l p p'
 unifyClause _ a b = return $ No [DifferentClauses [a] [b]]
 
@@ -245,12 +260,19 @@ data Problem = Problem
     prevErrorString :: String
   }
 
-addProblemIfNotPresent :: (Unify m) => Problem -> m ()
-addProblemIfNotPresent p = do
+addProblem :: (Unify m) => Problem -> m ()
+addProblem p = do
   v <- getProblems
-  if any (\p' -> p'.originatingMeta == p.originatingMeta) v
-    then return ()
-    else modify (S.|> p)
+  -- if any (\p' -> p'.originatingMeta == p.originatingMeta) v
+  -- then return ()
+  modify (S.|> p)
+
+{- ifProblemIsPresent :: (Unify m) => MetaVar -> m a -> m a -> m a
+ifProblemIsPresent m f g = do
+  v <- getProblems
+  if any (\p -> p.originatingMeta == m) v
+    then f
+    else g -}
 
 modifyProblem :: (Unify m) => Int -> (Problem -> Problem) -> m ()
 modifyProblem i f = modify (\(p :: Seq Problem) -> S.adjust' f i p)
@@ -282,13 +304,14 @@ solveRemainingProblems = do
 
 runSolveT :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT l m sp t f = do
+  -- ifProblemIsPresent m (return Yes) $ do
   f' <- runExceptT f
   ns <- view
   loc <- view
   case f' of
     Left e -> do
       e' <- pretty e
-      addProblemIfNotPresent
+      addProblem
         ( Problem
             { lvl = l,
               names = ns,
@@ -351,10 +374,7 @@ unify l t1 t2 = do
   t1' <- force t1
   t2' <- force t2
   case (t1', t2') of
-    (VPi m _ t c, VPi m' _ t' c') | m == m' -> do
-      a <- unify l t t'
-      b <- unifyClosure l c c'
-      return $ a /\ b
+    (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify l t t' /\ unifyClosure l c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure l c c'
     (t, VLam m' _ c') -> etaConvert l t m' c'
     (VLam m _ c, t) -> etaConvert l t m c
@@ -369,27 +389,22 @@ unify l t1 t2 = do
         else return $ Maybe mempty
     (VGlob (DefGlob f) sp, VGlob (DefGlob f') sp') ->
       if f == f'
-        then do
-          a <- unifySpines l sp sp'
-          b <- unfoldDefAndUnify l f sp t2'
-          return $ a \/ b
+        then unifySpines l sp sp' \/ unfoldDefAndUnify l f sp t2'
         else unfoldDefAndUnify l f sp t2'
     (VGlob (DefGlob f) sp, t') -> unfoldDefAndUnify l f sp t'
     (t, VGlob (DefGlob f') sp') -> unfoldDefAndUnify l f' sp' t
     (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) | a == b -> do
-      c <- unify l (VNeu s) (VNeu s')
-      d <- unifyClauses l bs bs'
-      e <- unifySpines l sp sp'
-      return $ (c /\ d /\ e) \/ Maybe mempty
+      ( unify l (VNeu s) (VNeu s')
+          /\ unifyClauses l bs bs'
+          /\ unifySpines l sp sp'
+        )
+        \/ return (Maybe mempty)
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
-      a <- unifySpines l sp sp'
-      return $ a \/ Maybe mempty
+      unifySpines l sp sp' \/ return (Maybe mempty)
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
-      a <- unifySpines l sp sp'
-      return $ a \/ Maybe mempty
+      unifySpines l sp sp' \/ return (Maybe mempty)
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
-      a <- unifySpines l sp sp'
-      return $ a \/ Maybe mempty
+      unifySpines l sp sp' \/ return (Maybe mempty)
     (VNeu (VApp (VFlex x) sp), t') -> unifyFlex l x sp t'
     (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex l x' sp' t
     (VNeu (VApp (VRigid x) sp), t') -> unifyRigid l x sp t'
