@@ -238,17 +238,19 @@ unifyClause _ a b = return $ No [DifferentClauses [a] [b]]
 data Problem = Problem
   { lvl :: Lvl,
     names :: [Name],
+    originatingMeta :: MetaVar,
     lhs :: VTm,
     rhs :: VTm,
     loc :: Loc,
     prevErrorString :: String
   }
 
-addProblem :: (Unify m) => Problem -> m Int
-addProblem p = do
+addProblemIfNotPresent :: (Unify m) => Problem -> m ()
+addProblemIfNotPresent p = do
   v <- getProblems
-  modify (S.|> p)
-  return $ S.length v
+  if any (\p' -> p'.originatingMeta == p.originatingMeta) v
+    then return ()
+    else modify (S.|> p)
 
 modifyProblem :: (Unify m) => Int -> (Problem -> Problem) -> m ()
 modifyProblem i f = modify (\(p :: Seq Problem) -> S.adjust' f i p)
@@ -270,8 +272,9 @@ solveRemainingProblems = do
       ( \i p -> do
           c <- unify p.lvl p.lhs p.rhs
           case c of
-            No e | all unifyErrorIsMetaRelated e -> return $ Yes
+            No e | all unifyErrorIsMetaRelated e -> return Yes
             No _ -> return $ No [PrevError p.prevErrorString] -- @@Todo: keep new error
+            Maybe m -> return $ Maybe m
             Yes -> removeProblem i >> return Yes
       )
       ps
@@ -285,11 +288,12 @@ runSolveT l m sp t f = do
   case f' of
     Left e -> do
       e' <- pretty e
-      addProblem -- not if it is there already ??
+      addProblemIfNotPresent
         ( Problem
             { lvl = l,
               names = ns,
               lhs = VNeu (VApp (VFlex m) sp),
+              originatingMeta = m,
               rhs = t,
               loc = loc,
               prevErrorString = e' -- this is a hack
