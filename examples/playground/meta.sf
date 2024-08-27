@@ -25,30 +25,18 @@ def Interp : Desc -> Type -> Type {
   }
 }
 
-
 def IInterp : [I : Type] (d : IDesc I, X : I -> Type, i : I) -> Type {
-  \[I] d X i => case d {
+  \d X i => case d {
     ask i' => X i',
-    give i' =>  Equal i i',
-    ichoice [I'] S f => {
-      let y = f ?h1;
-      ?h2
-      -- IInterp [I'] y ?h1 ?h2
-    },
-    -- ichoice S f => (x : S) * ?h2,
-    iprod S f => (x : S) -> ?h3,
+    give i' => Equal i i',
+    ichoice S f => (x : S) * IInterp (f x) X i,
+    iprod S f => (x : S) -> IInterp (f x) X i,
     iforeign S => S,
   }
 }
 
 data Foo : Type {
-  foo : [n : Nat, m : Nat] -> (Fin n -> Fin m) -> Foo,
-}
-
-def bar : Foo -> * {
-  \f => case f {
-    foo g => ?b1
-  }
+  foo : [n : Nat, m : Nat, p : Nat] -> (() -> Fin n -> Fin m -> Fin p) -> Foo,
 }
 
 def orn : [X : Type] -> (d : Desc) -> (Interp d X -> X) -> IDesc X {
@@ -67,16 +55,15 @@ data IMu : [I : Type] -> IDesc I -> I -> Type {
   imu : [I : Type, d : IDesc I, i : I] -> IInterp d (IMu d) i -> IMu d i
 }
 
--- data Rep : Desc -> Type {
---   mk-rep :
---     [d : Desc]
---     -> (
---       R : Type,
---       represent : Interp d R -> R,
---       view : (r : R) -> IMu (orn d represent) r
---     )
---     -> Rep d
--- }
+data Rep : Desc -> Type {
+  mk-rep :
+    [d : Desc] -> (
+      R : Type,
+      represent : Interp d R -> R,
+      view : (r : R) -> IMu (orn d represent) r
+    )
+    -> Rep d
+}
 
 -- data IRep : [I : Type] -> IDesc I -> Type {
 --   mk-irep :

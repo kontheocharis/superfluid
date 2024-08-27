@@ -13,6 +13,18 @@ data Sigma : (A : Type, B : A -> Type) -> Type {
   pair : [A : Type, B : A -> Type] -> (a : A) -> B a -> Sigma A B
 }
 
+def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+  \p => case p {
+    (a, b) => a
+  }
+}
+
+def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+  \p => case p {
+    (a, b) => b
+  }
+}
+
 def id : [A : Type] -> A -> A {
   \a => a
 }

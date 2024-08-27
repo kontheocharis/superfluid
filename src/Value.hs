@@ -55,13 +55,14 @@ data PRen = PRen
   { domSize :: Lvl,
     codSize :: Lvl,
     vars :: IntMap Lvl
-  }
+  } deriving (Show)
 
 liftPRen :: PRen -> PRen
-liftPRen = liftPRenN 1
+liftPRen (PRen dom cod ren) =  PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl dom ren)
 
 liftPRenN :: Int -> PRen -> PRen
-liftPRenN n (PRen dom cod ren) = PRen (Lvl (dom.unLvl + n)) (Lvl (cod.unLvl + n)) (IM.map (\c -> Lvl (c.unLvl + n)) ren)
+liftPRenN 0 ren = ren
+liftPRenN n ren = liftPRenN (n - 1) (liftPRen ren)
 
 type VPat = VTm
 

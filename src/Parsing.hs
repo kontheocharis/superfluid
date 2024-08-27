@@ -3,6 +3,8 @@ module Parsing (parseProgram, parseTerm, ParseError (..)) where
 import Common
   ( Arg (..),
     Clause (..),
+    Filename,
+    HasProjectFiles,
     Lit (..),
     Loc (..),
     Name (Name),
@@ -11,7 +13,7 @@ import Common
     Tag,
     Times (..),
     globalName,
-    unName, Filename, HasProjectFiles,
+    unName,
   )
 import Data.Char (isDigit, isSpace)
 import Data.Foldable1 (Foldable1 (fold1))
@@ -27,13 +29,13 @@ import GHC.ExecutionStack (SrcLoc (sourceFile))
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
 import Printing (Pretty (..))
-import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>), errorPos)
+import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
+import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
+import Text.Parsec.Error (errorMessages)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
-import qualified Text.Parsec as PS
-import Text.Parsec.Error (errorMessages)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -83,8 +85,8 @@ reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-i
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
-  f <- letter <|> char '_' <|> char '*'
-  rest <- many (char '_' <|> char '\'' <|> char '-' <|> char '*' <|> alphaNum)
+  f <- letter <|> char '_'
+  rest <- many (char '_' <|> char '\'' <|> char '-' <|> alphaNum)
   anyWhite
   return $ f : rest
 
@@ -155,7 +157,7 @@ parseProgram filename contents = case runParser
   Right p -> Right p
 
 item :: Parser PItem
-item = do
+item = whiteWrap . located (flip PLocatedItem) $ do
   ts <- tags
   tagged ts
     <$> ( PData <$> dataItem
@@ -180,7 +182,7 @@ whiteWrap p = do
   return x
 
 reprDataItem :: Parser PDataRep
-reprDataItem = whiteWrap $ do
+reprDataItem = do
   try (symbol "repr" >> symbol "data")
   src <- pat
   symbol "as"
@@ -192,7 +194,7 @@ reprDataItem = whiteWrap $ do
     return $ MkPDataRep src target ctors cse mempty
 
 reprDeclItem :: Parser PDefRep
-reprDeclItem = whiteWrap $ do
+reprDeclItem = do
   try (symbol "repr" >> symbol "def")
   src <- pat
   reservedOp "as"
@@ -234,7 +236,7 @@ ctorItem = do
 
 -- | Parse a data item.
 dataItem :: Parser PData
-dataItem = whiteWrap $ do
+dataItem = do
   symbol "data"
   (name, ty) <- defSig
   ctors <- curlies (commaSep ctorItem)
@@ -247,7 +249,7 @@ dataItem = whiteWrap $ do
 
 -- | Parse a primitive item
 primItem :: Parser PPrim
-primItem = whiteWrap $ do
+primItem = do
   symbol "prim"
   (name, ty) <- defSig
   case ty of
@@ -268,7 +270,7 @@ tags = do
 
 -- | Parse a declaration.
 defItem :: Parser PDef
-defItem = whiteWrap $ do
+defItem = do
   symbol "def"
   (name, ty) <- defSig
   t <- lets
@@ -436,7 +438,7 @@ pairOrParens :: Parser PTm
 pairOrParens = locatedTerm . parens $ do
   t <- sepEndBy term comma
   case t of
-    [] -> return PTt
+    [] -> return PUnit
     [t'] -> return t'
     ts -> return $ foldr1 PPair ts
 
@@ -449,7 +451,6 @@ varOrHoleOrU = locatedTerm $ do
     Just _ -> return $ PHole v
     Nothing -> case v of
       Name "Type" -> return PU
-      Name "*" -> return PUnit
       Name "_" -> return PWild
       _ -> return $ PName v
 

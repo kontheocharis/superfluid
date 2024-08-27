@@ -84,6 +84,7 @@ import Globals
     PrimGlobalInfo (PrimGlobalInfo),
     addItem,
     globalInfoToTm,
+    hasName,
     knownCtor,
     knownData,
     lookupGlobal,
@@ -139,7 +140,7 @@ data ElabError
   | DuplicateItem Name
   | Chain [ElabError]
 
-data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat
+data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat deriving (Eq)
 
 instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
   pretty e = do
@@ -391,11 +392,6 @@ prettyGoal n ty = do
   let g = n' ++ " : " ++ ty'
   return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
-prettyCurrentGoals :: (Elab m) => m String
-prettyCurrentGoals = do
-  c <- getCtx >>= pretty
-  return $ indentedFst c ++ "\n"
-
 checkMetaHere :: (Elab m) => Maybe Name -> VTy -> m STm
 checkMetaHere n ty = do
   m <- newMetaHere n
@@ -523,8 +519,6 @@ checkSpine (t, ty) (Arg m u :<| sp) = do
   u' <- check u a
   uv <- evalHere u'
   b' <- b $$ [uv]
-  pb <- pretty b'
-  showMessage $ "Rest of type: " ++ pb
   checkSpine (SApp m t' u', b') sp
 
 forbidPat :: (Elab m) => PTm -> m ()
@@ -578,8 +572,16 @@ inferName n =
               Nothing -> elabError $ UnresolvedVariable n
     )
 
+ensureNewName :: (Elab m) => Name -> m ()
+ensureNewName n = do
+  r <- access (hasName n)
+  if r
+    then elabError $ DuplicateItem n
+    else return ()
+
 checkDef :: (Elab m) => PDef -> m ()
 checkDef def = do
+  ensureNewName def.name
   ty' <- check def.ty VU >>= evalHere
   modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing Nothing)) def.tags)
   tm' <- check def.tm ty'
@@ -591,6 +593,7 @@ checkDef def = do
 
 checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()
 checkCtor dat idx ctor = do
+  ensureNewName ctor.name
   ty' <- check ctor.ty VU >>= evalHere
   i <- getLvl >>= (\l -> isCtorTy l dat ty')
   unless i (elabError $ InvalidCtorType ty')
@@ -602,6 +605,7 @@ getLvl = accessCtx (\c -> c.lvl)
 
 checkData :: (Elab m) => PData -> m ()
 checkData dat = do
+  ensureNewName dat.name
   ty' <- check dat.ty VU >>= evalHere
   i <- getLvl >>= (`isTypeFamily` ty')
   unless i (elabError $ InvalidDataFamily ty')
@@ -610,6 +614,7 @@ checkData dat = do
 
 checkPrim :: (Elab m) => PPrim -> m ()
 checkPrim prim = do
+  ensureNewName prim.name
   ty' <- check prim.ty VU >>= evalHere
   modify (addItem prim.name (PrimInfo (PrimGlobalInfo ty')) prim.tags)
   return ()
@@ -638,7 +643,6 @@ infer term = case term of
       pApp
         (PName (knownData KnownSigma).globalName)
         [Arg Explicit a, Arg Explicit (PLam Explicit x b)]
-  PTt -> infer $ PName (knownCtor KnownTt).globalName
   PUnit -> infer $ PName (knownData KnownUnit).globalName
   PPair t1 t2 ->
     infer $
@@ -699,7 +703,7 @@ infer term = case term of
 checkCase :: (Elab m) => PTm -> [Clause PTm PTm] -> VTy -> m STm
 checkCase s cs retTy = do
   (ss, vsTy) <- infer s
-  vs <- evalHere ss
+  vs <- evalHere ss -- @@Todo: only eval to names
   d <- ifIsData vsTy return (elabError $ InvalidCaseSubject s vsTy)
   scs <-
     mapM
@@ -723,8 +727,8 @@ checkPatAgainstSubject :: (Elab m) => PPat -> VTm -> VTy -> m SPat
 checkPatAgainstSubject p vs vsTy = do
   (sp, spTy) <- infer p >>= insert
   ns <- inPatNames <$> inPat
-  a <- canUnifyHere vsTy spTy
   vp <- evalPatHere (SPat sp ns)
+  a <- canUnifyHere vsTy spTy
   b <- canUnifyHere vp.vPat vs
   handleUnification vp.vPat vs (a /\ b)
   return $ SPat sp ns
@@ -746,6 +750,9 @@ check term typ = do
     (t, VPi Implicit x' a b) -> do
       vb <- evalInOwnCtxHere b
       SLam Implicit x' <$> enterCtx (insertedBind x' a) (check t vb)
+    (PUnit, ty@VU) -> check (PName (knownData KnownUnit).globalName) ty
+    (PUnit, ty) -> check (PName (knownCtor KnownTt).globalName) ty
+  -- (PName n, ty) | p /= NotInPat -> checkPatBind n ty
     (PLet x a t u, ty) -> do
       forbidPat term
       a' <- check a VU

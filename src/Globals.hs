@@ -25,6 +25,7 @@ module Globals
     knownData,
     knownCtor,
     lookupGlobal,
+    hasName,
     emptySig,
     globalInfoToTm,
     addItem,
@@ -59,6 +60,9 @@ data Sig = Sig
 emptySig :: Sig
 emptySig = Sig M.empty [] M.empty M.empty M.empty
 
+hasName :: Name -> Sig -> Bool
+hasName n s = M.member n s.contents
+
 addItem :: Name -> GlobalInfo -> Set Tag -> Sig -> Sig
 addItem n i ts s =
   s
@@ -76,20 +80,20 @@ modifyDefItem def f s = s {contents = M.insert def.globalName (DefInfo (f (getDe
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (DataInfo info) -> info
-  Just _ -> error "getDataGlobal: not a data global"
-  _ -> error "getDataGlobal: not a global"
+  Just _ -> error $ "getDataGlobal: not a data global" ++ show g
+  _ -> error $ "getDataGlobal: not a global" ++ show g
 
 getCtorGlobal :: CtorGlobal -> Sig -> CtorGlobalInfo
 getCtorGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (CtorInfo info) -> info
-  Just _ -> error "getCtorGlobal: not a ctor global"
-  _ -> error "getCtorGlobal: not a global"
+  Just _ -> error $ "getCtorGlobal: not a ctor global: "  ++ show g
+  _ -> error $ "getCtorGlobal: not a global" ++ show g
 
 getDefGlobal :: DefGlobal -> Sig -> DefGlobalInfo
 getDefGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (DefInfo info) -> info
-  Just _ -> error "getDefGlobal: not a def global"
-  _ -> error "getDefGlobal: not a global"
+  Just _ -> error $ "getDefGlobal: not a def global" ++ show g
+  _ -> error $ "getDefGlobal: not a global" ++ show g
 
 getGlobal :: Name -> Sig -> GlobalInfo
 getGlobal n sig = case M.lookup n sig.contents of

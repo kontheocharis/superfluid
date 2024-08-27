@@ -305,13 +305,6 @@ unifyFlex l m sp t = runSolveT l m sp t $ do
   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
 
--- solveProblem :: (Unify m) => Lvl -> MetaVar -> Spine VTm -> VTm -> m CanUnify
--- solveProblem l m sp t = do
---   pren <- invertSpine l sp
---   rhs <- rename m pren t
---   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
---   lift $ solveMetaVar m solution
-
 unifyRigid :: (Unify m) => Lvl -> Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid l x Empty t = return $ Maybe (subbing l x t)
 unifyRigid _ _ _ _ = return $ Maybe mempty
