@@ -161,6 +161,8 @@ data KnownGlobal a where
   KnownCons :: KnownGlobal CtorGlobal
   KnownString :: KnownGlobal DataGlobal
   KnownStr :: KnownGlobal CtorGlobal
+  KnownUnit :: KnownGlobal DataGlobal
+  KnownTt :: KnownGlobal CtorGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -173,6 +175,7 @@ knownData KnownFin = DataGlobal (Name "Fin")
 knownData KnownChar = DataGlobal (Name "Char")
 knownData KnownList = DataGlobal (Name "List")
 knownData KnownString = DataGlobal (Name "String")
+knownData KnownUnit = DataGlobal (Name "Unit")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -184,3 +187,4 @@ knownCtor KnownChr = CtorGlobal (Name "chr")
 knownCtor KnownNil = CtorGlobal (Name "nil")
 knownCtor KnownCons = CtorGlobal (Name "cons")
 knownCtor KnownStr = CtorGlobal (Name "str")
+knownCtor KnownTt = CtorGlobal (Name "tt")

@@ -123,6 +123,8 @@ data PTm
   | PHole Name
   | PRepr Times PTm
   | PWild
+  | PTt
+  | PUnit
   | PLocated Loc PTm
   deriving (Eq, Show)
 
@@ -229,6 +231,8 @@ instance (Monad m) => Pretty m PTm where
     ps <- pretty s
     return $ "repr " ++ if n == Finite 1 then ps else pn ++ " " ++ ps
   pretty (PLocated _ t) = pretty t
+  pretty PTt = return "()"
+  pretty PUnit = return "*"
 
 instance (Monad m) => Pretty m PCtor where
   pretty (MkPCtor n ty ts) = do

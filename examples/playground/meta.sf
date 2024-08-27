@@ -29,12 +29,13 @@ def Interp : Desc -> Type -> Type {
   }
 }
 
-def IInterp : [I : Type] -> IDesc I -> (I -> Type) -> (I -> Type) {
+def IInterp : [I : Type] (d : IDesc I, X : I -> Type, i : I) -> Type {
   \[I] d X i => case d {
     ask i' => X i',
     give i' =>  Equal i i',
-    ichoice S f => (x : S) * IInterp (f x) X i,
-    iprod S f => (x : S) -> IInterp (f x) X i,
+    -- ichoice S f => (x : S) * IInterp (f x) X i,
+    ichoice S f => (x : S) * ?h1,
+    iprod S f => (x : S) -> ?h2,
     iforeign S => S,
   }
 }

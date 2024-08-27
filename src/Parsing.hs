@@ -1,4 +1,4 @@
-module Parsing (parseProgram, parseTerm) where
+module Parsing (parseProgram, parseTerm, ParseError (..)) where
 
 import Common
   ( Arg (..),
@@ -11,9 +11,10 @@ import Common
     Tag,
     Times (..),
     globalName,
-    unName,
+    unName, Filename, HasProjectFiles,
   )
 import Data.Char (isDigit, isSpace)
+import Data.Foldable1 (Foldable1 (fold1))
 import Data.List.NonEmpty (NonEmpty, singleton)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
@@ -25,17 +26,27 @@ import Data.Text (Text)
 import GHC.ExecutionStack (SrcLoc (sourceFile))
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
-import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
+import Printing (Pretty (..))
+import Text.Parsec (Parsec, between, char, choice, eof, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>), errorPos)
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import qualified Text.Parsec as PS
+import Text.Parsec.Error (errorMessages)
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
 
 initialParserState :: ParserState
 initialParserState = ParserState {}
+
+data ParseError = ParseError Loc String
+
+instance (Monad m, HasProjectFiles m) => Pretty m ParseError where
+  pretty (ParseError l s) = do
+    l' <- pretty l
+    return $ l' ++ "\nParse error: " ++ s
 
 -- | Parser type alias.
 type Parser a = Parsec Text ParserState a
@@ -68,12 +79,12 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible", "Type"]
+reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible"]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
-  f <- letter <|> char '_'
-  rest <- many (alphaNum <|> char '_' <|> char '\'' <|> char '-')
+  f <- letter <|> char '_' <|> char '*'
+  rest <- many (char '_' <|> char '\'' <|> char '-' <|> char '*' <|> alphaNum)
   anyWhite
   return $ f : rest
 
@@ -122,19 +133,25 @@ locatedTerm p = do
   return $ PLocated l t
 
 -- | Parse a term from a string.
-parseTerm :: String -> Either String PTm
+parseTerm :: String -> Either ParseError PTm
 parseTerm contents = case runParser (term <* eof) initialParserState "" (fromString contents) of
-  Left err -> Left $ show err
+  Left err -> Left $ makeParseError "<interactive>" err
   Right p -> Right p
 
+makeParseError :: Filename -> PS.ParseError -> ParseError
+makeParseError file err = do
+  let e = errorPos err
+  let pos = Pos (sourceLine e) (sourceColumn e)
+  ParseError (Loc file pos pos) (show err)
+
 -- | Parse a program from its filename and string contents.
-parseProgram :: String -> String -> Either String PProgram
+parseProgram :: String -> String -> Either ParseError PProgram
 parseProgram filename contents = case runParser
   (program <* eof)
   initialParserState
   filename
   (fromString contents) of
-  Left err -> Left $ show err
+  Left err -> Left $ makeParseError filename err
   Right p -> Right p
 
 item :: Parser PItem
@@ -321,31 +338,28 @@ singlePat = singleTerm
 var :: Parser Name
 var = identifier
 
+data Typing = Typing {mode :: PiMode, name :: Name, ty :: PTy, loc :: Loc}
+
 -- | Parse a named parameter like `(n : Nat)`.
-named :: Parser (PiMode, NonEmpty (Loc, Name, PTy))
+named :: Parser [Typing]
 named =
-  (try . parens)
-    ( do
-        contents <- typings
-        return (Explicit, contents)
-    )
-    <|> (try . square)
-      ( do
-          contents <- typings
-          return (Implicit, contents)
-      )
-    <|> ( do
-            (Explicit,)
-              <$> located
-                (\(n, t) l -> singleton (l, n, t))
-                ( do
-                    t <- app
-                    return (Name "_", t)
-                )
-        )
+  ( concatMap NE.toList
+      <$> many1
+        ((try . parens) (typings Explicit) <|> (try . square) (typings Implicit))
+  )
+    <|> NE.toList <$> namelessTyping
   where
-    typings :: Parser (NonEmpty (Loc, Name, PTy))
-    typings = commaSep1 . located (\(n, t) l -> (l, n, t)) . try $ do
+    namelessTyping :: Parser (NonEmpty Typing)
+    namelessTyping =
+      located
+        (\(n, t) l -> singleton $ Typing Explicit n t l)
+        ( do
+            t <- app
+            return (Name "_", t)
+        )
+
+    typings :: PiMode -> Parser (NonEmpty Typing)
+    typings m = commaSep1 . located (uncurry $ Typing m) . try $ do
       n <- var
       _ <- colon
       ty <- term
@@ -354,10 +368,10 @@ named =
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy
 piTOrSigmaT = try $ do
-  (m, ts) <- named
-  op <- (reservedOp "->" >> return (PPi m)) <|> (reservedOp "*" >> return PSigma)
+  ns <- named
+  op <- (reservedOp "->" >> return PPi) <|> (reservedOp "*" >> return (const PSigma))
   ret <- term
-  return $ foldr (\(l, name, ty) acc -> PLocated l (op name ty acc)) ret ts
+  return $ foldr (\t acc -> PLocated t.loc (op t.mode t.name t.ty acc)) ret ns
 
 -- | Parse an application.
 app :: Parser PTy
@@ -420,24 +434,24 @@ lam = do
 -- | Parse a pair.
 pairOrParens :: Parser PTm
 pairOrParens = locatedTerm . parens $ do
-  t1 <- term
-  t2 <- optionMaybe $ comma >> term
-  case t2 of
-    Just t2' -> return $ PPair t1 t2'
-    Nothing -> return t1
+  t <- sepEndBy term comma
+  case t of
+    [] -> return PTt
+    [t'] -> return t'
+    ts -> return $ foldr1 PPair ts
 
 -- | Parse a variable or hole. Holes are prefixed with a question mark.
 varOrHoleOrU :: Parser PTm
-varOrHoleOrU =
-  locatedTerm $
-    (symbol "Type" >> return PU)
-      <|> (symbol "_" >> return PWild)
-      <|> do
-        hole <- optionMaybe $ reservedOp "?"
-        v <- var
-        case hole of
-          Just _ -> return $ PHole v
-          Nothing -> return $ PName v
+varOrHoleOrU = locatedTerm $ do
+  hole <- optionMaybe $ reservedOp "?"
+  v <- var
+  case hole of
+    Just _ -> return $ PHole v
+    Nothing -> case v of
+      Name "Type" -> return PU
+      Name "*" -> return PUnit
+      Name "_" -> return PWild
+      _ -> return $ PName v
 
 caseExpr :: Parser PTm
 caseExpr = locatedTerm $ do

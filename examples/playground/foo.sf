@@ -1,34 +1,26 @@
 
--- data Vec : Type -> Nat -> Type {
---   vnil : [A : Type] -> Vec A z,
---   vcons : [A : Type, n : Nat] -> A -> Vec A n -> Vec A (s n),
--- }
-
--- data Elem : [A : Type, n : Nat] -> (i : Fin n) -> A -> Vec A n -> Type {
---   here : [A : Type, i : Nat, x : A, xs : Vec A i] -> Elem (s i) x (vcons x xs),
--- }
-
--- def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
---   \n a => case n {
---     z => vnil,
---     s n' => vcons a (repeat n' a),
---   }
--- }
-
--- def map : [A : Type, B : Type, n : Nat] -> (A -> B) -> Vec A n -> Vec B n {
---   \f v => case v {
---     vnil => vnil,
---     vcons x xs => vcons (f x) (map f xs),
---   }
--- }
-
-
-
-def main : Unit * Unit {
-  let x = (tt, tt);
-  (tt, tt)
+data Vec : Type -> Nat -> Type {
+  vnil : [A : Type] -> Vec A z,
+  vcons : [A : Type, n : Nat] -> A -> Vec A n -> Vec A (s n),
 }
 
+def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
+  \n a => case n {
+    z => vnil,
+    s n' => vcons a (repeat n' a),
+  }
+}
+
+def map : [A : Type, B : Type, n : Nat] -> (A -> B) -> Vec A n -> Vec B n {
+  \f v => case v {
+    vnil => vnil,
+    vcons x xs => vcons (f x) (map f xs),
+  }
+}
+
+def main : (n : Nat) * Vec Nat n {
+  (1, vnil)
+}
 
 
 

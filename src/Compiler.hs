@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use >=>" #-}
 
 module Compiler (runCli) where
@@ -37,7 +38,7 @@ import Options.Applicative (execParser, (<**>), (<|>))
 import Options.Applicative.Builder (fullDesc, header, help, info, long, progDesc, short, strOption, switch)
 import Options.Applicative.Common (Parser)
 import Options.Applicative.Extra (helper)
-import Parsing (parseProgram)
+import Parsing (ParseError, parseProgram)
 import Persistence (preludePath)
 import Presyntax (PProgram)
 import Printing (Pretty (..))
@@ -137,11 +138,14 @@ data Compiler = Compiler
     problems :: Seq Problem
   }
 
-data CompilerError = ElabCompilerError ElabError | ParseCompilerError String
+data CompilerError = ElabCompilerError ElabError | ParseCompilerError ParseError
 
 instance Pretty Comp CompilerError where
-  pretty (ElabCompilerError e) = pretty e
-  pretty (ParseCompilerError e) = return e
+  pretty e = do
+    x <- case e of
+      ElabCompilerError a -> pretty a
+      ParseCompilerError a -> pretty a
+    return $ ">> " ++ x
 
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
   deriving (Functor, Applicative, Monad, MonadState Compiler, MonadError CompilerError, MonadIO)

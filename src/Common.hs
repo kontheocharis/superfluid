@@ -20,6 +20,7 @@ module Common
     Idx (..),
     Lvl (..),
     WithNames (..),
+    Filename,
     nextLvl,
     nextLvls,
     lvlToIdx,
@@ -156,9 +157,11 @@ instance Ord Times where
   compare PosInf _ = GT
   compare _ PosInf = LT
 
+type Filename = String
+
 -- | An optional location in the source code, represented by a start (inclusive) and
 -- end (exclusive) position.
-data Loc = NoLoc | Loc String Pos Pos deriving (Eq, Show)
+data Loc = NoLoc | Loc Filename Pos Pos deriving (Eq, Show)
 
 instance Semigroup Loc where
   NoLoc <> NoLoc = NoLoc
@@ -364,7 +367,7 @@ instance (HasProjectFiles m) => Pretty m Loc where
         -- Generate the underline string with carets
         let startCol = s.col
             endCol = if startLine == endLine then e.col else length (snd (last relevantLines))
-            underline = replicate (startCol + length (show startLine) + 2 - 1) ' ' ++ replicate (endCol - startCol) '^'
+            underline = replicate (startCol + length (show startLine) + 2) ' ' ++ replicate (endCol - startCol + 1) '^'
 
         -- Combine the relevant lines with the underline
         let numberedLines = intercalate "\n" $ map (\(num, line) -> show num ++ " | " ++ line) relevantLines

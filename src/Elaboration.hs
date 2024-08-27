@@ -631,6 +631,8 @@ infer term = case term of
       pApp
         (PName (knownData KnownSigma).globalName)
         [Arg Explicit a, Arg Explicit (PLam Explicit x b)]
+  PTt -> infer $ PName (knownCtor KnownTt).globalName
+  PUnit -> infer $ PName (knownData KnownUnit).globalName
   PPair t1 t2 ->
     infer $
       pApp (PName (knownCtor KnownPair).globalName) [Arg Explicit t1, Arg Explicit t2]
