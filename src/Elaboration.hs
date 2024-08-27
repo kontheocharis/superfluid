@@ -391,6 +391,11 @@ prettyGoal n ty = do
   let g = n' ++ " : " ++ ty'
   return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
+prettyCurrentGoals :: (Elab m) => m String
+prettyCurrentGoals = do
+  c <- getCtx >>= pretty
+  return $ indentedFst c ++ "\n"
+
 checkMetaHere :: (Elab m) => Maybe Name -> VTy -> m STm
 checkMetaHere n ty = do
   m <- newMetaHere n
@@ -518,6 +523,8 @@ checkSpine (t, ty) (Arg m u :<| sp) = do
   u' <- check u a
   uv <- evalHere u'
   b' <- b $$ [uv]
+  pb <- pretty b'
+  showMessage $ "Rest of type: " ++ pb
   checkSpine (SApp m t' u', b') sp
 
 forbidPat :: (Elab m) => PTm -> m ()

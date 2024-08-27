@@ -177,7 +177,7 @@ instance (Monad m) => Pretty m PTm where
   singlePretty v = pretty v
 
   pretty (PPi Explicit (Name "_") t1 t2) = do
-    pt1 <- pretty t1
+    pt1 <- singlePretty t1
     pt2 <- pretty t2
     return $ pt1 ++ " -> " ++ pt2
   pretty (PPi Explicit v t1 t2) = do
