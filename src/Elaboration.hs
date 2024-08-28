@@ -678,6 +678,9 @@ infer term = case term of
     ifInPat
       (uniqueName >>= inferPatBind)
       (inferMetaHere Nothing)
+  PLambdaCase cs -> do
+    n <- uniqueName
+    infer $ PLam Explicit n (PCase (PName n) cs)
   PCase s cs -> do
     forbidPat term
     retTy <- freshMetaHere >>= evalHere
@@ -771,6 +774,9 @@ check term typ = do
       ifInPat
         (uniqueName >>= (`checkPatBind` ty))
         (checkMetaHere Nothing ty)
+    (PLambdaCase cs, ty) -> do
+      n <- uniqueName
+      check (PLam Explicit n (PCase (PName n) cs)) ty
     (PCase s cs, ty) -> checkCase s cs ty
     (te, ty) -> do
       (te', ty') <- infer te >>= insert

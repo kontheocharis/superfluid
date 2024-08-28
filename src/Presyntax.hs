@@ -117,6 +117,7 @@ data PTm
   | PPair PTm PTm
   | PApp PiMode PTm PTm
   | PCase PTm [Clause PPat PTm]
+  | PLambdaCase [Clause PPat PTm]
   | PU
   | PName Name
   | PLit (Lit PTm)
@@ -218,6 +219,9 @@ instance (Monad m) => Pretty m PTm where
     pt <- pretty t
     pcs <- pretty cs
     return $ "case " ++ pt ++ " " ++ curlies pcs
+  pretty (PLambdaCase cs) = do
+    pcs <- pretty cs
+    return $ "case " ++ curlies pcs
   pretty PU = return "Type"
   pretty PWild = return "_"
   pretty (PName n) = pretty n

@@ -420,18 +420,19 @@ lets = curlies $ do
 lam :: Parser PTm
 lam = do
   reservedOp "\\"
-  v <- many1 (((Implicit,) <$> try (square (located (,) var))) <|> ((Explicit,) <$> located (,) var))
-  reservedOp "=>"
-  t <- term
-  n <- sourceName <$> getPosition
-  end <- getPos
-  return $
-    foldr
-      ( \(m, (x, l)) acc ->
-          PLocated (l <> Loc n end end) (PLam m x acc)
-      )
-      t
-      v
+  v <-
+    Left <$> try (reserved "case")
+      <|> Right <$> many1 (((Implicit,) <$> try (square (located (,) var))) <|> ((Explicit,) <$> located (,) var))
+  case v of
+    Left () -> do
+      clauses <- curlies (commaSep caseClause)
+      return $ PLambdaCase clauses
+    Right v' -> do
+      reservedOp "=>"
+      t <- term
+      n <- sourceName <$> getPosition
+      end <- getPos
+      return $ foldr (\(m, (x, l)) acc -> PLocated (l <> Loc n end end) (PLam m x acc)) t v'
 
 -- | Parse a pair.
 pairOrParens :: Parser PTm

@@ -35,10 +35,6 @@ def IInterp : [I : Type] (d : IDesc I, X : I -> Type, i : I) -> Type {
   }
 }
 
-data Foo : Type {
-  foo : [n : Nat, m : Nat, p : Nat] -> (() -> Fin n -> Fin m -> Fin p) -> Foo,
-}
-
 def orn : [X : Type] -> (d : Desc) -> (Interp d X -> X) -> IDesc X {
   ?h3
 }
@@ -75,6 +71,29 @@ data IRep : [I : Type] -> IDesc I -> Type {
     )
     -> IRep d
 }
+
+def is-odd : Nat -> Bool {
+  \case {
+    z => false,
+    s n => case is-even n {
+      true => false,
+      false => true,
+    }
+  }
+}
+
+def foo : (d : Desc) -> Mu d -> Nat {
+  \d v => case d {
+    choice S f => case v {
+      mu (a, b) => ?h1
+    },
+    _ => z
+  }
+}
+
+-- def natRepr : Rep ?h1 {
+--   mk-irep (\_ => ?h1) (\case {})
+-- }
 
 -- data ListE : Type {
 --   list-nil : ListE,
