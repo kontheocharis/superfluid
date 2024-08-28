@@ -177,16 +177,16 @@ caseToSpine v cls = do
     cls
 
 vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
-vRepr l (Finite 0) t = return t
+vRepr _ (Finite 0) t = return t
 vRepr l m (VPi e v ty t) = do
   ty' <- vRepr l m ty
   t' <- reprClosure m t
   return $ VPi e v ty' t'
-vRepr l m (VLam e v t) = do
+vRepr _ m (VLam e v t) = do
   t' <- reprClosure m t
   return $ VLam e v t'
-vRepr l _ VU = return VU
-vRepr l _ (VLit i) = return $ VLit i
+vRepr _ _ VU = return VU
+vRepr _ _ (VLit i) = return $ VLit i
 vRepr l m (VNeu (VApp (VGlobal g) sp)) = do
   g' <- access (getGlobalRepr g)
   sp' <- mapSpineM (vRepr l m) sp
