@@ -10,11 +10,13 @@ module Evaluation
     eval,
     isTypeFamily,
     isCtorTy,
+    ifIsData,
     unelab,
     ($$),
     vApp,
     vRepr,
     evalPat,
+    unfoldDefs,
     quoteSpine,
     unelabSig,
     vLams,
@@ -24,7 +26,7 @@ module Evaluation
   )
 where
 
-import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), Glob (..), Has (..), HasNameSupply (..), Idx (..), Lvl (..), MetaVar, Name (..), PiMode (..), Spine, Tag, Times (..), View (..), globName, inv, lvlToIdx, mapSpineM, nextLvl, nextLvls, unMetaVar, pattern Impossible, pattern Possible)
+import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (..), Has (..), HasNameSupply (..), Idx (..), Lvl (..), MetaVar, Name (..), PiMode (..), Spine, Tag, Times (..), View (..), globName, inv, lvlToIdx, mapSpineM, nextLvl, nextLvls, unMetaVar, pattern Impossible, pattern Possible)
 import Control.Arrow ((***))
 import Control.Monad (foldM)
 import Control.Monad.Extra (concatMapM)
@@ -54,6 +56,7 @@ import Globals
     getGlobalRepr,
     getGlobalTags,
     lookupGlobal,
+    unfoldDef,
   )
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
@@ -70,8 +73,9 @@ import Value
     VTm (..),
     vars,
     pattern VGl,
+    pattern VGlob,
     pattern VMeta,
-    pattern VVar,
+    pattern VVar, VTy,
   )
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
@@ -294,6 +298,15 @@ force v@(VNeu (VApp (VFlex m) sp)) = do
     Nothing -> return v
 force v = return v
 
+unfoldDefs :: (Eval m) => VTm -> m VTm
+unfoldDefs s = case s of
+  VNeu (VApp (VGlobal (DefGlob g)) sp) -> do
+    g' <- access (unfoldDef g)
+    case g' of
+      Just t -> vApp t sp >>= unfoldDefs
+      _ -> return s
+  _ -> return s
+
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
 quoteSpine l t Empty = return t
 quoteSpine l t (sp :|> Arg m u) = do
@@ -362,7 +375,7 @@ envLvl env = Lvl (length env)
 
 isTypeFamily :: (Eval m) => Lvl -> VTm -> m Bool
 isTypeFamily l t = do
-  t' <- force t
+  t' <- force t >>= unfoldDefs
   case t' of
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
@@ -372,13 +385,20 @@ isTypeFamily l t = do
 
 isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m Bool
 isCtorTy l d t = do
-  t' <- force t
+  t' <- force t >> unfoldDefs t
   case t' of
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
     (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
     _ -> return False
+
+ifIsData :: (Eval m) => VTy -> (DataGlobal -> m a) -> m a -> m a
+ifIsData v a b = do
+  v' <- force v >>= unfoldDefs
+  case v' of
+    VGlob (DataGlob g@(DataGlobal _)) _ -> a g
+    _ -> b
 
 unelabMeta :: (Eval m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
 unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of

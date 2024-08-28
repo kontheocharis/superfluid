@@ -73,7 +73,7 @@ import Evaluation
     unelab,
     vApp,
     vRepr,
-    ($$),
+    ($$), ifIsData,
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -541,13 +541,6 @@ checkPatBind x ty = do
     )
   return $ SVar (Idx 0)
 
-ifIsData :: (Elab m) => VTy -> (DataGlobal -> m a) -> m a -> m a
-ifIsData v a b = do
-  v' <- force v
-  case v' of
-    VGlob (DataGlob g@(DataGlobal _)) _ -> a g
-    _ -> b
-
 reprHere :: (Elab m) => Times -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
@@ -752,7 +745,7 @@ check term typ = do
       SLam Implicit x' <$> enterCtx (insertedBind x' a) (check t vb)
     (PUnit, ty@VU) -> check (PName (knownData KnownUnit).globalName) ty
     (PUnit, ty) -> check (PName (knownCtor KnownTt).globalName) ty
-  -- (PName n, ty) | p /= NotInPat -> checkPatBind n ty
+    -- (PName n, ty) | p /= NotInPat -> checkPatBind n ty
     (PLet x a t u, ty) -> do
       forbidPat term
       a' <- check a VU
