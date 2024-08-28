@@ -15,39 +15,9 @@ module Elaboration
 where
 
 import Algebra.Lattice ((/\))
-import Common
-  ( Arg (..),
-    Clause (..),
-    CtorGlobal (..),
-    DataGlobal (..),
-    DefGlobal (..),
-    Glob (..),
-    Has (..),
-    HasNameSupply (..),
-    HasProjectFiles,
-    Idx (..),
-    Lit (..),
-    Loc (NoLoc),
-    Lvl (..),
-    MetaVar,
-    Modify (modify),
-    Name (..),
-    PiMode (..),
-    Spine,
-    Times,
-    View (..),
-    globName,
-    inv,
-    lvlToIdx,
-    mapSpine,
-    nextLvl,
-    nextLvls,
-    pat,
-    unMetaVar,
-    pattern Impossible,
-    pattern Possible,
-  )
+import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), DefGlobal (..), Glob (..), Has (..), HasNameSupply (..), HasProjectFiles, Idx (..), Lit (..), Loc (NoLoc), Lvl (..), MetaVar, Modify (modify), Name (..), PiMode (..), Spine, Tag, Times, View (..), globName, inv, lvlToIdx, mapSpine, nextLvl, nextLvls, pat, unMetaVar, pattern Impossible, pattern Possible)
 import Control.Monad (unless, zipWithM, zipWithM_)
+import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
@@ -61,6 +31,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
+import Data.Set (Set)
 import Debug.Trace (traceM, traceStack)
 import Evaluation
   ( Eval (..),
@@ -87,6 +58,7 @@ import Globals
     KnownGlobal (..),
     PrimGlobalInfo (PrimGlobalInfo),
     addItem,
+    getDataGlobal,
     globalInfoToTm,
     hasName,
     knownCtor,
@@ -133,7 +105,8 @@ data ElabError
   | PotentialMismatch VTm VTm
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
-  | InvalidPattern PTm
+  | InvalidPattern
+  | InvalidNonPattern
   | RemainingProblems [(UnifyError, Loc)]
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
@@ -165,9 +138,10 @@ instance (HasProjectFiles m, Elab m) => Pretty m ElabError where
           return $ "Unresolved variable: " <> n'
         ImplicitMismatch m1 m2 -> do
           return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
-        InvalidPattern p -> do
-          p' <- pretty p
-          return $ "Invalid pattern: " <> p'
+        InvalidPattern -> do
+          return "Invalid in pattern position"
+        InvalidNonPattern -> do
+          return "Invalid in non-pattern position"
         ImpossibleCaseIsPossible t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -498,23 +472,26 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
-forcePiType :: (Elab m) => PiMode -> VTy -> m (VTy, Closure)
-forcePiType m ty = do
+ifForcePiType :: (Elab m) => PiMode -> VTy -> (PiMode -> Name -> VTy -> Closure -> m a) -> (PiMode -> Name -> VTy -> Closure -> m a) -> m a
+ifForcePiType m ty the els = do
   ty' <- force ty
   case ty' of
-    VPi m' _ a b -> do
+    VPi m' x a b -> do
       if m == m'
-        then return (a, b)
-        else elabError $ ImplicitMismatch m m'
+        then the m' x a b
+        else els m' x a b
     _ -> do
       a <- freshMetaHere >>= evalHere
-      v <- uniqueName
-      b <- enterCtx (bind v a) freshMetaHere >>= closeHere 1
-      unifyHere ty (VPi m v a b)
-      return (a, b)
+      x <- uniqueName
+      b <- enterCtx (bind x a) freshMetaHere >>= closeHere 1
+      unifyHere ty (VPi m x a b)
+      the m x a b
 
-forbidPat :: (Elab m) => PTm -> m ()
-forbidPat p = ifInPat (elabError $ InvalidPattern p) (return ())
+forbidPat :: (Elab m) => m ()
+forbidPat = ifInPat (elabError InvalidPattern) (return ())
+
+ensurePat :: (Elab m) => m ()
+ensurePat = ifInPat (return ()) (elabError InvalidPattern)
 
 inferPatBind :: (Elab m) => Name -> m (STm, VTy)
 inferPatBind x = do
@@ -560,47 +537,305 @@ name n =
 ensureNewName :: (Elab m) => Name -> m ()
 ensureNewName n = do
   r <- access (hasName n)
-  if r
-    then elabError $ DuplicateItem n
-    else return ()
-
-checkDef :: (Elab m) => PDef -> m ()
-checkDef def = do
-  ensureNewName def.name
-  ty' <- check def.ty VU >>= evalHere
-  modify (addItem def.name (DefInfo (DefGlobalInfo ty' Nothing Nothing)) def.tags)
-  tm' <- check def.tm ty'
-  vtm <- evalHere tm'
-  b <- normaliseProgram
-  stm <- if b then quote (Lvl 0) vtm else return tm'
-  modify (modifyDefItem (DefGlobal def.name) (\d -> d {tm = Just stm, vtm = Just vtm}))
-  return ()
-
-checkCtor :: (Elab m) => DataGlobal -> Int -> PCtor -> m ()
-checkCtor dat idx ctor = do
-  ensureNewName ctor.name
-  ty' <- check ctor.ty VU >>= evalHere
-  i <- getLvl >>= (\l -> isCtorTy l dat ty')
-  unless i (elabError $ InvalidCtorType ty')
-  modify (addItem ctor.name (CtorInfo (CtorGlobalInfo ty' idx dat)) ctor.tags)
-  modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal ctor.name]}))
+  when r $ elabError $ DuplicateItem n
 
 getLvl :: (Elab m) => m Lvl
 getLvl = accessCtx (\c -> c.lvl)
 
+inPatNames :: InPat -> [Name]
+inPatNames (InPossiblePat ns) = ns
+inPatNames _ = []
+
+evalInOwnCtxHere :: (Elab m) => Closure -> m VTm
+evalInOwnCtxHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  evalInOwnCtx l t
+
+data Mode = Check VTy | Infer
+
+type Child m = (Mode -> m (STm, VTy))
+
+lam :: (Elab m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
+lam mode m x t = do
+  forbidPat
+  case mode of
+    Check ty ->
+      ifForcePiType
+        m
+        ty
+        ( \_ x' a b -> do
+            vb <- evalInOwnCtxHere b
+            (t', _) <- enterCtx (bind x a) (t (Check vb))
+            return (SLam m x t', VPi m x' a b)
+        )
+        ( \m' x' a b -> case m' of
+            Implicit -> insertLam x' a b (\s -> lam s m x t)
+            _ -> elabError $ ImplicitMismatch m m'
+        )
+    Infer -> do
+      a <- freshMetaHere >>= evalHere
+      (t', b) <- enterCtx (bind x a) $ t Infer >>= insert
+      b' <- closeValHere 1 b
+      return (SLam m x t', VPi m x a b')
+
+insertLam :: (Elab m) => Name -> VTy -> Closure -> Child m -> m (STm, VTy)
+insertLam x' a b t = do
+  vb <- evalInOwnCtxHere b
+  (t', _) <- enterCtx (insertedBind x' a) (t (Check vb))
+  return (SLam Implicit x' t', VPi Implicit x' a b)
+
+letIn :: (Elab m) => Mode -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
+letIn mode x a t u = do
+  forbidPat
+  (a', _) <- a (Check VU)
+  va <- evalHere a'
+  (t', _) <- t (Check va)
+  vt <- evalHere t'
+  (u', ty) <- enterCtx (define x vt va) $ u mode
+  return (SLet x a' t' u', ty)
+
+spine :: (Elab m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
+spine (t, ty) Empty = return (t, ty)
+spine (t, ty) (Arg m u :<| sp) = do
+  (t', ty') <- case m of
+    Implicit -> return (t, ty)
+    Explicit -> insertFull (t, ty)
+    Instance -> error "unimplemented"
+  ifForcePiType
+    m
+    ty'
+    ( \_ _ a b -> do
+        (u', _) <- u (Check a)
+        uv <- evalHere u'
+        b' <- b $$ [uv]
+        spine (SApp m t' u', b') sp
+    )
+    (\m' _ _ _ -> elabError $ ImplicitMismatch m m')
+
+app :: (Elab m) => Child m -> Spine (Child m) -> m (STm, VTy)
+app s sp = do
+  (s', sTy) <- s Infer
+  spine (s', sTy) sp
+
+univ :: (Elab m) => m (STm, VTy)
+univ = do
+  forbidPat
+  return (SU, VU)
+
+piTy :: (Elab m) => PiMode -> Name -> Child m -> Child m -> m (STm, VTy)
+piTy m x a b = do
+  forbidPat
+  (a', _) <- a (Check VU)
+  av <- evalHere a'
+  (b', _) <- enterCtx (bind x av) $ b (Check VU)
+  return (SPi m x a' b', VU)
+
+repr :: (Elab m) => Mode -> Times -> Child m -> m (STm, VTy)
+repr mode m t = do
+  forbidPat
+  case mode of
+    Check ty@(VNeu (VRepr m' t')) | m == m' -> do
+      (tc, _) <- t (Check (VNeu (VHead t')))
+      return (SRepr m tc, ty)
+    Check ty | m < mempty -> do
+      (t', ty') <- t Infer >>= insert
+      reprTy <- reprHere (inv m) ty
+      unifyHere reprTy ty'
+      return (SRepr m t', ty)
+    Check ty -> checkByInfer (repr Infer m t) ty
+    Infer -> do
+      (t', ty) <- t Infer
+      reprTy <- reprHere m ty
+      return (SRepr m t', reprTy)
+
+checkByInfer :: (Elab m) => m (STm, VTy) -> VTy -> m (STm, VTy)
+checkByInfer t ty = do
+  (t', ty') <- t >>= insert
+  unifyHere ty ty'
+  return (t', ty)
+
+wildPat :: (Elab m) => Mode -> m (STm, VTy)
+wildPat (Check ty) = do
+  n <- uniqueName
+  n' <- checkPatBind n ty
+  return (n', ty)
+wildPat Infer = uniqueName >>= inferPatBind
+
+pat :: (Elab m) => InPat -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
+pat inPt pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
+  (p', t, ns) <- enterPat inPt $ do
+    (p', t') <- pt Infer >>= insert
+    ns <- inPatNames <$> inPat
+    runInsidePatScope (SPat p' ns) t'
+    return (p', t', ns)
+  runOutsidePatScope (SPat p' ns) t
+
+matchPat :: (Elab m) => VTm -> VTy -> SPat -> VTy -> m ()
+matchPat vs ssTy sp spTy = do
+  vp <- evalPatHere sp
+  u <- canUnifyHere ssTy spTy /\ canUnifyHere vp.vPat vs
+  handleUnification vp.vPat vs u
+
+caseOf :: (Elab m) => Mode -> Child m -> [Clause (Child m) (Child m)] -> m (STm, VTy)
+caseOf mode s cs = do
+  forbidPat
+  case mode of
+    Infer -> do
+      retTy <- freshMetaHere >>= evalHere
+      caseOf (Check retTy) s cs
+    Check ty -> do
+      (ss, ssTy) <- s Infer
+      d <- ifIsData ssTy return (elabError $ InvalidCaseSubject ss ssTy)
+      vs <- evalHere ss
+      scs <-
+        mapM
+          ( \case
+              Possible p t -> pat (InPossiblePat []) p (matchPat vs ssTy) $ \sp _ -> do
+                (st, _) <- t (Check ty)
+                return $ Possible sp st
+              Impossible p -> pat InImpossiblePat p (matchPat vs ssTy) $ \sp _ -> do
+                return $ Impossible sp
+          )
+          cs
+      return (SCase d ss scs, ty)
+
+meta :: (Elab m) => Mode -> Maybe Name -> m (STm, VTy)
+meta mode n = do
+  forbidPat
+  case mode of
+    Infer -> inferMetaHere n
+    Check ty -> do
+      m <- checkMetaHere n ty
+      return (m, ty)
+
+lit :: (Elab m) => Mode -> Lit (Child m) -> m (STm, VTy)
+lit mode l = case mode of
+  Check ty -> checkByInfer (lit Infer l) ty
+  Infer -> do
+    (l', ty, args) <- case l of
+      StringLit s -> return (StringLit s, KnownString, Empty)
+      CharLit c -> return (CharLit c, KnownChar, Empty)
+      NatLit n -> return (NatLit n, KnownNat, Empty)
+      FinLit f bound -> do
+        (bound', _) <- bound (Check (VGlob (DataGlob (knownData KnownNat)) Empty))
+        vbound' <- evalHere bound'
+        return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
+    return (SLit l', VGlob (DataGlob (knownData ty)) args)
+
+defItem :: (Elab m) => Name -> Set Tag -> Child m -> Child m -> m ()
+defItem n ts ty tm = do
+  ensureNewName n
+  (ty', _) <- ty (Check VU)
+  vty <- evalHere ty'
+  modify (addItem n (DefInfo (DefGlobalInfo vty Nothing Nothing)) ts)
+  (tm', _) <- tm (Check vty)
+  vtm <- evalHere tm'
+  b <- normaliseProgram
+  stm <- if b then quote (Lvl 0) vtm else return tm'
+  modify (modifyDefItem (DefGlobal n) (\d -> d {tm = Just stm, vtm = Just vtm}))
+  return ()
+
+dataItem :: (Elab m) => Name -> Set Tag -> Child m -> m ()
+dataItem n ts ty = do
+  ensureNewName n
+  (ty', _) <- ty (Check VU)
+  vty <- evalHere ty'
+  i <- getLvl >>= (`isTypeFamily` vty)
+  unless i (elabError $ InvalidDataFamily vty)
+  modify (addItem n (DataInfo (DataGlobalInfo vty [])) ts)
+
+ctorItem :: (Elab m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
+ctorItem dat n ts ty = do
+  ensureNewName n
+  idx <- access (\s -> length (getDataGlobal dat s).ctors)
+  (ty', _) <- ty (Check VU)
+  vty <- evalHere ty'
+  i <- getLvl >>= (\l -> isCtorTy l dat vty)
+  unless i (elabError $ InvalidCtorType vty)
+  modify (addItem n (CtorInfo (CtorGlobalInfo vty idx dat)) ts)
+  modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
+
+-- Presyntax exists below here
+
+pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
+pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit) ts)
+
+pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
+pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
+
+elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
+elab p Infer = infer p
+elab p (Check ty) = check p ty
+
+checkEval :: (Elab m) => PTm -> VTy -> m (VTm, VTy)
+checkEval p ty = do
+  (t, ty') <- check p ty
+  v <- evalHere t
+  return (v, ty')
+
+check :: (Elab m) => PTm -> VTy -> m (STm, VTy)
+check term typ = do
+  typ' <- force typ
+  case (term, typ') of
+    (PLocated l t, ty) -> enterLoc l (check t ty)
+    (PLam m x t, ty) -> lam (Check ty) m x (elab t)
+    (t, VPi Implicit x' a b) -> insertLam x' a b (elab t)
+    (PUnit, ty@VU) -> check (pKnownData KnownUnit []) ty
+    (PUnit, ty) -> check (pKnownCtor KnownTt []) ty
+    (PLet x a t u, ty) -> letIn (Check ty) x (elab a) (elab t) (elab u)
+    (PRepr m t, ty) -> repr (Check ty) m (elab t)
+    (PHole n, ty) -> meta (Check ty) (Just n)
+    (PWild, ty) ->
+      ifInPat
+        (wildPat (Check ty))
+        (meta (Check ty) Nothing)
+    (PLambdaCase cs, ty) -> do
+      n <- uniqueName
+      check (PLam Explicit n (PCase (PName n) cs)) ty
+    (PCase s cs, ty) -> caseOf (Check ty) (elab s) (map (bimap elab elab) cs)
+    (te, ty) -> checkByInfer (infer te) ty
+
+infer :: (Elab m) => PTm -> m (STm, VTy)
+infer term = case term of
+  PLocated l t -> enterLoc l $ infer t
+  PName x -> name x
+  PSigma x a b -> infer $ pKnownData KnownSigma [a, PLam Explicit x b]
+  PUnit -> infer $ pKnownData KnownUnit []
+  PPair t1 t2 -> infer $ pKnownCtor KnownPair [t1, t2]
+  PLam m x t -> lam Infer m x (elab t)
+  PApp {} -> do
+    let (s, sp) = toPSpine term
+    app (elab s) (mapSpine elab sp)
+  PU -> univ
+  PPi m x a b -> piTy m x (elab a) (elab b)
+  PLet x a t u -> letIn Infer x (elab a) (elab t) (elab u)
+  PRepr m x -> repr Infer m (elab x)
+  PHole n -> meta Infer (Just n)
+  PWild ->
+    ifInPat
+      (wildPat Infer)
+      (meta Infer Nothing)
+  PLambdaCase cs -> do
+    n <- uniqueName
+    infer $ PLam Explicit n (PCase (PName n) cs)
+  PCase s cs -> caseOf Infer (elab s) (map (bimap elab elab) cs)
+  PLit l -> lit Infer (fmap elab l)
+
+checkDef :: (Elab m) => PDef -> m ()
+checkDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
+
+checkCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
+checkCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
+
 checkData :: (Elab m) => PData -> m ()
 checkData dat = do
-  ensureNewName dat.name
-  ty' <- check dat.ty VU >>= evalHere
-  i <- getLvl >>= (`isTypeFamily` ty')
-  unless i (elabError $ InvalidDataFamily ty')
-  modify (addItem dat.name (DataInfo (DataGlobalInfo ty' [])) dat.tags)
-  zipWithM_ (checkCtor (DataGlobal dat.name)) [0 ..] dat.ctors
+  dataItem dat.name dat.tags (elab dat.ty)
+  mapM_ (checkCtor (DataGlobal dat.name)) dat.ctors
 
 checkPrim :: (Elab m) => PPrim -> m ()
 checkPrim prim = do
   ensureNewName prim.name
-  ty' <- check prim.ty VU >>= evalHere
+  (ty', _) <- checkEval prim.ty VU
   modify (addItem prim.name (PrimInfo (PrimGlobalInfo ty')) prim.tags)
   return ()
 
@@ -618,240 +853,3 @@ checkItem i = do
 
 checkProgram :: (Elab m) => PProgram -> m ()
 checkProgram (PProgram items) = mapM_ checkItem items
-
-inPatNames :: InPat -> [Name]
-inPatNames (InPossiblePat ns) = ns
-inPatNames _ = []
-
-evalInOwnCtxHere :: (Elab m) => Closure -> m VTm
-evalInOwnCtxHere t = do
-  l <- accessCtx (\c -> c.lvl)
-  evalInOwnCtx l t
-
-data Mode = Check VTy | Infer
-
-type Child m = (Mode -> m (STm, VTy))
-
-lam :: (Elab m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
-lam (Check (VPi m' x' a b)) m x t | m == m' = do
-  vb <- evalInOwnCtxHere b
-  (t', _) <- enterCtx (bind x a) (t (Check vb))
-  return (SLam m x t', VPi m' x' a b)
-lam Infer m x t = do
-  a <- freshMetaHere >>= evalHere
-  (t', b) <- enterCtx (bind x a) $ t Infer >>= insert
-  b' <- closeValHere 1 b
-  return (SLam m x t', VPi m x a b')
-
-insertLam :: (Elab m) => Name -> VTy -> Closure -> Child m -> m (STm, VTy)
-insertLam x' a b t = do
-  vb <- evalInOwnCtxHere b
-  (t', _) <- enterCtx (insertedBind x' a) (t (Check vb))
-  return (SLam Implicit x' t', VPi Implicit x' a b)
-
-letIn :: (Elab m) => Mode -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
-letIn mode x a t u = do
-  (a', _) <- a (Check VU)
-  va <- evalHere a'
-  (t', _) <- t (Check va)
-  vt <- evalHere t'
-  (u', ty) <- enterCtx (define x vt va) $ u mode
-  return (SLet x a' t' u', ty)
-
-checkSpine :: (Elab m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
-checkSpine (t, ty) Empty = return (t, ty)
-checkSpine (t, ty) (Arg m u :<| sp) = do
-  (t', ty') <- case m of
-    Implicit -> return (t, ty)
-    Explicit -> insertFull (t, ty)
-    Instance -> error "unimplemented"
-  (a, b) <- forcePiType m ty'
-  (u', _) <- u (Check a)
-  uv <- evalHere u'
-  b' <- b $$ [uv]
-  checkSpine (SApp m t' u', b') sp
-
-app :: (Elab m) => Child m -> Spine (Child m) -> m (STm, VTy)
-app s sp = do
-  (s', sTy) <- s Infer
-  checkSpine (s', sTy) sp
-
-univ :: (Elab m) => m (STm, VTy)
-univ = return (SU, VU)
-
-piTy :: (Elab m) => PiMode -> Name -> Child m -> Child m -> m (STm, VTy)
-piTy m x a b = do
-  (a', _) <- a (Check VU)
-  av <- evalHere a'
-  (b', _) <- enterCtx (bind x av) $ b (Check VU)
-  return (SPi m x a' b', VU)
-
--- check' :: (Elab m) => PTm -> VTy -> m (STm, VTy)
--- check' term typ = do
---   term' <- check term typ
---   return (term', typ)
-
-repr :: (Elab m) => Mode -> Times -> Child m -> m (STm, VTy)
-repr (Check ty@(VNeu (VRepr m' t'))) m t | m == m' = do
-  (tc, _) <- t (Check (VNeu (VHead t')))
-  return (SRepr m tc, ty)
-repr (Check ty) m t | m < mempty = do
-  (t', ty') <- t Infer >>= insert
-  reprTy <- reprHere (inv m) ty
-  unifyHere reprTy ty'
-  return (SRepr m t', ty)
-repr (Check ty) m t = checkByInfer (repr Infer m t) ty
-repr Infer m t = do
-  (t', ty) <- t Infer
-  reprTy <- reprHere m ty
-  return (SRepr m t', reprTy)
-
-checkByInfer :: (Elab m) => m (STm, VTy) -> VTy -> m (STm, VTy)
-checkByInfer t ty = do
-  (t', ty') <- t >>= insert
-  unifyHere ty ty'
-  return (t', ty)
-
-wildPat :: (Elab m) => Mode -> m (STm, VTy)
-wildPat (Check ty) = do
-  n <- uniqueName
-  n' <- checkPatBind n ty
-  return (n', ty)
-wildPat Infer = uniqueName >>= inferPatBind
-
-pat :: (Elab m) => Mode -> InPat -> Child m -> (SPat -> VTy -> m a) -> m a
-pat m o p f = enterCtx id $ do
-  (p', t, ns) <- enterPat o $ do
-    (p', t') <- p m
-    ns <- inPatNames <$> inPat
-    return (p', t', ns)
-  f (SPat p' ns) t
-
-matchPat :: (Elab m) => (SPat, VTy) -> (STm, VTy) -> m ()
-matchPat (sp, spTy) (ss, ssTy) = do
-  vs <- evalHere ss
-  vp <- evalPatHere sp
-  u <- canUnifyHere ssTy spTy /\ canUnifyHere vp.vPat vs
-  handleUnification vp.vPat vs u
-
-caseOf :: (Elab m) => Mode -> Child m -> [Clause (Child m) (Child m)] -> m (STm, VTy)
-caseOf Infer s cs = do
-  retTy <- freshMetaHere >>= evalHere
-  caseOf (Check retTy) s cs
-caseOf (Check ty) s cs = do
-  (ss, ssTy) <- s Infer >>= insert
-  d <- ifIsData ssTy return (elabError $ InvalidCaseSubject ss ssTy)
-  scs <-
-    mapM
-      ( \case
-          Possible p t -> pat Infer (InPossiblePat []) p $ \sp spTy -> do
-            matchPat (sp, spTy) (ss, ssTy)
-            (st, _) <- t (Check ty)
-            return $ Possible sp st
-          Impossible p -> pat Infer InImpossiblePat p $ \sp spTy -> do
-            matchPat (sp, spTy) (ss, ssTy)
-            return $ Impossible sp
-      )
-      cs
-  return (SCase d ss scs, ty)
-
-meta :: (Elab m) => Mode -> Maybe Name -> m (STm, VTy)
-meta Infer n = inferMetaHere n
-meta (Check ty) n = do
-  m <- checkMetaHere n ty
-  return (m, ty)
-
-lit :: (Elab m) => Mode -> Lit (Child m) -> m (STm, VTy)
-lit (Check ty) l = checkByInfer (lit Infer l) ty
-lit Infer l = do
-  (l', ty, args) <- case l of
-    StringLit s -> return (StringLit s, KnownString, Empty)
-    CharLit c -> return (CharLit c, KnownChar, Empty)
-    NatLit n -> return (NatLit n, KnownNat, Empty)
-    FinLit f bound -> do
-      (bound', _) <- bound (Check (VGlob (DataGlob (knownData KnownNat)) Empty))
-      vbound' <- evalHere bound'
-      return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
-  return (SLit l', VGlob (DataGlob (knownData ty)) args)
-
--- Presyntax exists below here
-
-pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
-pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit) ts)
-
-pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
-pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
-
-elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
-elab p Infer = infer p
-elab p (Check ty) = check p ty
-
-check :: (Elab m) => PTm -> VTy -> m (STm, VTy)
-check term typ = do
-  typ' <- force typ
-  case (term, typ') of
-    (PLocated l t, ty) -> enterLoc l (check t ty)
-    (PLam m x t, VPi m' x' a b) | m == m' -> do
-      forbidPat term
-      lam (Check (VPi m' x' a b)) m x (elab t)
-    (t, VPi Implicit x' a b) -> do
-      insertLam x' a b (elab t)
-    (PUnit, ty@VU) -> check (pKnownData KnownUnit []) ty
-    (PUnit, ty) -> check (pKnownCtor KnownTt []) ty
-    (PLet x a t u, ty) -> do
-      forbidPat term
-      letIn (Check ty) x (elab a) (elab t) (elab u)
-    (PRepr m t, ty) -> do
-      forbidPat term
-      repr (Check ty) m (elab t)
-    (PHole n, ty) -> do
-      forbidPat term
-      meta (Check ty) (Just n)
-    (PWild, ty) ->
-      ifInPat
-        (wildPat (Check ty))
-        (meta (Check ty) Nothing)
-    (PLambdaCase cs, ty) -> do
-      n <- uniqueName
-      check (PLam Explicit n (PCase (PName n) cs)) ty
-    (PCase s cs, ty) -> do
-      caseOf (Check ty) (elab s) (map (bimap elab elab) cs)
-    (te, ty) -> checkByInfer (infer te) ty
-
-infer :: (Elab m) => PTm -> m (STm, VTy)
-infer term = case term of
-  PLocated l t -> enterLoc l $ infer t
-  PName x -> name x
-  PSigma x a b -> infer $ pKnownData KnownSigma [a, PLam Explicit x b]
-  PUnit -> infer $ pKnownData KnownUnit []
-  PPair t1 t2 -> infer $ pKnownCtor KnownPair [t1, t2]
-  PLam m x t -> do
-    forbidPat term
-    lam Infer m x (elab t)
-  PApp {} -> do
-    let (s, sp) = toPSpine term
-    app (elab s) (mapSpine elab sp)
-  PU -> forbidPat term >> univ
-  PPi m x a b -> do
-    forbidPat term
-    piTy m x (elab a) (elab b)
-  PLet x a t u -> do
-    forbidPat term
-    letIn Infer x (elab a) (elab t) (elab u)
-  PRepr m x -> do
-    forbidPat term
-    repr Infer m (elab x)
-  PHole n -> do
-    forbidPat term
-    meta Infer (Just n)
-  PWild ->
-    ifInPat
-      (wildPat Infer)
-      (meta Infer Nothing)
-  PLambdaCase cs -> do
-    n <- uniqueName
-    infer $ PLam Explicit n (PCase (PName n) cs)
-  PCase s cs -> do
-    forbidPat term
-    caseOf Infer (elab s) (map (bimap elab elab) cs)
-  PLit l -> lit Infer (fmap elab l)
