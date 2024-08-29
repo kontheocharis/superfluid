@@ -61,8 +61,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Typechecking (Ctx, InPat (..), Tc (showMessage, tcError), TcError, emptyCtx)
-import Unification (Problem, Unify)
+import Typechecking (Ctx, InPat (..), Problem, Tc (showMessage, tcError), TcError, emptyCtx)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -151,8 +150,7 @@ data Compiler = Compiler
     currentLoc :: Loc,
     normaliseProgram :: Bool,
     lastNameIdx :: Int,
-    reduceUnfoldDefs :: Bool,
-    problems :: Seq Problem
+    reduceUnfoldDefs :: Bool
   }
 
 data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError
@@ -186,12 +184,6 @@ instance Eval Comp where
   setNormaliseProgram b = ST.modify (\s -> s {normaliseProgram = b})
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
   setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
-
-instance Has Comp (Seq Problem) where
-  view = gets (\c -> c.problems)
-  modify f = ST.modify (\s -> s {problems = f s.problems})
-
-instance Unify Comp
 
 instance Tc Comp where
   tcError = throwError . TcCompilerError
@@ -227,8 +219,7 @@ emptyCompiler =
       inPat = NotInPat,
       normaliseProgram = False,
       lastNameIdx = 0,
-      reduceUnfoldDefs = False,
-      problems = mempty
+      reduceUnfoldDefs = False
     }
 
 runComp :: Comp a -> Compiler -> IO ()

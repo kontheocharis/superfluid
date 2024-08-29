@@ -32,8 +32,8 @@ def upgrade-i : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add i n) {
   }
 }
 
-def main : (n : Nat) * Vec Nat n {
-  (1, vcons z vnil)
+def main : Nat -> (n : Nat) * Vec Nat n {
+  \n => (n, repeat n z)
 }
 
 

@@ -22,6 +22,7 @@ module Evaluation
     vLams,
     uniqueVLams,
     evalInOwnCtx,
+    extendEnvByNVars,
     close,
   )
 where

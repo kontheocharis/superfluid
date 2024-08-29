@@ -288,8 +288,6 @@ class (Monad m) => Has m a where
 
 -- instance () => Has (With a m) a
 
-
-
 -- Printing
 
 instance (Monad m) => Pretty m Name where

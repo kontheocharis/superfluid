@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -9,6 +10,7 @@ module Typechecking
     emptyCtx,
     Mode (..),
     InPat (..),
+    Problem,
     lam,
     letIn,
     app,
@@ -30,7 +32,7 @@ module Typechecking
   )
 where
 
-import Algebra.Lattice ((/\))
+import Algebra.Lattice (Lattice (..), (/\))
 import Common
   ( Arg (..),
     Clause (..),
@@ -45,6 +47,7 @@ import Common
     Lit (..),
     Loc (NoLoc),
     Lvl (..),
+    MetaVar,
     Name (..),
     PiMode (..),
     Spine,
@@ -59,9 +62,12 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (unless)
+import Control.Monad (replicateM, unless, void)
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
-import Data.Foldable (Foldable (..))
+import Control.Monad.Trans (MonadTrans (lift))
+import Data.Bitraversable (Bitraversable (bitraverse))
+import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate, zipWith4)
 import qualified Data.List.NonEmpty as NE
@@ -70,6 +76,7 @@ import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
+import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -83,8 +90,9 @@ import Evaluation
     quote,
     resolve,
     unfoldDefs,
+    vApp,
     vRepr,
-    ($$),
+    ($$), extendEnvByNVars,
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -101,28 +109,27 @@ import Globals
     lookupGlobal,
     modifyDataItem,
     modifyDefItem,
+    unfoldDef,
   )
-import Meta (freshMetaVar)
+import Literals (unfoldLit)
+import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..))
-import Unification
-  ( CanUnify (..),
-    Unify (),
-    UnifyError (..),
-    getProblems,
-    loc,
-    prevErrorString,
-    unify,
-    unifyErrorIsMetaRelated,
-  )
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), uniqueSLams)
 import Value
   ( Closure (..),
     Env,
-    Sub,
+    PRen (..),
+    Sub (..),
+    VHead (..),
+    VNeu (..),
     VPatB (..),
     VTm (..),
     VTy,
+    env,
     isEmptySub,
+    liftPRenN,
+    numVars,
+    subbing,
     vars,
     pattern VGlob,
     pattern VHead,
@@ -136,7 +143,7 @@ data TcError
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern
-  | RemainingProblems [(UnifyError, Loc)]
+  | RemainingProblems [Problem]
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm [UnifyError]
@@ -203,10 +210,10 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         RemainingProblems ps -> do
           ps' <-
             mapM
-              ( \(l, c) -> do
-                  l' <- pretty l
-                  c' <- pretty c
-                  return $ c' ++ "\n" ++ l'
+              ( \p -> enter (const p.names) . enter (const p.lvl) $ do
+                  l' <- pretty p.loc
+                  c' <- intercalate "\n" <$> mapM pretty (toList p.errs)
+                  return $ l' ++ "\n" ++ c'
               )
               ps
           return $ "Cannot solve some metavariables:\n" ++ indentedFst (intercalate "\n" ps')
@@ -219,7 +226,7 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Unify m, Has m Loc, Has m InPat, Has m Ctx) => Tc m where
+class (Eval m, Has m Loc, Has m InPat, Has m Ctx) => Tc m where
   getCtx :: m Ctx
   getCtx = view
 
@@ -266,13 +273,17 @@ data Ctx = Ctx
     types :: [VTy],
     bounds :: Bounds,
     nameList :: [Name],
-    names :: Map Name Lvl
+    names :: Map Name Lvl,
+    problems :: Seq Problem
   }
 
 data Mode = Check VTy | Infer
 
 type Child m = (Mode -> m (STm, VTy))
 
+instance (Tc m) => Has m (Env VTm) where
+  view = accessCtx (\c -> c.env)
+  modify f = modifyCtx (\c -> c {env = f c.env})
 instance (Tc m) => Has m [Name] where
   view = accessCtx (\c -> c.nameList)
   modify f = modifyCtx (\c -> c {nameList = f c.nameList})
@@ -280,6 +291,10 @@ instance (Tc m) => Has m [Name] where
 instance (Tc m) => Has m Lvl where
   view = accessCtx (\c -> c.lvl)
   modify f = modifyCtx (\c -> c {lvl = f c.lvl})
+
+instance (Tc m) => Has m (Seq Problem) where
+  view = accessCtx (\c -> c.problems)
+  modify f = modifyCtx (\c -> c {problems = f c.problems})
 
 instance (Eval m, Has m [Name]) => Pretty m Ctx where
   pretty c =
@@ -319,17 +334,17 @@ emptyCtx =
       types = [],
       bounds = [],
       nameList = [],
-      names = M.empty
+      names = M.empty,
+      problems = S.empty
     }
 
 ensureAllProblemsSolved :: (Tc m) => m ()
 ensureAllProblemsSolved = do
-  ps <- getProblems
+  solveRemainingProblems
+  ps <- accessCtx (\c -> c.problems)
   if S.null ps
     then return ()
-    else do
-      let ps' = fmap (\p -> (PrevError p.prevErrorString, p.loc)) ps
-      tcError $ RemainingProblems (toList ps')
+    else tcError $ RemainingProblems (toList ps)
 
 applySubToCtx :: (Tc m) => Sub -> m ()
 applySubToCtx sub = do
@@ -474,15 +489,15 @@ handleUnification t1 t2 r = do
 
 canUnifyHere :: (Tc m) => VTm -> VTm -> m CanUnify
 canUnifyHere t1 t2 = do
-  l <- accessCtx (\c -> c.lvl)
+  -- l <- accessCtx (\c -> c.lvl)
   t1' <- resolveHere t1
   t2' <- resolveHere t2
-  unify l t1' t2'
+  unify t1' t2'
 
 resolveHere :: (Tc m) => VTm -> m VTm
 resolveHere t = do
-  l <- accessCtx (\c -> c.env)
-  resolve l t
+  e <- accessCtx (\c -> c.env)
+  resolve e t
 
 unifyHere :: (Tc m) => VTm -> VTm -> m ()
 unifyHere t1 t2 = do
@@ -778,3 +793,332 @@ primItem n ts ty = do
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
   modify (addItem n (PrimInfo (PrimGlobalInfo vty)) ts)
+
+data UnifyError
+  = DifferentSpineLengths (Spine VTm) (Spine VTm)
+  | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
+  | Mismatching VTm VTm
+  | SolveError SolveError
+  | ErrorInCtx [Name] Lvl UnifyError
+  deriving (Show)
+
+unifyErrorIsMetaRelated :: UnifyError -> Bool
+unifyErrorIsMetaRelated (SolveError _) = True
+unifyErrorIsMetaRelated _ = False
+
+data SolveError
+  = InvertError (Spine VTm)
+  | OccursError MetaVar VTm
+  | EscapingVariable VTm
+  deriving (Show)
+
+data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
+
+instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m CanUnify where
+  pretty Yes = return "can unify"
+  pretty (No xs) = do
+    xs' <- intercalate ", " <$> mapM pretty xs
+    return $ "cannot unify: " ++ xs'
+  pretty (Maybe s) = do
+    s' <- pretty s
+    return $ "can only unify if: " ++ s'
+
+instance (Eval m, Has m [Name]) => Pretty m SolveError where
+  pretty (InvertError s) = do
+    s' <- pretty s
+    return $ "the arguments " ++ s' ++ " contain non-variables"
+  pretty (OccursError m t) = do
+    t' <- pretty t
+    m' <- pretty (SMeta m [])
+    return $ "the meta-variable " ++ m' ++ " occurs in " ++ t'
+  pretty (EscapingVariable t) = do
+    t' <- pretty t
+    return $ "a variable is missing from " ++ t'
+
+instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m UnifyError where
+  pretty (SolveError e) = pretty e
+  pretty (DifferentSpineLengths s s') = do
+    s'' <- pretty s
+    s''' <- pretty s'
+    return $ "the arguments " ++ s'' ++ " and " ++ s''' ++ " have different lengths"
+  pretty (DifferentClauses cs cs') = do
+    cs'' <- pretty cs
+    cs''' <- pretty cs'
+    return $ "the clauses " ++ cs'' ++ " and " ++ cs''' ++ " are different"
+  pretty (Mismatching t t') = do
+    t'' <- pretty t
+    t''' <- pretty t'
+    return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
+  pretty (ErrorInCtx ns l e) = enter (const ns) . enter (const l) $ pretty e
+
+instance (Eval m) => Lattice (m CanUnify) where
+  a \/ b = do
+    a' <- a
+    case a' of
+      Yes -> a
+      No _ -> b
+      Maybe _ -> do
+        b' <- b
+        case b' of
+          Yes -> return Yes
+          No _ -> a
+          Maybe _ -> return $ Maybe mempty
+
+  a /\ b = do
+    a' <- a
+    case a' of
+      Yes -> b
+      No xs -> do
+        b' <- b
+        case b' of
+          Yes -> a
+          No ys -> return $ No (xs ++ ys)
+          Maybe _ -> return $ No xs
+      Maybe xs -> do
+        b' <- b
+        case b' of
+          Yes -> return $ Maybe xs
+          No ys -> return $ No ys
+          Maybe ys -> return $ Maybe (xs <> ys)
+
+type SolveT = ExceptT SolveError
+
+enterClosure :: (Tc m) => Closure -> m a -> m a
+enterClosure c m = do
+  bs <- replicateM c.numVars uniqueName
+  enter (`nextLvls` c.numVars) . enter (bs ++) . enter (extendEnvByNVars c.numVars) $ m
+
+enterPatBinds :: (Tc m) => VPatB -> m a -> m a
+enterPatBinds p = enter (`nextLvls` length p.binds) . enter (p.binds ++) . enter (extendEnvByNVars (length p.binds))
+
+invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
+invertSpine Empty = do
+  l <- lift getLvl
+  return $ PRen (Lvl 0) l mempty
+invertSpine s@(sp' :|> Arg _ t) = do
+  (PRen dom cod ren) <- invertSpine sp'
+  f <- lift $ force t
+  case f of
+    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' dom ren)
+    _ -> throwError $ InvertError s
+
+renameSp :: (Tc m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
+renameSp _ _ t Empty = return t
+renameSp m pren t (sp :|> Arg i u) = do
+  xs <- renameSp m pren t sp
+  ys <- rename m pren u
+  return $ SApp i xs ys
+
+renameClosure :: (Tc m) => MetaVar -> PRen -> Closure -> SolveT m STm
+renameClosure m pren cl = do
+  vt <- lift $ evalInOwnCtx pren.codSize cl
+  rename m (liftPRenN cl.numVars pren) vt
+
+renamePat :: (Tc m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
+renamePat m pren (VPatB p binds) = do
+  let n = length binds
+  p' <- rename m (liftPRenN n pren) p
+  return $ SPat p' binds
+
+-- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
+rename :: (Tc m) => MetaVar -> PRen -> VTm -> SolveT m STm
+rename m pren tm = do
+  f <- lift $ force tm
+  case f of
+    VNeu (VApp (VFlex m') sp)
+      | m == m' -> throwError $ OccursError m tm
+      | otherwise -> renameSp m pren (SMeta m' []) sp
+    VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
+      Nothing -> throwError $ EscapingVariable tm
+      Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
+    VNeu (VReprApp n h sp) -> do
+      t' <- rename m pren (VNeu (VApp h Empty))
+      renameSp m pren (SRepr n t') sp
+    VNeu (VCaseApp dat v cs sp) -> do
+      v' <- rename m pren (VNeu v)
+      cs' <- mapM (bitraverse (renamePat m pren) (renameClosure m pren)) cs
+      renameSp m pren (SCase dat v' cs') sp
+    VLam i x t -> do
+      t' <- renameClosure m pren t
+      return $ SLam i x t'
+    VPi i x a b -> do
+      a' <- rename m pren a
+      b' <- renameClosure m pren b
+      return $ SPi i x a' b'
+    VU -> return SU
+    VNeu (VApp (VGlobal g) sp) -> renameSp m pren (SGlobal g) sp
+    VLit lit -> SLit <$> traverse (rename m pren) lit
+
+unifySpines :: (Tc m) => Spine VTm -> Spine VTm -> m CanUnify
+unifySpines Empty Empty = return Yes
+unifySpines (sp :|> Arg _ u) (sp' :|> Arg _ u') = unifySpines sp sp' /\ unify u u'
+unifySpines sp sp' = return $ No [DifferentSpineLengths sp sp']
+
+unifyClauses :: (Tc m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
+unifyClauses [] [] = return Yes
+unifyClauses (c : cs) (c' : cs') = unifyClause c c' /\ unifyClauses cs cs'
+unifyClauses a b = return $ No [DifferentClauses a b]
+
+unifyPat :: (Tc m) => VPatB -> VPatB -> m CanUnify
+unifyPat pt@(VPatB p binds) (VPatB p' binds') = do
+  let n = length binds
+  let n' = length binds'
+  if n == n'
+    then enterPatBinds pt $ unify p p'
+    else return $ No []
+
+unifyClause :: (Tc m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
+unifyClause (Possible p t) (Possible p' t') = unifyPat p p' /\ unifyClosure t t'
+unifyClause (Impossible p) (Impossible p') = unifyPat p p'
+unifyClause a b = return $ No [DifferentClauses [a] [b]]
+
+data Problem = Problem
+  { lvl :: Lvl,
+    names :: [Name],
+    loc :: Loc,
+    originatingMeta :: MetaVar,
+    lhs :: VTm,
+    rhs :: VTm,
+    errs :: [UnifyError]
+  }
+
+addProblem :: (Tc m) => Problem -> m ()
+addProblem p = do
+  modify (S.|> p)
+
+removeProblem :: (Tc m) => Int -> m ()
+removeProblem i = modify (\(p :: Seq Problem) -> S.deleteAt i p)
+
+getProblems :: (Tc m) => m (Seq Problem)
+getProblems = view
+
+enterProblem :: (Tc m) => Problem -> m a -> m a
+enterProblem p = enterPat NotInPat . enter (const p.lvl) . enter (const p.names) . enter (const p.loc)
+
+solveRemainingProblems :: (Tc m) => m ()
+solveRemainingProblems = do
+  ps <- getProblems
+  void $
+    S.traverseWithIndex
+      ( \i p -> enterProblem p $ do
+          c <- unify p.lhs p.rhs
+          handleUnification p.lhs p.rhs c
+          removeProblem i
+      )
+      ps
+
+runSolveT :: (Tc m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
+runSolveT m sp t f = do
+  f' <- runExceptT f
+  ns <- view
+  l <- view
+  loc <- view
+  case f' of
+    Left err -> do
+      addProblem
+        ( Problem
+            { lvl = l,
+              names = ns,
+              loc = loc,
+              originatingMeta = m,
+              lhs = VNeu (VApp (VFlex m) sp),
+              rhs = t,
+              errs = [SolveError err]
+            }
+        )
+        >> return Yes
+    Right () -> solveRemainingProblems >> return Yes
+
+unifyFlex :: (Tc m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
+unifyFlex m sp t = runSolveT m sp t $ do
+  pren <- invertSpine sp
+  rhs <- rename m pren t
+  solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
+  lift $ solveMetaVar m solution
+
+unifyRigid :: (Tc m) => Lvl -> Spine VTm -> VTm -> m CanUnify
+unifyRigid x Empty t = do
+  l <- getLvl
+  return $ Maybe (subbing l x t)
+unifyRigid _ _ _ = return $ Maybe mempty
+
+unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
+unfoldDefAndUnify g sp t' = do
+  gu <- access (unfoldDef g)
+  case gu of
+    Nothing -> return $ Maybe mempty
+    Just gu' -> do
+      t <- vApp gu' sp
+      unify t t'
+
+unifyLit :: (Tc m) => Lit VTm -> VTm -> m CanUnify
+unifyLit a t = case t of
+  VLit a' -> case (a, a') of
+    (StringLit x, StringLit y) | x == y -> return Yes
+    (CharLit x, CharLit y) | x == y -> return Yes
+    (NatLit x, NatLit y) | x == y -> return Yes
+    (FinLit d n, FinLit d' n') | d == d' -> unify n n'
+    _ -> return $ No [Mismatching (VLit a) (VLit a')]
+  _ -> unify (unfoldLit a) t
+
+unifyClosure :: (Tc m) => Closure -> Closure -> m CanUnify
+unifyClosure cl1 cl2 = do
+  l <- getLvl
+  t1 <- evalInOwnCtx l cl1
+  t2 <- evalInOwnCtx l cl2
+  if cl1.numVars == cl2.numVars
+    then enterClosure cl1 $ unify t1 t2
+    else error "unifyClosure: different number of variables"
+
+etaConvert :: (Tc m) => VTm -> PiMode -> Closure -> m CanUnify
+etaConvert t m c = do
+  l <- getLvl
+  x <- evalInOwnCtx l c
+  x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
+  enterClosure c $ unify x x'
+
+unify :: (Tc m) => VTm -> VTm -> m CanUnify
+unify t1 t2 = do
+  t1' <- force t1
+  t2' <- force t2
+  case (t1', t2') of
+    (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
+    (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
+    (t, VLam m' _ c') -> etaConvert t m' c'
+    (VLam m _ c, t) -> etaConvert t m c
+    (VU, VU) -> return Yes
+    (t, VLit a') -> unifyLit a' t
+    (VLit a, t') -> unifyLit a t'
+    (VGlob (CtorGlob c) sp, VGlob (CtorGlob c') sp') | c == c' -> unifySpines sp sp'
+    (VGlob (DataGlob d) sp, VGlob (DataGlob d') sp') | d == d' -> unifySpines sp sp'
+    (VGlob (PrimGlob f) sp, VGlob (PrimGlob f') sp') ->
+      if f == f'
+        then unifySpines sp sp'
+        else return $ Maybe mempty
+    (VGlob (DefGlob f) sp, VGlob (DefGlob f') sp') ->
+      if f == f'
+        then unifySpines sp sp' \/ unfoldDefAndUnify f sp t2'
+        else unfoldDefAndUnify f sp t2'
+    (VGlob (DefGlob f) sp, t') -> unfoldDefAndUnify f sp t'
+    (t, VGlob (DefGlob f') sp') -> unfoldDefAndUnify f' sp' t
+    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) | a == b -> do
+      ( unify (VNeu s) (VNeu s')
+          /\ unifyClauses bs bs'
+          /\ unifySpines sp sp'
+        )
+        \/ return (Maybe mempty)
+    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
+      unifySpines sp sp' \/ return (Maybe mempty)
+    (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
+      unifySpines sp sp' \/ return (Maybe mempty)
+    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
+      unifySpines sp sp' \/ return (Maybe mempty)
+    (VNeu (VApp (VFlex x) sp), t') -> unifyFlex x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex x' sp' t
+    (VNeu (VApp (VRigid x) sp), t') -> unifyRigid x sp t'
+    (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid x' sp' t
+    (VNeu (VReprApp {}), _) -> return $ Maybe mempty
+    (_, VNeu (VReprApp {})) -> return $ Maybe mempty
+    (VNeu (VCaseApp {}), _) -> return $ Maybe mempty
+    (_, VNeu (VCaseApp {})) -> return $ Maybe mempty
+    _ -> return $ No [Mismatching t1' t2']
