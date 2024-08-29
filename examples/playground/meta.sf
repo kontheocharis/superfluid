@@ -62,12 +62,10 @@ data Rep : Desc -> Type {
 }
 
 data IRep : [I : Type] -> IDesc I -> Type {
-  mk-irep :
-    [I : Type, d : IDesc I]
-    -> (
+  mk-irep : [I : Type, d : IDesc I] (
       R : I -> Type,
       represent : [i : I] -> IInterp d R i -> R i,
-      view : [i : I] -> (r : R i) -> IMu (iorn d (represent [i])) (i, r),
+      view : [i : I] (r : R i) -> IMu (iorn d (represent [i])) (i, r),
     )
     -> IRep d
 }

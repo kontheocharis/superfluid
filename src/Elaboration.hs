@@ -4,9 +4,8 @@
 
 module Elaboration
   ( Elab,
-    infer,
+    elab,
     checkProgram,
-    check,
   )
 where
 
@@ -19,7 +18,6 @@ import Common
     mapSpine,
   )
 import Data.Bifunctor (bimap)
-import Evaluation (force)
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax
   ( PCtor (..),
@@ -67,56 +65,33 @@ pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
 pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
 
 elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
-elab p Infer = infer p
-elab p (Check ty) = check p ty
-
-check :: (Elab m) => PTm -> VTy -> m (STm, VTy)
-check term typ = do
-  typ' <- force typ
-  case (term, typ') of
-    (PLocated l t, ty) -> enterLoc l (check t ty)
-    (PLam m x t, ty) -> lam (Check ty) m x (elab t)
-    (t, VPi Implicit x' a b) -> insertLam x' a b (elab t)
-    (PUnit, ty@VU) -> check (pKnownData KnownUnit []) ty
-    (PUnit, ty) -> check (pKnownCtor KnownTt []) ty
-    (PLet x a t u, ty) -> letIn (Check ty) x (elab a) (elab t) (elab u)
-    (PRepr m t, ty) -> repr (Check ty) m (elab t)
-    (PHole n, ty) -> meta (Check ty) (Just n)
-    (PWild, ty) ->
-      ifInPat
-        (wildPat (Check ty))
-        (meta (Check ty) Nothing)
-    (PLambdaCase cs, ty) -> do
-      n <- uniqueName
-      check (PLam Explicit n (PCase (PName n) cs)) ty
-    (PCase s cs, ty) -> caseOf (Check ty) (elab s) (map (bimap elab elab) cs)
-    (te, ty) -> checkByInfer (infer te) ty
-
-infer :: (Elab m) => PTm -> m (STm, VTy)
-infer term = case term of
-  PLocated l t -> enterLoc l $ infer t
-  PName x -> name x
-  PSigma x a b -> infer $ pKnownData KnownSigma [a, PLam Explicit x b]
-  PUnit -> infer $ pKnownData KnownUnit []
-  PPair t1 t2 -> infer $ pKnownCtor KnownPair [t1, t2]
-  PLam m x t -> lam Infer m x (elab t)
-  PApp {} -> do
-    let (s, sp) = toPSpine term
-    app (elab s) (mapSpine elab sp)
-  PU -> univ
-  PPi m x a b -> piTy m x (elab a) (elab b)
-  PLet x a t u -> letIn Infer x (elab a) (elab t) (elab u)
-  PRepr m x -> repr Infer m (elab x)
-  PHole n -> meta Infer (Just n)
-  PWild ->
-    ifInPat
-      (wildPat Infer)
-      (meta Infer Nothing)
-  PLambdaCase cs -> do
+elab p mode = case (p, mode) of
+  -- Check/both modes:
+  (PLocated l t, md) -> enterLoc l (elab t md)
+  (PLam m x t, md) -> lam md m x (elab t)
+  -- Lambda insertion
+  (t, Check (VPi Implicit x' a b)) -> insertLam x' a b (elab t)
+  (PUnit, Check ty@VU) -> elab (pKnownData KnownUnit []) (Check ty)
+  (PUnit, md) -> elab (pKnownCtor KnownTt []) md
+  (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit x b]) md
+  (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
+  (PLet x a t u, md) -> letIn md x (elab a) (elab t) (elab u)
+  (PRepr m t, md) -> repr md m (elab t)
+  (PHole n, md) -> meta md (Just n)
+  (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
+  (PLambdaCase cs, md) -> do
     n <- uniqueName
-    infer $ PLam Explicit n (PCase (PName n) cs)
-  PCase s cs -> caseOf Infer (elab s) (map (bimap elab elab) cs)
-  PLit l -> lit Infer (fmap elab l)
+    elab (PLam Explicit n (PCase (PName n) cs)) md
+  (PCase s cs, md) -> caseOf md (elab s) (map (bimap elab elab) cs)
+  (PLit l, md) -> lit md (fmap elab l)
+  (te, Check ty) -> checkByInfer (elab te Infer) ty
+  -- Only infer:
+  (PName x, Infer) -> name x
+  (PApp {}, Infer) -> do
+    let (s, sp) = toPSpine p
+    app (elab s) (mapSpine elab sp)
+  (PU, Infer) -> univ
+  (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
 
 checkDef :: (Elab m) => PDef -> m ()
 checkDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
