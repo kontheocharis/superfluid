@@ -76,6 +76,7 @@ import qualified Data.Map as M
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
+import Data.Vector.Fusion.Stream.Monadic (zipWith3M)
 import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
@@ -83,6 +84,7 @@ import Evaluation
     eval,
     evalInOwnCtx,
     evalPat,
+    extendEnvByNVars,
     force,
     ifIsData,
     isCtorTy,
@@ -92,7 +94,7 @@ import Evaluation
     unfoldDefs,
     vApp,
     vRepr,
-    ($$), extendEnvByNVars,
+    ($$),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -210,7 +212,7 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         RemainingProblems ps -> do
           ps' <-
             mapM
-              ( \p -> enter (const p.names) . enter (const p.lvl) $ do
+              ( \p -> enterProblem p $ do
                   l' <- pretty p.loc
                   c' <- intercalate "\n" <$> mapM pretty (toList p.errs)
                   return $ l' ++ "\n" ++ c'
@@ -226,7 +228,7 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Has m Loc, Has m InPat, Has m Ctx) => Tc m where
+class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx) => Tc m where
   getCtx :: m Ctx
   getCtx = view
 
@@ -267,14 +269,15 @@ class (Eval m, Has m Loc, Has m InPat, Has m Ctx) => Tc m where
     NotInPat -> b
     _ -> a
 
+data CtxTy = CtxTy VTy | TyUnneeded
+
 data Ctx = Ctx
   { env :: Env VTm,
     lvl :: Lvl,
-    types :: [VTy],
+    types :: [CtxTy],
     bounds :: Bounds,
     nameList :: [Name],
-    names :: Map Name Lvl,
-    problems :: Seq Problem
+    names :: Map Name Lvl
   }
 
 data Mode = Check VTy | Infer
@@ -284,6 +287,7 @@ type Child m = (Mode -> m (STm, VTy))
 instance (Tc m) => Has m (Env VTm) where
   view = accessCtx (\c -> c.env)
   modify f = modifyCtx (\c -> c {env = f c.env})
+
 instance (Tc m) => Has m [Name] where
   view = accessCtx (\c -> c.nameList)
   modify f = modifyCtx (\c -> c {nameList = f c.nameList})
@@ -292,9 +296,9 @@ instance (Tc m) => Has m Lvl where
   view = accessCtx (\c -> c.lvl)
   modify f = modifyCtx (\c -> c {lvl = f c.lvl})
 
-instance (Tc m) => Has m (Seq Problem) where
-  view = accessCtx (\c -> c.problems)
-  modify f = modifyCtx (\c -> c {problems = f c.problems})
+instance (Monad m, Pretty m VTm) => Pretty m CtxTy where
+  pretty (CtxTy t) = pretty t
+  pretty TyUnneeded = return "_"
 
 instance (Eval m, Has m [Name]) => Pretty m Ctx where
   pretty c =
@@ -310,7 +314,7 @@ instance (Eval m, Has m [Name]) => Pretty m Ctx where
         )
         (reverse con)
     where
-      con :: [(Name, VTy, Maybe VTm)]
+      con :: [(Name, CtxTy, Maybe VTm)]
       con =
         zipWith4
           ( \i n t e ->
@@ -334,14 +338,13 @@ emptyCtx =
       types = [],
       bounds = [],
       nameList = [],
-      names = M.empty,
-      problems = S.empty
+      names = M.empty
     }
 
 ensureAllProblemsSolved :: (Tc m) => m ()
 ensureAllProblemsSolved = do
   solveRemainingProblems
-  ps <- accessCtx (\c -> c.problems)
+  ps <- view
   if S.null ps
     then return ()
     else tcError $ RemainingProblems (toList ps)
@@ -373,7 +376,18 @@ bind x ty ctx =
   ctx
     { env = VNeu (VVar ctx.lvl) : ctx.env,
       lvl = nextLvl ctx.lvl,
-      types = ty : ctx.types,
+      types = CtxTy ty : ctx.types,
+      bounds = Bound : ctx.bounds,
+      names = M.insert x ctx.lvl ctx.names,
+      nameList = x : ctx.nameList
+    }
+
+typelessBind :: Name -> Ctx -> Ctx
+typelessBind x ctx =
+  ctx
+    { env = VNeu (VVar ctx.lvl) : ctx.env,
+      lvl = nextLvl ctx.lvl,
+      types = TyUnneeded : ctx.types,
       bounds = Bound : ctx.bounds,
       names = M.insert x ctx.lvl ctx.names,
       nameList = x : ctx.nameList
@@ -387,15 +401,19 @@ define x t ty ctx =
   ctx
     { env = t : ctx.env,
       lvl = nextLvl ctx.lvl,
-      types = ty : ctx.types,
+      types = CtxTy ty : ctx.types,
       bounds = Defined : ctx.bounds,
       names = M.insert x ctx.lvl ctx.names,
       nameList = x : ctx.nameList
     }
 
+ensureNeeded :: CtxTy -> VTm
+ensureNeeded (CtxTy t) = t
+ensureNeeded TyUnneeded = error "Type is unneeded"
+
 lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
 lookupName n ctx = case M.lookup n ctx.names of
-  Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
+  Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ensureNeeded (ctx.types !! idx.unIdx))
   Nothing -> Nothing
 
 inferMeta :: (Tc m) => Maybe Name -> m (STm, VTy)
@@ -799,8 +817,23 @@ data UnifyError
   | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
   | Mismatching VTm VTm
   | SolveError SolveError
-  | ErrorInCtx [Name] Lvl UnifyError
+  | ErrorInCtx TypelessCtx UnifyError
   deriving (Show)
+
+newtype TypelessCtx = TypelessCtx {names :: [Name]} deriving (Show, Eq)
+
+currentTypelessCtx :: (Tc m) => m TypelessCtx
+currentTypelessCtx = do
+  ns <- accessCtx (\c -> c.nameList)
+  return $ TypelessCtx ns
+
+namelessTypelessCtx :: (Tc m) => Int -> m TypelessCtx
+namelessTypelessCtx n = do
+  ns <- replicateM n uniqueName
+  return $ TypelessCtx ns
+
+enterTypelessCtx :: (Tc m) => TypelessCtx -> m a -> m a
+enterTypelessCtx c = enterCtx (\ctx -> foldr typelessBind ctx c.names)
 
 unifyErrorIsMetaRelated :: UnifyError -> Bool
 unifyErrorIsMetaRelated (SolveError _) = True
@@ -814,7 +847,7 @@ data SolveError
 
 data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
 
-instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m CanUnify where
+instance (Tc m) => Pretty m CanUnify where
   pretty Yes = return "can unify"
   pretty (No xs) = do
     xs' <- intercalate ", " <$> mapM pretty xs
@@ -823,7 +856,7 @@ instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m CanUnify where
     s' <- pretty s
     return $ "can only unify if: " ++ s'
 
-instance (Eval m, Has m [Name]) => Pretty m SolveError where
+instance (Tc m) => Pretty m SolveError where
   pretty (InvertError s) = do
     s' <- pretty s
     return $ "the arguments " ++ s' ++ " contain non-variables"
@@ -835,7 +868,7 @@ instance (Eval m, Has m [Name]) => Pretty m SolveError where
     t' <- pretty t
     return $ "a variable is missing from " ++ t'
 
-instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m UnifyError where
+instance (Tc m) => Pretty m UnifyError where
   pretty (SolveError e) = pretty e
   pretty (DifferentSpineLengths s s') = do
     s'' <- pretty s
@@ -849,7 +882,7 @@ instance (Eval m, Has m Lvl, Has m Loc, Has m [Name]) => Pretty m UnifyError whe
     t'' <- pretty t
     t''' <- pretty t'
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
-  pretty (ErrorInCtx ns l e) = enter (const ns) . enter (const l) $ pretty e
+  pretty (ErrorInCtx c e) = enterTypelessCtx c $ pretty e
 
 instance (Eval m) => Lattice (m CanUnify) where
   a \/ b = do
@@ -883,13 +916,13 @@ instance (Eval m) => Lattice (m CanUnify) where
 
 type SolveT = ExceptT SolveError
 
-enterClosure :: (Tc m) => Closure -> m a -> m a
-enterClosure c m = do
-  bs <- replicateM c.numVars uniqueName
-  enter (`nextLvls` c.numVars) . enter (bs ++) . enter (extendEnvByNVars c.numVars) $ m
+enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
+enterTypelessClosure c m = do
+  ctx <- namelessTypelessCtx c.numVars
+  enterTypelessCtx ctx m
 
-enterPatBinds :: (Tc m) => VPatB -> m a -> m a
-enterPatBinds p = enter (`nextLvls` length p.binds) . enter (p.binds ++) . enter (extendEnvByNVars (length p.binds))
+enterTypelessPatBinds :: (Tc m) => VPatB -> m a -> m a
+enterTypelessPatBinds p = enterTypelessCtx (TypelessCtx p.binds)
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
@@ -947,7 +980,7 @@ rename m pren tm = do
       return $ SPi i x a' b'
     VU -> return SU
     VNeu (VApp (VGlobal g) sp) -> renameSp m pren (SGlobal g) sp
-    VLit lit -> SLit <$> traverse (rename m pren) lit
+    VLit l -> SLit <$> traverse (rename m pren) l
 
 unifySpines :: (Tc m) => Spine VTm -> Spine VTm -> m CanUnify
 unifySpines Empty Empty = return Yes
@@ -964,7 +997,7 @@ unifyPat pt@(VPatB p binds) (VPatB p' binds') = do
   let n = length binds
   let n' = length binds'
   if n == n'
-    then enterPatBinds pt $ unify p p'
+    then enterTypelessPatBinds pt $ unify p p'
     else return $ No []
 
 unifyClause :: (Tc m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
@@ -973,10 +1006,8 @@ unifyClause (Impossible p) (Impossible p') = unifyPat p p'
 unifyClause a b = return $ No [DifferentClauses [a] [b]]
 
 data Problem = Problem
-  { lvl :: Lvl,
-    names :: [Name],
+  { ctx :: TypelessCtx,
     loc :: Loc,
-    originatingMeta :: MetaVar,
     lhs :: VTm,
     rhs :: VTm,
     errs :: [UnifyError]
@@ -993,7 +1024,7 @@ getProblems :: (Tc m) => m (Seq Problem)
 getProblems = view
 
 enterProblem :: (Tc m) => Problem -> m a -> m a
-enterProblem p = enterPat NotInPat . enter (const p.lvl) . enter (const p.names) . enter (const p.loc)
+enterProblem p = enterPat NotInPat . enterTypelessCtx p.ctx . enterLoc p.loc
 
 solveRemainingProblems :: (Tc m) => m ()
 solveRemainingProblems = do
@@ -1010,23 +1041,13 @@ solveRemainingProblems = do
 runSolveT :: (Tc m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT m sp t f = do
   f' <- runExceptT f
-  ns <- view
-  l <- view
+  ctx <- currentTypelessCtx
   loc <- view
   case f' of
     Left err -> do
-      addProblem
-        ( Problem
-            { lvl = l,
-              names = ns,
-              loc = loc,
-              originatingMeta = m,
-              lhs = VNeu (VApp (VFlex m) sp),
-              rhs = t,
-              errs = [SolveError err]
-            }
-        )
-        >> return Yes
+      addProblem $
+        Problem {ctx = ctx, loc = loc, lhs = VNeu (VApp (VFlex m) sp), rhs = t, errs = [SolveError err]}
+      return Yes
     Right () -> solveRemainingProblems >> return Yes
 
 unifyFlex :: (Tc m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
@@ -1067,7 +1088,7 @@ unifyClosure cl1 cl2 = do
   t1 <- evalInOwnCtx l cl1
   t2 <- evalInOwnCtx l cl2
   if cl1.numVars == cl2.numVars
-    then enterClosure cl1 $ unify t1 t2
+    then enterTypelessClosure cl1 $ unify t1 t2
     else error "unifyClosure: different number of variables"
 
 etaConvert :: (Tc m) => VTm -> PiMode -> Closure -> m CanUnify
@@ -1075,7 +1096,7 @@ etaConvert t m c = do
   l <- getLvl
   x <- evalInOwnCtx l c
   x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
-  enterClosure c $ unify x x'
+  enterTypelessClosure c $ unify x x'
 
 unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do

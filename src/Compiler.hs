@@ -150,7 +150,8 @@ data Compiler = Compiler
     currentLoc :: Loc,
     normaliseProgram :: Bool,
     lastNameIdx :: Int,
-    reduceUnfoldDefs :: Bool
+    reduceUnfoldDefs :: Bool,
+    problems :: Seq Problem
   }
 
 data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError
@@ -184,6 +185,10 @@ instance Eval Comp where
   setNormaliseProgram b = ST.modify (\s -> s {normaliseProgram = b})
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
   setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
+
+instance Has Comp (Seq Problem) where
+  view = gets (\c -> c.problems)
+  modify f = ST.modify (\s -> s {problems = f s.problems})
 
 instance Tc Comp where
   tcError = throwError . TcCompilerError
@@ -219,7 +224,8 @@ emptyCompiler =
       inPat = NotInPat,
       normaliseProgram = False,
       lastNameIdx = 0,
-      reduceUnfoldDefs = False
+      reduceUnfoldDefs = False,
+      problems = mempty
     }
 
 runComp :: Comp a -> Compiler -> IO ()
