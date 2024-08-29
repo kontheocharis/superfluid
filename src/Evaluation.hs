@@ -26,7 +26,33 @@ module Evaluation
   )
 where
 
-import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (..), Has (..), HasNameSupply (..), Idx (..), Lvl (..), MetaVar, Name (..), PiMode (..), Spine, Tag, Times (..), View (..), globName, inv, lvlToIdx, mapSpineM, nextLvl, nextLvls, unMetaVar, pattern Impossible, pattern Possible)
+import Common
+  ( Arg (..),
+    Clause (..),
+    CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (DefGlobal),
+    Glob (..),
+    Has (..),
+    HasNameSupply (..),
+    Idx (..),
+    Lvl (..),
+    MetaVar,
+    Name (..),
+    PiMode (..),
+    Spine,
+    Tag,
+    Times (..),
+    globName,
+    inv,
+    lvlToIdx,
+    mapSpineM,
+    nextLvl,
+    nextLvls,
+    unMetaVar,
+    pattern Impossible,
+    pattern Possible,
+  )
 import Control.Arrow ((***))
 import Control.Monad (foldM)
 import Control.Monad.Extra (concatMapM)
@@ -71,11 +97,12 @@ import Value
     VPat,
     VPatB (..),
     VTm (..),
+    VTy,
     vars,
     pattern VGl,
     pattern VGlob,
     pattern VMeta,
-    pattern VVar, VTy,
+    pattern VVar,
   )
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where

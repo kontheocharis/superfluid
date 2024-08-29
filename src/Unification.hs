@@ -26,37 +26,27 @@ import Common
     Loc,
     Lvl (..),
     MetaVar,
-    Modify (modify),
     Name,
     PiMode (..),
     Spine,
-    Times,
-    View (..),
     lvlToIdx,
-    mapSpineM,
     nextLvl,
     nextLvls,
     pattern Impossible,
     pattern Possible,
   )
-import Control.Exception (assert)
-import Control.Monad (zipWithM, zipWithM_)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Identity (Identity (runIdentity))
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.Either (fromRight, isRight)
-import Data.Foldable (Foldable (fold), toList)
+import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Sequence (Seq (..), ViewR (..))
+import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Debug.Trace (trace, traceM, traceStack)
-import Evaluation (Eval, eval, evalInOwnCtx, force, quote, quoteSpine, vApp, ($$))
-import Globals (KnownGlobal (..), knownCtor, knownData, unfoldDef)
+import Evaluation (Eval, eval, evalInOwnCtx, force, vApp)
+import Globals (unfoldDef)
 import Literals (unfoldLit)
 import Meta (solveMetaVar)
-import Numeric.Natural (Natural)
 import Printing (Pretty (..))
 import Syntax (SPat (..), STm (..), uniqueSLams)
 import Value
@@ -67,11 +57,9 @@ import Value
     VNeu (..),
     VPatB (..),
     VTm (..),
-    liftPRen,
     liftPRenN,
     numVars,
     subbing,
-    pattern VGl,
     pattern VGlob,
     pattern VVar,
   )
@@ -167,7 +155,7 @@ instance (Eval m) => Lattice (m CanUnify) where
 -- a \/ b = runIdentity $
 -- a /\ b = runIdentity $
 
-class (Eval m, Has m (Seq Problem), Has m Loc, Has m [Name]) => Unify m
+class (Eval m, Has m (Seq Problem), Has m Loc, Has m [Name], Has m Lvl) => Unify m
 
 type SolveT = ExceptT SolveError
 

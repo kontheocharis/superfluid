@@ -31,7 +31,34 @@ module Typechecking
 where
 
 import Algebra.Lattice ((/\))
-import Common (Arg (..), Clause (..), CtorGlobal (..), DataGlobal (..), DefGlobal (..), Glob (..), Has (..), HasNameSupply (..), HasProjectFiles, Idx (..), Lit (..), Loc (NoLoc), Lvl (..), Modify (modify), Name (..), PiMode (..), Spine, Tag, Times, View (..), inv, lvlToIdx, nextLvl, nextLvls, pat, unMetaVar, pattern Impossible, pattern Possible)
+import Common
+  ( Arg (..),
+    Clause (..),
+    CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (..),
+    Glob (..),
+    Has (..),
+    HasNameSupply (..),
+    HasProjectFiles,
+    Idx (..),
+    Lit (..),
+    Loc (NoLoc),
+    Lvl (..),
+    Name (..),
+    PiMode (..),
+    Spine,
+    Tag,
+    Times,
+    inv,
+    lvlToIdx,
+    nextLvl,
+    nextLvls,
+    pat,
+    unMetaVar,
+    pattern Impossible,
+    pattern Possible,
+  )
 import Control.Monad (unless)
 import Control.Monad.Extra (when)
 import Data.Foldable (Foldable (..))
@@ -55,8 +82,9 @@ import Evaluation
     isTypeFamily,
     quote,
     resolve,
+    unfoldDefs,
     vRepr,
-    ($$), unfoldDefs,
+    ($$),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -245,16 +273,13 @@ data Mode = Check VTy | Infer
 
 type Child m = (Mode -> m (STm, VTy))
 
-instance (Tc m) => View m [Name] where
+instance (Tc m) => Has m [Name] where
   view = accessCtx (\c -> c.nameList)
-
-instance (Tc m) => Modify m [Name] where
   modify f = modifyCtx (\c -> c {nameList = f c.nameList})
 
-instance (Tc m) => Has m [Name]
-
-instance (Tc m) => View m Lvl where
+instance (Tc m) => Has m Lvl where
   view = accessCtx (\c -> c.lvl)
+  modify f = modifyCtx (\c -> c {lvl = f c.lvl})
 
 instance (Eval m, Has m [Name]) => Pretty m Ctx where
   pretty c =

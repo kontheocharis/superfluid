@@ -14,7 +14,7 @@ module Meta
   )
 where
 
-import Common (Has, MetaVar (..), Modify (..), Name, View (..))
+import Common (Has (..), MetaVar (..), Name)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM

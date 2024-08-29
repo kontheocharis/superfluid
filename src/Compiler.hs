@@ -17,7 +17,13 @@ module Compiler (runCli) where
 
 -- import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 
-import Common (Has, HasNameSupply (..), HasProjectFiles (getProjectFileContents), Loc (..), Modify (..), Name (..), View (view))
+import Common
+  ( Has (..),
+    HasNameSupply (..),
+    HasProjectFiles (getProjectFileContents),
+    Loc (..),
+    Name (..),
+  )
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -35,7 +41,17 @@ import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
 import Options.Applicative (execParser, (<**>), (<|>))
-import Options.Applicative.Builder (fullDesc, header, help, info, long, progDesc, short, strOption, switch)
+import Options.Applicative.Builder
+  ( fullDesc,
+    header,
+    help,
+    info,
+    long,
+    progDesc,
+    short,
+    strOption,
+    switch,
+  )
 import Options.Applicative.Common (Parser)
 import Options.Applicative.Extra (helper)
 import Parsing (ParseError, parseProgram)
@@ -45,7 +61,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Typechecking (Ctx, InPat (..), Tc (tcError, showMessage), TcError, emptyCtx)
+import Typechecking (Ctx, InPat (..), Tc (showMessage, tcError), TcError, emptyCtx)
 import Unification (Problem, Unify)
 
 -- import Resources.Prelude (preludePath, preludeContents)
@@ -151,21 +167,13 @@ instance Pretty Comp CompilerError where
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
   deriving (Functor, Applicative, Monad, MonadState Compiler, MonadError CompilerError, MonadIO)
 
-instance View Comp SolvedMetas where
+instance Has Comp SolvedMetas where
   view = gets (\c -> c.solvedMetas)
-
-instance Modify Comp SolvedMetas where
   modify f = ST.modify (\s -> s {solvedMetas = f s.solvedMetas})
 
-instance Has Comp SolvedMetas
-
-instance View Comp Sig where
+instance Has Comp Sig where
   view = gets (\c -> c.sig)
-
-instance Modify Comp Sig where
   modify f = ST.modify (\s -> s {sig = f s.sig})
-
-instance Has Comp Sig
 
 instance HasNameSupply Comp where
   uniqueName = do
@@ -179,13 +187,9 @@ instance Eval Comp where
   reduceUnfoldDefs = gets (\c -> c.reduceUnfoldDefs)
   setReduceUnfoldDefs b = ST.modify (\s -> s {reduceUnfoldDefs = b})
 
-instance View Comp (Seq Problem) where
+instance Has Comp (Seq Problem) where
   view = gets (\c -> c.problems)
-
-instance Modify Comp (Seq Problem) where
   modify f = ST.modify (\s -> s {problems = f s.problems})
-
-instance Has Comp (Seq Problem)
 
 instance Unify Comp
 
@@ -195,29 +199,17 @@ instance Tc Comp where
 
 instance Elab Comp
 
-instance View Comp Ctx where
+instance Has Comp Ctx where
   view = gets (\c -> c.ctx)
-
-instance Modify Comp Ctx where
   modify f = ST.modify (\s -> s {ctx = f s.ctx})
 
-instance Has Comp Ctx
-
-instance View Comp InPat where
+instance Has Comp InPat where
   view = gets (\c -> c.inPat)
-
-instance Modify Comp InPat where
   modify f = ST.modify (\s -> s {inPat = f s.inPat})
 
-instance Has Comp InPat
-
-instance View Comp Loc where
+instance Has Comp Loc where
   view = gets (\c -> c.currentLoc)
-
-instance Modify Comp Loc where
   modify f = ST.modify (\s -> s {currentLoc = f s.currentLoc})
-
-instance Has Comp Loc
 
 instance HasProjectFiles Comp where
   getProjectFileContents f = do

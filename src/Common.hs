@@ -38,8 +38,6 @@ module Common
     HasNameSupply (..),
     HasProjectFiles (..),
     Has (..),
-    View (..),
-    Modify (..),
   )
 where
 
@@ -272,16 +270,14 @@ instance Show Tag where
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name
 
-class (Functor m) => View m a where
+class (Monad m) => Has m a where
   view :: m a
 
   access :: (a -> b) -> m b
   access f = f <$> view
 
-class (Monad m, View m a) => Modify m a where
   modify :: (a -> a) -> m ()
 
-class (View m a, Modify m a) => Has m a where
   enter :: (a -> a) -> m c -> m c
   enter f m = do
     c <- view :: m a
