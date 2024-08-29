@@ -30,7 +30,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Debug.Trace (trace, traceStack)
-import Elaboration (Elab (..), checkProgram)
+import Elaboration (Elab (..), elabProgram)
 import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
@@ -253,7 +253,7 @@ compile args = do
       when flags.normalise $ setNormaliseProgram True
       parseAndCheckPrelude
       parsed <- parseFile file
-      checkProgram parsed
+      elabProgram parsed
       when flags.verbose $ msg "\nTypechecked program successfully"
       when flags.dump $ unelabSig >>= pretty >>= msg
     Args (ParseFile file) flags -> do
@@ -274,7 +274,7 @@ compile args = do
 parseAndCheckPrelude :: Comp ()
 parseAndCheckPrelude = do
   parsed <- parseFile preludePath
-  checkProgram parsed
+  elabProgram parsed
 
 -- | Parse a file with the given name and add it to the program
 parseFile :: String -> Comp PProgram

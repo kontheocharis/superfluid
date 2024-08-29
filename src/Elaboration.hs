@@ -5,7 +5,7 @@
 module Elaboration
   ( Elab,
     elab,
-    checkProgram,
+    elabProgram,
   )
 where
 
@@ -93,31 +93,30 @@ elab p mode = case (p, mode) of
   (PU, Infer) -> univ
   (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
 
-checkDef :: (Elab m) => PDef -> m ()
-checkDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
+elabDef :: (Elab m) => PDef -> m ()
+elabDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
 
-checkCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
-checkCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
+elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
+elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
 
-checkData :: (Elab m) => PData -> m ()
-checkData dat = do
+elabData :: (Elab m) => PData -> m ()
+elabData dat = do
   dataItem dat.name dat.tags (elab dat.ty)
-  mapM_ (checkCtor (DataGlobal dat.name)) dat.ctors
+  mapM_ (elabCtor (DataGlobal dat.name)) dat.ctors
 
-checkPrim :: (Elab m) => PPrim -> m ()
-checkPrim prim = primItem prim.name prim.tags (elab prim.ty)
+elabPrim :: (Elab m) => PPrim -> m ()
+elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
 
-checkItem :: (Elab m) => PItem -> m ()
-checkItem i = do
-  r <- case i of
-    PDef def -> checkDef def
-    PData dat -> checkData dat
-    PPrim prim -> checkPrim prim
+elabItem :: (Elab m) => PItem -> m ()
+elabItem i = do
+  case i of
+    PDef def -> elabDef def
+    PData dat -> elabData dat
+    PPrim prim -> elabPrim prim
     PDataRep {} -> return () -- @@Todo
     PDefRep {} -> return () -- @@Todo
-    PLocatedItem l i' -> enterLoc l $ checkItem i'
+    PLocatedItem l i' -> enterLoc l $ elabItem i'
   ensureAllProblemsSolved
-  return r
 
-checkProgram :: (Elab m) => PProgram -> m ()
-checkProgram (PProgram items) = mapM_ checkItem items
+elabProgram :: (Elab m) => PProgram -> m ()
+elabProgram (PProgram items) = mapM_ elabItem items
