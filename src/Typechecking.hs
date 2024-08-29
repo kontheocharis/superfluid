@@ -95,10 +95,11 @@ import Value
     VTm (..),
     VTy,
     isEmptySub,
+    vars,
     pattern VGlob,
     pattern VHead,
     pattern VRepr,
-    pattern VVar, vars,
+    pattern VVar,
   )
 
 data TcError
@@ -107,7 +108,6 @@ data TcError
   | UnresolvedVariable Name
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern
-  | InvalidNonPattern
   | RemainingProblems [(UnifyError, Loc)]
   | ImpossibleCaseIsPossible VTm VTm
   | ImpossibleCaseMightBePossible VTm VTm Sub
@@ -141,8 +141,6 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
         InvalidPattern -> do
           return "Invalid in pattern position"
-        InvalidNonPattern -> do
-          return "Invalid in non-pattern position"
         ImpossibleCaseIsPossible t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -360,12 +358,11 @@ lookupName n ctx = case M.lookup n ctx.names of
   Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ctx.types !! idx.unIdx)
   Nothing -> Nothing
 
-inferMetaHere :: (Tc m) => Maybe Name -> m (STm, VTy)
-inferMetaHere n = do
-  ty <- newMetaHere Nothing
+inferMeta :: (Tc m) => Maybe Name -> m (STm, VTy)
+inferMeta n = do
+  ty <- newMeta Nothing
   vty <- evalHere ty
-  m <- checkMetaHere n vty
-  return (m, vty)
+  checkMeta n vty
 
 prettyGoal :: (Tc m) => STm -> VTy -> m String
 prettyGoal n ty = do
@@ -375,22 +372,22 @@ prettyGoal n ty = do
   let g = n' ++ " : " ++ ty'
   return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
-checkMetaHere :: (Tc m) => Maybe Name -> VTy -> m STm
-checkMetaHere n ty = do
-  m <- newMetaHere n
+checkMeta :: (Tc m) => Maybe Name -> VTy -> m (STm, VTy)
+checkMeta n ty = do
+  m <- newMeta n
   case n of
     Just _ -> prettyGoal m ty >>= showMessage
     Nothing -> return ()
-  return m
+  return (m, ty)
 
-newMetaHere :: (Tc m) => Maybe Name -> m STm
-newMetaHere n = do
+newMeta :: (Tc m) => Maybe Name -> m STm
+newMeta n = do
   bs <- accessCtx (\c -> c.bounds)
   m <- freshMetaVar n
   return (SMeta m bs)
 
-freshMetaHere :: (Tc m) => m STm
-freshMetaHere = newMetaHere Nothing
+freshMeta :: (Tc m) => m STm
+freshMeta = newMeta Nothing
 
 freshMetaOrPatBind :: (Tc m) => m (STm, VTm)
 freshMetaOrPatBind =
@@ -402,7 +399,7 @@ freshMetaOrPatBind =
         return (n', vn.vPat)
     )
     ( do
-        n' <- freshMetaHere
+        n' <- freshMeta
         vn <- evalHere n'
         return (n', vn)
     )
@@ -486,25 +483,21 @@ ifForcePiType m ty the els = do
         then the m' x a b
         else els m' x a b
     _ -> do
-      a <- freshMetaHere >>= evalHere
+      a <- freshMeta >>= evalHere
       x <- uniqueName
-      b <- enterCtx (bind x a) freshMetaHere >>= closeHere 1
+      b <- enterCtx (bind x a) freshMeta >>= closeHere 1
       unifyHere ty (VPi m x a b)
       the m x a b
 
 forbidPat :: (Tc m) => m ()
 forbidPat = ifInPat (tcError InvalidPattern) (return ())
 
-ensurePat :: (Tc m) => m ()
-ensurePat = ifInPat (return ()) (tcError InvalidPattern)
-
 inferPatBind :: (Tc m) => Name -> m (STm, VTy)
 inferPatBind x = do
-  ty <- freshMetaHere >>= evalHere
-  x' <- checkPatBind x ty
-  return (x', ty)
+  ty <- freshMeta >>= evalHere
+  checkPatBind x ty
 
-checkPatBind :: (Tc m) => Name -> VTy -> m STm
+checkPatBind :: (Tc m) => Name -> VTy -> m (STm, VTy)
 checkPatBind x ty = do
   modifyCtx (bind x ty)
   whenInPat
@@ -512,7 +505,7 @@ checkPatBind x ty = do
         InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [x]))
         _ -> return ()
     )
-  return $ SVar (Idx 0)
+  return (SVar (Idx 0), ty)
 
 reprHere :: (Tc m) => Times -> VTm -> m VTm
 reprHere m t = do
@@ -574,7 +567,7 @@ lam mode m x t = do
             _ -> tcError $ ImplicitMismatch m m'
         )
     Infer -> do
-      a <- freshMetaHere >>= evalHere
+      a <- freshMeta >>= evalHere
       (t', b) <- enterCtx (bind x a) $ t Infer >>= insert
       b' <- closeValHere 1 b
       return (SLam m x t', VPi m x a b')
@@ -655,13 +648,6 @@ checkByInfer t ty = do
   unifyHere ty ty'
   return (t', ty)
 
-wildPat :: (Tc m) => Mode -> m (STm, VTy)
-wildPat (Check ty) = do
-  n <- uniqueName
-  n' <- checkPatBind n ty
-  return (n', ty)
-wildPat Infer = uniqueName >>= inferPatBind
-
 pat :: (Tc m) => InPat -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
 pat inPt pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
   (p', t, ns) <- enterPat inPt $ do
@@ -682,7 +668,7 @@ caseOf mode s cs = do
   forbidPat
   case mode of
     Infer -> do
-      retTy <- freshMetaHere >>= evalHere
+      retTy <- freshMeta >>= evalHere
       caseOf (Check retTy) s cs
     Check ty -> do
       (ss, ssTy) <- s Infer
@@ -700,14 +686,19 @@ caseOf mode s cs = do
           cs
       return (SCase d ss scs, ty)
 
+wildPat :: (Tc m) => Mode -> m (STm, VTy)
+wildPat mode = do
+  n <- uniqueName
+  case mode of
+    Infer -> inferPatBind n
+    (Check ty) -> checkPatBind n ty
+
 meta :: (Tc m) => Mode -> Maybe Name -> m (STm, VTy)
 meta mode n = do
   forbidPat
   case mode of
-    Infer -> inferMetaHere n
-    Check ty -> do
-      m <- checkMetaHere n ty
-      return (m, ty)
+    Infer -> inferMeta n
+    Check ty -> checkMeta n ty
 
 lit :: (Tc m) => Mode -> Lit (Child m) -> m (STm, VTy)
 lit mode l = case mode of
