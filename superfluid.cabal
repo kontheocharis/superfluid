@@ -37,6 +37,7 @@ library
       Presyntax
       Printing
       Syntax
+      Typechecking
       Unification
       Value
   other-modules:

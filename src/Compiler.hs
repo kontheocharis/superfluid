@@ -30,7 +30,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Debug.Trace (trace, traceStack)
-import Elaboration (Ctx, Elab (..), ElabError, InPat (NotInPat), checkProgram, emptyCtx)
+import Elaboration (Elab (..), checkProgram)
 import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
@@ -45,6 +45,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
+import Typechecking (Ctx, InPat (..), Tc (tcError, showMessage), TcError, emptyCtx)
 import Unification (Problem, Unify)
 
 -- import Resources.Prelude (preludePath, preludeContents)
@@ -138,12 +139,12 @@ data Compiler = Compiler
     problems :: Seq Problem
   }
 
-data CompilerError = ElabCompilerError ElabError | ParseCompilerError ParseError
+data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError
 
 instance Pretty Comp CompilerError where
   pretty e = do
     x <- case e of
-      ElabCompilerError a -> pretty a
+      TcCompilerError a -> pretty a
       ParseCompilerError a -> pretty a
     return $ ">> " ++ x
 
@@ -188,9 +189,11 @@ instance Has Comp (Seq Problem)
 
 instance Unify Comp
 
-instance Elab Comp where
-  elabError = throwError . ElabCompilerError
+instance Tc Comp where
+  tcError = throwError . TcCompilerError
   showMessage = msg
+
+instance Elab Comp
 
 instance View Comp Ctx where
   view = gets (\c -> c.ctx)
