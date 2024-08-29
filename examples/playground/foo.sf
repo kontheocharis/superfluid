@@ -11,15 +11,29 @@ def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
   }
 }
 
-def map : [A : Type, B : Type, n : Nat] -> (A -> B) -> Vec A n -> Vec B n {
-  \f v => case v {
-    vnil => vnil,
-    vcons x xs => vcons (f x) (map f xs),
+def upgrade1 : [n : Nat] -> Fin n -> Fin (s n) {
+  \f => case f {
+    fz => fz,
+    fs f' => fs (upgrade1 f'),
+  }
+}
+
+def plus-succ-symmetric : [m n : Nat] -> Equal (add (s m) n) (add m (s n)) {
+  \[m] [n] => case m {
+    z => refl,
+    s m' => cong s (plus-succ-symmetric [m'] [n]),
+  }
+}
+
+def upgrade-i : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add i n) {
+  \i f => case i {
+    z => f,
+    s i' => ?h2,
   }
 }
 
 def main : (n : Nat) * Vec Nat n {
-  (1, vnil)
+  (1, vcons z vnil)
 }
 
 

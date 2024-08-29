@@ -16,7 +16,6 @@ import Common
     unName,
   )
 import Data.Char (isDigit, isSpace)
-import Data.Foldable1 (Foldable1 (fold1))
 import Data.List.NonEmpty (NonEmpty, singleton)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
@@ -25,15 +24,12 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.String
 import Data.Text (Text)
-import GHC.ExecutionStack (SrcLoc (sourceFile))
-import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
 import Printing (Pretty (..))
 import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
 import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
-import Text.Parsec.Error (errorMessages)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 
@@ -361,11 +357,16 @@ named =
         )
 
     typings :: PiMode -> Parser (NonEmpty Typing)
-    typings m = commaSep1 . located (uncurry $ Typing m) . try $ do
-      n <- var
-      _ <- colon
-      ty <- term
-      return (n, ty)
+    typings m = do
+      ts <- commaSep1
+        . located (\ts l -> map (\(n, t) -> Typing m n t l) ts)
+        . try
+        $ do
+          n <- many1 var
+          _ <- colon
+          ty <- term
+          return $ map (,ty) n
+      return . NE.fromList $ concat ts
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy

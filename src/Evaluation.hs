@@ -234,11 +234,11 @@ evalPat env pat = do
         a' <- evalPat' e a
         b' <- evalPat' e b
         lift $ vApp a' (S.singleton (Arg m b'))
-      (SVar (Idx 0)) -> do
+      (SVar (Idx _)) -> do
         s <- get
         put (s + 1)
         return $ VNeu (VVar (Lvl s))
-      _ -> error "impossible"
+      _ -> error $ "impossible: found pat " ++ show pat'
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
 eval env (SPi m v ty1 ty2) = do

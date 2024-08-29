@@ -56,7 +56,7 @@ import Evaluation
     quote,
     resolve,
     vRepr,
-    ($$),
+    ($$), unfoldDefs,
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -476,7 +476,7 @@ closeHere n t = do
 
 ifForcePiType :: (Tc m) => PiMode -> VTy -> (PiMode -> Name -> VTy -> Closure -> m a) -> (PiMode -> Name -> VTy -> Closure -> m a) -> m a
 ifForcePiType m ty the els = do
-  ty' <- force ty
+  ty' <- force ty >>= unfoldDefs
   case ty' of
     VPi m' x a b -> do
       if m == m'
