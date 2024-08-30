@@ -87,9 +87,10 @@ def NatT : Type {
 }
 
 def z-t : NatT {
-  mu [nat-d] (e-z, ())
+  let x = mu [nat-d] (pair [NatE] [_] e-z tt);
+  ?r
 }
 
-def s-t : NatT -> NatT {
-  \n => mu (e-s, n)
-}
+-- def s-t : NatT -> NatT {
+--   \n => mu (e-s, n)
+-- }

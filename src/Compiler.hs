@@ -61,7 +61,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Typechecking (Ctx, InPat (..), Problem, Tc (showMessage, tcError), TcError, emptyCtx)
+import Typechecking (Ctx, InPat (..), Problem, Tc (showMessage, tcError, addGoal), TcError, emptyCtx, Goal, prettyGoal)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -149,6 +149,7 @@ data Compiler = Compiler
     inPat :: InPat,
     currentLoc :: Loc,
     normaliseProgram :: Bool,
+    goals :: [Goal],
     lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool,
     problems :: Seq Problem
@@ -194,6 +195,8 @@ instance Tc Comp where
   tcError = throwError . TcCompilerError
   showMessage = msg
 
+  addGoal g = ST.modify (\s -> s {goals = g : s.goals})
+
 instance Elab Comp
 
 instance Has Comp Ctx where
@@ -225,6 +228,7 @@ emptyCompiler =
       normaliseProgram = False,
       lastNameIdx = 0,
       reduceUnfoldDefs = False,
+      goals = [],
       problems = mempty
     }
 
@@ -234,6 +238,11 @@ runComp c s = do
   (_, _) <- runStateT (runExceptT c'.unComp) s
   return ()
 
+showGoals :: Comp ()
+showGoals = do
+  gs <- gets (\s -> s.goals)
+  mapM_ (\g -> prettyGoal g >>= msg) gs
+
 -- | Run the compiler.
 compile :: Args -> Comp ()
 compile args = do
@@ -242,9 +251,10 @@ compile args = do
       when flags.normalise $ setNormaliseProgram True
       parseAndCheckPrelude
       parsed <- parseFile file
-      elabProgram parsed
+      elabProgram parsed `catchError` (\e -> showGoals >> throwError e)
       when flags.verbose $ msg "\nTypechecked program successfully"
       when flags.dump $ unelabSig >>= pretty >>= msg
+      showGoals
     Args (ParseFile file) flags -> do
       parsed <- parseFile file
       when flags.verbose $ msg $ "Parsing file " ++ file

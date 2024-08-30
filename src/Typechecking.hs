@@ -11,6 +11,8 @@ module Typechecking
     Mode (..),
     InPat (..),
     Problem,
+    Goal,
+    prettyGoal,
     lam,
     letIn,
     app,
@@ -229,6 +231,8 @@ instance Show InPat where
   show InImpossiblePat = "in impossible pat"
 
 class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx) => Tc m where
+  addGoal :: Goal -> m ()
+
   getCtx :: m Ctx
   getCtx = view
 
@@ -269,7 +273,7 @@ class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx) => Tc m w
     NotInPat -> b
     _ -> a
 
-data CtxTy = CtxTy VTy | TyUnneeded
+data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
 
 data Ctx = Ctx
   { env :: Env VTm,
@@ -278,7 +282,7 @@ data Ctx = Ctx
     bounds :: Bounds,
     nameList :: [Name],
     names :: Map Name Lvl
-  }
+  } deriving (Show)
 
 data Mode = Check VTy | Infer
 
@@ -453,8 +457,14 @@ inferMeta n = do
   vty <- evalHere ty
   checkMeta n vty
 
-prettyGoal :: (Tc m) => STm -> VTy -> m String
-prettyGoal n ty = do
+data Goal = Goal
+  { ctx :: Ctx,
+    tm :: STm,
+    ty :: VTy
+  }
+
+prettyGoal :: (Tc m) => Goal -> m String
+prettyGoal (Goal c n ty) = enterCtx (const c) $ do
   c <- getCtx >>= pretty
   n' <- pretty n
   ty' <- pretty ty
@@ -464,8 +474,9 @@ prettyGoal n ty = do
 checkMeta :: (Tc m) => Maybe Name -> VTy -> m (STm, VTy)
 checkMeta n ty = do
   m <- newMeta n
+  c <- getCtx
   case n of
-    Just _ -> prettyGoal m ty >>= showMessage
+    Just _ -> addGoal (Goal c m ty)
     Nothing -> return ()
   return (m, ty)
 
@@ -857,8 +868,9 @@ unifyErrorIsMetaRelated _ = False
 
 data SolveError
   = InvertError (Spine VTm)
-  | OccursError MetaVar VTm
-  | EscapingVariable VTm
+  | OccursError MetaVar
+  | EscapingVariable
+  | WithProblem Problem SolveError
   deriving (Show)
 
 data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
@@ -876,13 +888,18 @@ instance (Tc m) => Pretty m SolveError where
   pretty (InvertError s) = do
     s' <- pretty s
     return $ "the arguments " ++ s' ++ " contain non-variables"
-  pretty (OccursError m t) = do
-    t' <- pretty t
+  pretty (OccursError m) = do
     m' <- pretty (SMeta m [])
-    return $ "the meta-variable " ++ m' ++ " occurs in " ++ t'
-  pretty (EscapingVariable t) = do
-    t' <- pretty t
-    return $ "a variable is missing from " ++ t'
+    return $ "the meta-variable " ++ m' ++ " occurs in a term it is being unified against"
+  pretty EscapingVariable = do
+    return "a variable in a term escapes the context of the meta it is being unified against"
+  pretty (WithProblem p e) = do
+    p' <- enterProblem p $ do
+      lhs <- pretty p.lhs
+      rhs <- pretty p.rhs
+      return $ lhs ++ " =? " ++ rhs
+    e' <- pretty e
+    return $ p' ++ "\n" ++ e'
 
 instance (Tc m) => Pretty m UnifyError where
   pretty (SolveError e) = pretty e
@@ -961,13 +978,12 @@ renameSp m pren t (sp :|> Arg i u) = do
 renameClosure :: (Tc m) => MetaVar -> PRen -> Closure -> SolveT m STm
 renameClosure m pren cl = do
   vt <- lift $ evalInOwnCtx pren.codSize cl
-  ExceptT $ enterTypelessClosure cl (runExceptT (rename m (liftPRenN cl.numVars pren) vt))
+  rename m (liftPRenN cl.numVars pren) vt
 
 renamePat :: (Tc m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
 renamePat m pren (VPatB p binds) = do
   let n = length binds
-  p' <- ExceptT . enterTypelessPatBinds (VPatB p binds) $ do
-    runExceptT (rename m (liftPRenN n pren) p)
+  p' <- rename m (liftPRenN n pren) p
   return $ SPat p' binds
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
@@ -976,10 +992,10 @@ rename m pren tm = do
   f <- lift $ force tm
   case f of
     VNeu (VApp (VFlex m') sp)
-      | m == m' -> throwError $ OccursError m tm
+      | m == m' -> throwError $ OccursError m
       | otherwise -> renameSp m pren (SMeta m' []) sp
     VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
-      Nothing -> throwError $ EscapingVariable tm
+      Nothing -> throwError $ EscapingVariable
       Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (VNeu (VApp h Empty))
@@ -1028,7 +1044,7 @@ data Problem = Problem
     lhs :: VTm,
     rhs :: VTm,
     errs :: [UnifyError]
-  }
+  } deriving (Show)
 
 addProblem :: (Tc m) => Problem -> m ()
 addProblem p = do
@@ -1062,8 +1078,8 @@ runSolveT m sp t f = do
   loc <- view
   case f' of
     Left err -> do
-      addProblem $
-        Problem {ctx = ctx, loc = loc, lhs = VNeu (VApp (VFlex m) sp), rhs = t, errs = [SolveError err]}
+      let p = Problem {ctx = ctx, loc = loc, lhs = VNeu (VApp (VFlex m) sp), rhs = t, errs = []}
+      addProblem $ p {errs = [SolveError (WithProblem p err)]}
       return Yes
     Right () -> solveRemainingProblems >> return Yes
 
