@@ -62,7 +62,7 @@ import Control.Monad.State.Class (MonadState (..), gets)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import qualified Data.IntMap as IM
-import Data.List.Extra (firstJust, intercalate)
+import Data.List.Extra (firstJust, intercalate, (!?))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe (fromJust, fromMaybe)
@@ -157,14 +157,15 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) ps)) (VNeu (VApp (VGlobal
 vMatch _ _ = Nothing
 
 vCase :: (Eval m) => DataGlobal -> VTm -> [Clause VPatB Closure] -> m VTm
-vCase dat v cs =
-  case v of
+vCase dat v cs = do
+  v' <- unfoldDefs v
+  case v' of
     VNeu n ->
       fromMaybe (return $ VNeu (VCaseApp dat n cs Empty)) $
         firstJust
           ( \clause -> do
               case clause of
-                Possible p t -> case vMatch p.vPat v of
+                Possible p t -> case vMatch p.vPat v' of
                   Just env -> Just $ t $$ env
                   Nothing -> Nothing
                 Impossible _ -> Nothing
@@ -479,7 +480,11 @@ unelab ns = \case
   (SMeta m bs) -> do
     (t, ts) <- unelabMeta ns m bs
     return $ pApp t ts
-  (SVar i) -> return $ PName (ns !! i.unIdx)
+  (SVar v) -> do
+    let i = ns !? v.unIdx
+    case i of
+      Just i' -> return $ PName i'
+      Nothing -> return $ PName (Name $ "?" ++ show v.unIdx)
   (SApp m t u) -> PApp m <$> unelab ns t <*> unelab ns u
   (SCase _ t cs) ->
     PCase

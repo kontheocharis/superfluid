@@ -63,7 +63,7 @@ import Common
     pattern Possible,
   )
 import Control.Monad (replicateM, unless, void)
-import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Except (ExceptT (ExceptT), MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -371,41 +371,72 @@ applySubToCtx sub = do
                   )
     replaceVars _ _ = error "impossible"
 
+uniqueNames :: (Tc m) => Int -> m [Name]
+uniqueNames n = replicateM n uniqueName
+
+data CtxEntry = CtxEntry
+  { name :: Name,
+    ty :: CtxTy,
+    tm :: VTm,
+    lvl :: Lvl,
+    bound :: BoundState
+  }
+
 bind :: Name -> VTy -> Ctx -> Ctx
 bind x ty ctx =
-  ctx
-    { env = VNeu (VVar ctx.lvl) : ctx.env,
-      lvl = nextLvl ctx.lvl,
-      types = CtxTy ty : ctx.types,
-      bounds = Bound : ctx.bounds,
-      names = M.insert x ctx.lvl ctx.names,
-      nameList = x : ctx.nameList
-    }
-
-typelessBind :: Name -> Ctx -> Ctx
-typelessBind x ctx =
-  ctx
-    { env = VNeu (VVar ctx.lvl) : ctx.env,
-      lvl = nextLvl ctx.lvl,
-      types = TyUnneeded : ctx.types,
-      bounds = Bound : ctx.bounds,
-      names = M.insert x ctx.lvl ctx.names,
-      nameList = x : ctx.nameList
-    }
+  addCtxEntry
+    ( CtxEntry
+        { name = x,
+          ty = CtxTy ty,
+          tm = VNeu (VVar ctx.lvl),
+          lvl = ctx.lvl,
+          bound = Bound
+        }
+    )
+    ctx
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
 insertedBind = bind
 
 define :: Name -> VTm -> VTy -> Ctx -> Ctx
 define x t ty ctx =
+  addCtxEntry
+    ( CtxEntry
+        { tm = t,
+          ty = CtxTy ty,
+          bound = Defined,
+          lvl = ctx.lvl,
+          name = x
+        }
+    )
+    ctx
+
+typelessBind :: Name -> Ctx -> Ctx
+typelessBind x ctx =
+  addCtxEntry
+    ( CtxEntry
+        { tm = VNeu (VVar ctx.lvl),
+          ty = TyUnneeded,
+          lvl = ctx.lvl,
+          bound = Bound,
+          name = x
+        }
+    )
+    ctx
+
+addCtxEntry :: CtxEntry -> Ctx -> Ctx
+addCtxEntry e ctx =
   ctx
-    { env = t : ctx.env,
-      lvl = nextLvl ctx.lvl,
-      types = CtxTy ty : ctx.types,
-      bounds = Defined : ctx.bounds,
-      names = M.insert x ctx.lvl ctx.names,
-      nameList = x : ctx.nameList
+    { env = e.tm : ctx.env,
+      lvl = nextLvl e.lvl,
+      types = e.ty : ctx.types,
+      bounds = e.bound : ctx.bounds,
+      names = M.insert e.name e.lvl ctx.names,
+      nameList = e.name : ctx.nameList
     }
+
+typelessBinds :: [Name] -> Ctx -> Ctx
+typelessBinds ns ctx = foldr typelessBind ctx (reverse ns)
 
 ensureNeeded :: CtxTy -> VTm
 ensureNeeded (CtxTy t) = t
@@ -817,23 +848,8 @@ data UnifyError
   | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
   | Mismatching VTm VTm
   | SolveError SolveError
-  | ErrorInCtx TypelessCtx UnifyError
+  | ErrorInCtx [Name] UnifyError
   deriving (Show)
-
-newtype TypelessCtx = TypelessCtx {names :: [Name]} deriving (Show, Eq)
-
-currentTypelessCtx :: (Tc m) => m TypelessCtx
-currentTypelessCtx = do
-  ns <- accessCtx (\c -> c.nameList)
-  return $ TypelessCtx ns
-
-namelessTypelessCtx :: (Tc m) => Int -> m TypelessCtx
-namelessTypelessCtx n = do
-  ns <- replicateM n uniqueName
-  return $ TypelessCtx ns
-
-enterTypelessCtx :: (Tc m) => TypelessCtx -> m a -> m a
-enterTypelessCtx c = enterCtx (\ctx -> foldr typelessBind ctx c.names)
 
 unifyErrorIsMetaRelated :: UnifyError -> Bool
 unifyErrorIsMetaRelated (SolveError _) = True
@@ -882,7 +898,7 @@ instance (Tc m) => Pretty m UnifyError where
     t'' <- pretty t
     t''' <- pretty t'
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
-  pretty (ErrorInCtx c e) = enterTypelessCtx c $ pretty e
+  pretty (ErrorInCtx ns e) = enterCtx (const $ typelessBinds ns emptyCtx) $ pretty e
 
 instance (Eval m) => Lattice (m CanUnify) where
   a \/ b = do
@@ -918,11 +934,11 @@ type SolveT = ExceptT SolveError
 
 enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
-  ctx <- namelessTypelessCtx c.numVars
-  enterTypelessCtx ctx m
+  ns <- uniqueNames c.numVars
+  enterCtx (const $ typelessBinds ns emptyCtx) m
 
 enterTypelessPatBinds :: (Tc m) => VPatB -> m a -> m a
-enterTypelessPatBinds p = enterTypelessCtx (TypelessCtx p.binds)
+enterTypelessPatBinds p = enterCtx (typelessBinds p.binds)
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
@@ -945,12 +961,13 @@ renameSp m pren t (sp :|> Arg i u) = do
 renameClosure :: (Tc m) => MetaVar -> PRen -> Closure -> SolveT m STm
 renameClosure m pren cl = do
   vt <- lift $ evalInOwnCtx pren.codSize cl
-  rename m (liftPRenN cl.numVars pren) vt
+  ExceptT $ enterTypelessClosure cl (runExceptT (rename m (liftPRenN cl.numVars pren) vt))
 
 renamePat :: (Tc m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
 renamePat m pren (VPatB p binds) = do
   let n = length binds
-  p' <- rename m (liftPRenN n pren) p
+  p' <- ExceptT . enterTypelessPatBinds (VPatB p binds) $ do
+    runExceptT (rename m (liftPRenN n pren) p)
   return $ SPat p' binds
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
@@ -1006,7 +1023,7 @@ unifyClause (Impossible p) (Impossible p') = unifyPat p p'
 unifyClause a b = return $ No [DifferentClauses [a] [b]]
 
 data Problem = Problem
-  { ctx :: TypelessCtx,
+  { ctx :: Ctx,
     loc :: Loc,
     lhs :: VTm,
     rhs :: VTm,
@@ -1024,7 +1041,7 @@ getProblems :: (Tc m) => m (Seq Problem)
 getProblems = view
 
 enterProblem :: (Tc m) => Problem -> m a -> m a
-enterProblem p = enterPat NotInPat . enterTypelessCtx p.ctx . enterLoc p.loc
+enterProblem p = enterPat NotInPat . enterCtx (const p.ctx) . enterLoc p.loc
 
 solveRemainingProblems :: (Tc m) => m ()
 solveRemainingProblems = do
@@ -1041,7 +1058,7 @@ solveRemainingProblems = do
 runSolveT :: (Tc m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT m sp t f = do
   f' <- runExceptT f
-  ctx <- currentTypelessCtx
+  ctx <- getCtx
   loc <- view
   case f' of
     Left err -> do
