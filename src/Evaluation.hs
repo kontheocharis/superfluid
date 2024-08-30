@@ -4,6 +4,7 @@
 module Evaluation
   ( Eval (..),
     quote,
+    quotePat,
     nf,
     resolve,
     force,

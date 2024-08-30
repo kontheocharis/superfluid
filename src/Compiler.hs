@@ -40,7 +40,7 @@ import Elaboration (Elab (..), elabProgram)
 import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
-import Options.Applicative (execParser, (<**>), (<|>))
+import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
 import Options.Applicative.Builder
   ( fullDesc,
     header,
@@ -61,7 +61,7 @@ import Printing (Pretty (..))
 import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Typechecking (Ctx, InPat (..), Problem, Tc (showMessage, tcError, addGoal), TcError, emptyCtx, Goal, prettyGoal)
+import Typechecking (Ctx, Goal, InPat (..), Problem, SolveAttempts (..), Tc (addGoal, showMessage, tcError), TcError, emptyCtx, prettyGoal)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -84,14 +84,16 @@ data Flags = Flags
     -- | Whether to be verbose.
     verbose :: Bool,
     -- | Normalise the program in the end.
-    normalise :: Bool
+    normalise :: Bool,
+    -- | Amount of solve attempts for metas.
+    attempts :: Int
   }
   deriving (Show)
 
 -- | Command-line arguments.
 data Args = Args
-  { argsMode :: Mode,
-    argsFlags :: Flags
+  { mode :: Mode,
+    flags :: Flags
   }
   deriving (Show)
 
@@ -102,6 +104,7 @@ parseFlags =
     <$> switch (long "dump" <> short 'd' <> help "Print the parsed program")
     <*> switch (long "verbose" <> short 'v' <> help "Be verbose")
     <*> switch (long "normalise" <> short 'n' <> help "Normalise the program")
+    <*> option auto (long "attempts" <> short 'a' <> help "Amount of solve attempts for metas" <> value 1)
 
 -- | Parse the mode to run in.
 parseMode :: Parser Mode
@@ -152,6 +155,7 @@ data Compiler = Compiler
     goals :: [Goal],
     lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool,
+    solveAttempts :: SolveAttempts,
     problems :: Seq Problem
   }
 
@@ -191,6 +195,10 @@ instance Has Comp (Seq Problem) where
   view = gets (\c -> c.problems)
   modify f = ST.modify (\s -> s {problems = f s.problems})
 
+instance Has Comp SolveAttempts where
+  view = gets (\c -> c.solveAttempts)
+  modify f = ST.modify (\s -> s {solveAttempts = f s.solveAttempts})
+
 instance Tc Comp where
   tcError = throwError . TcCompilerError
   showMessage = msg
@@ -229,7 +237,8 @@ emptyCompiler =
       lastNameIdx = 0,
       reduceUnfoldDefs = False,
       goals = [],
-      problems = mempty
+      problems = mempty,
+      solveAttempts = SolveAttempts 1
     }
 
 runComp :: Comp a -> Compiler -> IO ()
@@ -240,12 +249,14 @@ runComp c s = do
 
 showGoals :: Comp ()
 showGoals = do
+  msg "\n-- Goals --\n"
   gs <- gets (\s -> s.goals)
   mapM_ (\g -> prettyGoal g >>= msg) gs
 
 -- | Run the compiler.
 compile :: Args -> Comp ()
 compile args = do
+  ST.modify (\s -> s {solveAttempts = SolveAttempts args.flags.attempts})
   case args of
     Args (CheckFile file) flags -> do
       when flags.normalise $ setNormaliseProgram True

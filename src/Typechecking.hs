@@ -12,6 +12,7 @@ module Typechecking
     InPat (..),
     Problem,
     Goal,
+    SolveAttempts (..),
     prettyGoal,
     lam,
     letIn,
@@ -92,6 +93,7 @@ import Evaluation
     isCtorTy,
     isTypeFamily,
     quote,
+    quotePat,
     resolve,
     unfoldDefs,
     vApp,
@@ -230,7 +232,7 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx) => Tc m where
+class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m SolveAttempts) => Tc m where
   addGoal :: Goal -> m ()
 
   getCtx :: m Ctx
@@ -282,7 +284,8 @@ data Ctx = Ctx
     bounds :: Bounds,
     nameList :: [Name],
     names :: Map Name Lvl
-  } deriving (Show)
+  }
+  deriving (Show)
 
 data Mode = Check VTy | Infer
 
@@ -544,7 +547,7 @@ handleUnification t1 t2 r = do
       No errs -> tcError $ ImpossibleCase t1 errs
     NotInPat -> case r of
       Yes -> return ()
-      Maybe _ -> tcError $ PotentialMismatch t1 t2
+      Maybe _ -> addNewProblem t1 t2 Blocking
       No errs -> tcError $ Mismatch errs
 
 canUnifyHere :: (Tc m) => VTm -> VTm -> m CanUnify
@@ -870,6 +873,7 @@ data SolveError
   = InvertError (Spine VTm)
   | OccursError MetaVar
   | EscapingVariable
+  | Blocking
   | WithProblem Problem SolveError
   deriving (Show)
 
@@ -893,6 +897,7 @@ instance (Tc m) => Pretty m SolveError where
     return $ "the meta-variable " ++ m' ++ " occurs in a term it is being unified against"
   pretty EscapingVariable = do
     return "a variable in a term escapes the context of the meta it is being unified against"
+  pretty Blocking = return "reduction is blocked"
   pretty (WithProblem p e) = do
     p' <- enterProblem p $ do
       lhs <- pretty p.lhs
@@ -981,10 +986,8 @@ renameClosure m pren cl = do
   rename m (liftPRenN cl.numVars pren) vt
 
 renamePat :: (Tc m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
-renamePat m pren (VPatB p binds) = do
-  let n = length binds
-  p' <- rename m (liftPRenN n pren) p
-  return $ SPat p' binds
+renamePat _ pren p = do
+  lift $ quotePat pren.codSize p
 
 -- | Perform the partial renaming on rhs, while also checking for "m" occurrences.
 rename :: (Tc m) => MetaVar -> PRen -> VTm -> SolveT m STm
@@ -995,7 +998,7 @@ rename m pren tm = do
       | m == m' -> throwError $ OccursError m
       | otherwise -> renameSp m pren (SMeta m' []) sp
     VNeu (VApp (VRigid (Lvl x)) sp) -> case IM.lookup x pren.vars of
-      Nothing -> throwError $ EscapingVariable
+      Nothing -> throwError EscapingVariable
       Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (VNeu (VApp h Empty))
@@ -1044,11 +1047,19 @@ data Problem = Problem
     lhs :: VTm,
     rhs :: VTm,
     errs :: [UnifyError]
-  } deriving (Show)
+  }
+  deriving (Show)
 
 addProblem :: (Tc m) => Problem -> m ()
 addProblem p = do
   modify (S.|> p)
+
+addNewProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
+addNewProblem t t' e = do
+  c <- getCtx
+  l <- view
+  let p = Problem {ctx = c, loc = l, lhs = t, rhs = t', errs = []}
+  addProblem $ p {errs = [SolveError (WithProblem p e)]}
 
 removeProblem :: (Tc m) => Int -> m ()
 removeProblem i = modify (\(p :: Seq Problem) -> S.deleteAt i p)
@@ -1059,27 +1070,38 @@ getProblems = view
 enterProblem :: (Tc m) => Problem -> m a -> m a
 enterProblem p = enterPat NotInPat . enterCtx (const p.ctx) . enterLoc p.loc
 
+newtype SolveAttempts = SolveAttempts {n :: Int}
+
 solveRemainingProblems :: (Tc m) => m ()
 solveRemainingProblems = do
-  ps <- getProblems
-  void $
-    S.traverseWithIndex
-      ( \i p -> enterProblem p $ do
-          c <- unify p.lhs p.rhs
-          handleUnification p.lhs p.rhs c
-          removeProblem i
-      )
-      ps
+  att <- view
+  solveRemainingProblems' att
+  where
+    solveRemainingProblems' :: (Tc m) => SolveAttempts -> m ()
+    solveRemainingProblems' (SolveAttempts 0) = return ()
+    solveRemainingProblems' (SolveAttempts n) = do
+      ps <- getProblems
+      if null ps
+        then return ()
+        else do
+          _ <-
+            S.traverseWithIndex
+              ( \i p -> enterProblem p $ do
+                  lhs' <- resolveHere p.lhs
+                  rhs' <- resolveHere p.rhs
+                  c <- unify lhs' rhs'
+                  handleUnification lhs' rhs' c
+                  removeProblem i
+              )
+              ps
+          solveRemainingProblems' (SolveAttempts (n - 1))
 
 runSolveT :: (Tc m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT m sp t f = do
   f' <- runExceptT f
-  ctx <- getCtx
-  loc <- view
   case f' of
     Left err -> do
-      let p = Problem {ctx = ctx, loc = loc, lhs = VNeu (VApp (VFlex m) sp), rhs = t, errs = []}
-      addProblem $ p {errs = [SolveError (WithProblem p err)]}
+      addNewProblem (VNeu (VApp (VFlex m) sp)) t err
       return Yes
     Right () -> solveRemainingProblems >> return Yes
 

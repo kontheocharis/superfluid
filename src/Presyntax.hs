@@ -216,7 +216,7 @@ instance (Monad m) => Pretty m PTm where
     return $ px ++ " " ++ intercalate " " pxs
   pretty l@(PLet {}) = prettyLets (pLetToList l)
   pretty (PCase t cs) = do
-    pt <- pretty t
+    pt <- singlePretty t
     pcs <- pretty cs
     return $ "case " ++ pt ++ " " ++ curlies pcs
   pretty (PLambdaCase cs) = do
