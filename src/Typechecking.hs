@@ -538,12 +538,12 @@ handleUnification t1 t2 r = do
   case p of
     InImpossiblePat -> case r of
       Yes -> tcError $ ImpossibleCaseIsPossible t1 t2
-      Maybe s -> tcError $ ImpossibleCaseMightBePossible t1 t2 s
+      Maybe _ -> addNewProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
       No errs | not $ any unifyErrorIsMetaRelated errs -> return ()
       No errs -> tcError $ Mismatch errs
     InPossiblePat _ -> case r of
       Yes -> return ()
-      Maybe s -> applySubToCtx s
+      Maybe _ -> addNewProblem t1 t2 Blocking -- applySubToCtx s
       No errs -> tcError $ ImpossibleCase t1 errs
     NotInPat -> case r of
       Yes -> return ()
@@ -1114,15 +1114,34 @@ unifyFlex m sp t = runSolveT m sp t $ do
 
 unifyRigid :: (Tc m) => Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid x Empty t = do
-  l <- getLvl
-  return $ Maybe (subbing l x t)
-unifyRigid _ _ _ = return $ Maybe mempty
+  maybeUnify (subbing x x t)
+-- l <- getLvl
+-- ifInPat
+--   ( applySubToCtx (subbing l x t) >> return Yes
+--   )
+--   (return $ Maybe (subbing l x t))
+-- >> return Yes
+-- return $ Maybe (subbing l x t)
+unifyRigid _ _ _ = do
+  maybeUnify mempty
+
+-- ifInPat
+--   (return Yes)
+--   (return $ Maybe (mempty))
+
+maybeUnify :: (Tc m) => Sub -> m CanUnify
+maybeUnify s =
+  ifInPat
+    (applySubToCtx s >> return Yes)
+    (return $ Maybe s)
+
+--  return $ Maybe mempty
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do
   gu <- access (unfoldDef g)
   case gu of
-    Nothing -> return $ Maybe mempty
+    Nothing -> maybeUnify mempty
     Just gu' -> do
       t <- vApp gu' sp
       unify t t'
@@ -1170,7 +1189,7 @@ unify t1 t2 = do
     (VGlob (PrimGlob f) sp, VGlob (PrimGlob f') sp') ->
       if f == f'
         then unifySpines sp sp'
-        else return $ Maybe mempty
+        else maybeUnify mempty
     (VGlob (DefGlob f) sp, VGlob (DefGlob f') sp') ->
       if f == f'
         then unifySpines sp sp' \/ unfoldDefAndUnify f sp t2'
@@ -1182,19 +1201,19 @@ unify t1 t2 = do
           /\ unifyClauses bs bs'
           /\ unifySpines sp sp'
         )
-        \/ return (Maybe mempty)
+        \/ maybeUnify mempty
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
-      unifySpines sp sp' \/ return (Maybe mempty)
+      unifySpines sp sp' \/ maybeUnify mempty
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
-      unifySpines sp sp' \/ return (Maybe mempty)
+      unifySpines sp sp' \/ maybeUnify mempty
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
-      unifySpines sp sp' \/ return (Maybe mempty)
+      unifySpines sp sp' \/ maybeUnify mempty
     (VNeu (VApp (VFlex x) sp), t') -> unifyFlex x sp t'
     (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex x' sp' t
     (VNeu (VApp (VRigid x) sp), t') -> unifyRigid x sp t'
     (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid x' sp' t
-    (VNeu (VReprApp {}), _) -> return $ Maybe mempty
-    (_, VNeu (VReprApp {})) -> return $ Maybe mempty
-    (VNeu (VCaseApp {}), _) -> return $ Maybe mempty
-    (_, VNeu (VCaseApp {})) -> return $ Maybe mempty
+    (VNeu (VReprApp {}), _) -> maybeUnify mempty
+    (_, VNeu (VReprApp {})) -> maybeUnify mempty
+    (VNeu (VCaseApp {}), _) -> maybeUnify mempty
+    (_, VNeu (VCaseApp {})) -> maybeUnify mempty
     _ -> return $ No [Mismatching t1' t2']

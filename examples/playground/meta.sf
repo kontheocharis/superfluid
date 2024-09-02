@@ -93,3 +93,37 @@ def z-t : NatT {
 def s-t : NatT -> NatT {
   \n => mu (e-s, n)
 }
+
+data ListE : Type {
+  e-nil : ListE,
+  e-cons : ListE,
+}
+
+def list-d : Type -> Desc {
+  \A => choice ListE (\case {
+    e-nil => one,
+    e-cons => choice A (\_ => var),
+  })
+}
+
+def ListT : Type -> Type {
+  \A => Mu (list-d A)
+}
+
+def nil-t : [A : Type] -> ListT A {
+  mu (e-nil, ())
+}
+
+def cons-t : [A : Type] -> A -> ListT A -> ListT A {
+  \a l => mu (e-cons, (a, l))
+}
+
+def repeat : [A : Type] -> (n : NatT) -> A -> ListT A {
+  \[A] n a => case n {
+    mu (e-z, ()) => nil-t,
+    mu (e-s, n') => {
+      -- let x = repeat n' ?l2;
+      ?p1
+    }
+  }
+}
