@@ -1,6 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Typechecking
@@ -31,6 +33,7 @@ module Typechecking
     dataItem,
     ctorItem,
     primItem,
+    reprDataItem,
     ensureAllProblemsSolved,
   )
 where
@@ -55,9 +58,10 @@ import Common
     PiMode (..),
     Spine,
     Tag,
-    Times,
+    Times (..),
     inv,
     lvlToIdx,
+    mapSpineM,
     nextLvl,
     nextLvls,
     pat,
@@ -65,7 +69,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (replicateM, unless, void)
+import Control.Monad (replicateM, unless, void, (>=>))
 import Control.Monad.Except (ExceptT (ExceptT), MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -100,6 +104,7 @@ import Evaluation
     vRepr,
     ($$),
   )
+import GHC.Records (HasField)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -107,8 +112,15 @@ import Globals
     GlobalInfo (..),
     KnownGlobal (..),
     PrimGlobalInfo (PrimGlobalInfo),
+    Sig,
+    addCaseRepr,
+    addCtorRepr,
+    addDataRepr,
+    addDefRepr,
     addItem,
+    getCtorGlobal,
     getDataGlobal,
+    getDefGlobal,
     globalInfoToTm,
     hasName,
     knownData,
@@ -120,7 +132,7 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), uniqueSLams)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -155,7 +167,7 @@ data TcError
   | ImpossibleCase VTm [UnifyError]
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
-  | InvalidCtorType VTy
+  | InvalidCtorType STy
   | DuplicateItem Name
   | Chain [TcError]
 
@@ -846,7 +858,7 @@ ctorItem dat n ts ty = do
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
   i <- getLvl >>= (\l -> isCtorTy l dat vty)
-  unless i (tcError $ InvalidCtorType vty)
+  unless i (tcError $ InvalidCtorType ty')
   modify (addItem n (CtorInfo (CtorGlobalInfo vty idx dat)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
@@ -856,6 +868,85 @@ primItem n ts ty = do
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
   modify (addItem n (PrimInfo (PrimGlobalInfo vty)) ts)
+
+vReprHere :: (Tc m) => Times -> VTm -> m VTm
+vReprHere m t = do
+  l <- accessCtx (\c -> c.lvl)
+  vRepr l m t
+
+reprItem :: (Tc m) => m VTy -> (VTy -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m ()
+reprItem getGlob addGlob ts r = do
+  ty <- getGlob
+  ty' <- vReprHere (Finite 1) ty
+  (r', _) <- r (Check ty')
+  vr <- evalHere r'
+  modify (addGlob vr ts)
+
+reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
+reprDataItem dat = reprItem (access (getDataGlobal dat) >>= \d -> return d.ty) (addDataRepr dat)
+
+reprCtorItem :: (Tc m) => CtorGlobal -> Set Tag -> Child m -> m ()
+reprCtorItem ctor = reprItem (access (getCtorGlobal ctor) >>= \d -> return d.ty) (addCtorRepr ctor)
+
+reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
+reprDefItem def = reprItem (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
+
+reprCaseItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
+reprCaseItem dat = reprItem (buildElimTy dat) (addCaseRepr dat)
+
+sPis :: [(PiMode, Name, STm)] -> STm -> STm
+sPis [] b = b
+sPis ((m, n, a) : xs) b = SPi m n a (sPis xs b)
+
+sGatherPis :: STm -> ([(PiMode, Name, STm)], STm)
+sGatherPis = \case
+  SPi m n a b -> let (xs, b') = sGatherPis b in ((m, n, a) : xs, b')
+  t -> ([], t)
+
+sPiRet :: STm -> (STm, Int)
+sPiRet = \case
+  SPi m n a b -> let (t, l) = sPiRet b in (t, l + 1)
+  t -> (t, 0)
+
+quoteHere :: (Tc m) => VTm -> m STm
+quoteHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  quote l t
+
+spineForTel :: [(PiMode, Name, STm)] -> Spine STm
+spineForTel tel =
+  S.fromList $ zipWith (curry (\((m, _, _), i) -> Arg m (SVar (lvlToIdx (Lvl $ length tel) (Lvl i))))) tel [0 ..]
+
+ctorMethodTy :: (Tc m) => STy -> CtorGlobal -> m STy
+ctorMethodTy sMotive ctor = do
+  ctorInfo <- access (getCtorGlobal ctor)
+  sTy <- quoteHere ctorInfo.ty
+  let (sTyBinds, sTyRet) = sGatherPis sTy
+  let (_, sTyRetSp) = sGatherApps sTyRet
+  let spToCtor = sAppSpine (SGlobal (CtorGlob ctor)) (spineForTel sTyBinds)
+  let methodRetTy = sAppSpine sMotive (sTyRetSp S.|> Arg Explicit spToCtor)
+  return $ sPis sTyBinds methodRetTy
+
+dataMotiveTy :: (Tc m) => DataGlobal -> m STy
+dataMotiveTy dat = do
+  datInfo <- access (getDataGlobal dat)
+  sTy <- quoteHere datInfo.ty
+  let (sTyBinds, _) = sGatherPis sTy
+  let spToData = sAppSpine (SGlobal (DataGlob dat)) (spineForTel sTyBinds)
+  return $ sPis (sTyBinds ++ [(Explicit, Name "x", spToData)]) SU
+
+buildElimTy :: (Tc m) => DataGlobal -> m VTy
+buildElimTy dat = do
+  datInfo <- access (getDataGlobal dat)
+  motive <- dataMotiveTy dat
+  methods <- mapM (ctorMethodTy motive) datInfo.ctors
+
+  datInfo <- access (getDataGlobal dat)
+  sTy <- quoteHere datInfo.ty
+  let (sTyBinds, _) = sGatherPis sTy
+  let elimTy = sPis ([(Explicit, Name "E", motive)] ++ sTyBinds ++ [ ( spineForTel sTyBinds)]) SU
+
+  return undefined
 
 data UnifyError
   = DifferentSpineLengths (Spine VTm) (Spine VTm)
@@ -1115,27 +1206,14 @@ unifyFlex m sp t = runSolveT m sp t $ do
 unifyRigid :: (Tc m) => Lvl -> Spine VTm -> VTm -> m CanUnify
 unifyRigid x Empty t = do
   maybeUnify (subbing x x t)
--- l <- getLvl
--- ifInPat
---   ( applySubToCtx (subbing l x t) >> return Yes
---   )
---   (return $ Maybe (subbing l x t))
--- >> return Yes
--- return $ Maybe (subbing l x t)
 unifyRigid _ _ _ = do
   maybeUnify mempty
-
--- ifInPat
---   (return Yes)
---   (return $ Maybe (mempty))
 
 maybeUnify :: (Tc m) => Sub -> m CanUnify
 maybeUnify s =
   ifInPat
     (applySubToCtx s >> return Yes)
     (return $ Maybe s)
-
---  return $ Maybe mempty
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do

@@ -4,9 +4,9 @@ module Syntax
     SPat (..),
     BoundState (..),
     Bounds,
-    toPSpine,
     sAppSpine,
     sLams,
+    sGatherApps,
     uniqueSLams,
   )
 where
@@ -30,7 +30,7 @@ import Presyntax (PTm (..))
 
 type STy = STm
 
-data SPat = SPat { asTm :: STm, binds :: [Name] } deriving (Show)
+data SPat = SPat {asTm :: STm, binds :: [Name]} deriving (Show)
 
 data BoundState = Bound | Defined deriving (Eq, Show)
 
@@ -50,10 +50,6 @@ data STm
   | SRepr Times STm
   deriving (Show)
 
-toPSpine :: PTm -> (PTm, Spine PTm)
-toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
-toPSpine t = (t, Empty)
-
 sAppSpine :: STm -> Spine STm -> STm
 sAppSpine t Empty = t
 sAppSpine t (Arg m u :<| sp) = sAppSpine (SApp m t u) sp
@@ -67,5 +63,6 @@ sLams :: Spine Name -> STm -> STm
 sLams Empty t = t
 sLams (Arg m x :<| sp) t = SLam m x (sLams sp t)
 
-
-
+sGatherApps :: STm -> (STm, Spine STm)
+sGatherApps (SApp m t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m u)
+sGatherApps t = (t, Empty)

@@ -15,15 +15,17 @@ module Presyntax
     PProgram (..),
     tagged,
     pApp,
+    toPSpine,
   )
 where
 
-import Common (Arg (..), Clause (..), Lit, Loc, Name (..), PiMode (..), Pos, Tag (..), Times (..), arg, mode)
+import Common (Arg (..), Clause (..), Lit, Loc, Name (..), PiMode (..), Pos, Tag (..), Times (..), arg, mode, Spine)
 import Data.List (intercalate)
 import Data.Set (Set)
 import Data.Typeable (Typeable)
 import Printing (Pretty (..), curlies)
 import Debug.Trace (traceM)
+import Data.Sequence (Seq(..))
 
 type PTy = PTm
 
@@ -130,6 +132,10 @@ data PTm
 
 pApp :: PTm -> [Arg PTm] -> PTm
 pApp = foldl (\g x -> PApp x.mode g x.arg)
+
+toPSpine :: PTm -> (PTm, Spine PTm)
+toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
+toPSpine t = (t, Empty)
 
 pLamsToList :: PTm -> ([Arg Name], PTm)
 pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m n : ns, b)

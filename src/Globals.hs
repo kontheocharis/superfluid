@@ -29,15 +29,29 @@ module Globals
     emptySig,
     globalInfoToTm,
     addItem,
+    addCaseRepr,
+    addCtorRepr,
+    addDataRepr,
+    addDefRepr,
   )
 where
 
-import Common (CtorGlobal (CtorGlobal), DataGlobal (DataGlobal), DefGlobal (DefGlobal), Glob (..), Name (..), PrimGlobal (..), Tag, globalName)
+import Common
+  ( CtorGlobal (CtorGlobal),
+    DataGlobal (DataGlobal),
+    DefGlobal (DefGlobal),
+    Glob (..),
+    Name (..),
+    PrimGlobal (..),
+    Tag,
+    globalName,
+  )
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set
 import Syntax (STm (..))
 import Value (VTm (..), VTy)
+import Control.Monad.Accum (MonadAccum(add))
 
 data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
 
@@ -53,8 +67,8 @@ data Sig = Sig
   { contents :: Map Name GlobalInfo,
     nameOrder :: [Name],
     tags :: Map Name (Set Tag),
-    repr :: Map Name VTm,
-    reprCase :: Map Name VTm
+    repr :: Map Name (VTm, Set Tag),
+    reprCase :: Map Name (VTm, Set Tag)
   }
 
 emptySig :: Sig
@@ -71,6 +85,19 @@ addItem n i ts s =
       tags = M.insert n ts s.tags
     }
 
+addDataRepr :: DataGlobal -> VTm -> Set Tag -> Sig -> Sig
+addDataRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
+
+addCaseRepr :: DataGlobal -> VTm -> Set Tag -> Sig -> Sig
+addCaseRepr g t ts s = s {reprCase = M.insert g.globalName (t, ts) s.reprCase}
+
+addCtorRepr :: CtorGlobal -> VTm -> Set Tag -> Sig -> Sig
+addCtorRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
+
+addDefRepr :: DefGlobal -> VTm -> Set Tag -> Sig -> Sig
+addDefRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
+
+
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
 modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}
 
@@ -86,7 +113,7 @@ getDataGlobal g sig = case M.lookup g.globalName sig.contents of
 getCtorGlobal :: CtorGlobal -> Sig -> CtorGlobalInfo
 getCtorGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (CtorInfo info) -> info
-  Just _ -> error $ "getCtorGlobal: not a ctor global: "  ++ show g
+  Just _ -> error $ "getCtorGlobal: not a ctor global: " ++ show g
   _ -> error $ "getCtorGlobal: not a global" ++ show g
 
 getDefGlobal :: DefGlobal -> Sig -> DefGlobalInfo
@@ -120,27 +147,27 @@ unfoldDef g sig = (getDefGlobal g sig).vtm
 
 getDataRepr :: DataGlobal -> Sig -> VTm
 getDataRepr g sig = case M.lookup g.globalName sig.repr of
-  Just t -> t
+  Just (t, _) -> t
   Nothing -> error $ "getDataRepr: no repr for data " ++ show g
 
 getCaseRepr :: DataGlobal -> Sig -> VTm
 getCaseRepr g sig = case M.lookup g.globalName sig.reprCase of
-  Just t -> t
+  Just (t, _) -> t
   Nothing -> error $ "getCaseRepr: no repr for data " ++ show g
 
 getCtorRepr :: CtorGlobal -> Sig -> VTm
 getCtorRepr g sig = case M.lookup g.globalName sig.repr of
-  Just t -> t
+  Just (t, _) -> t
   Nothing -> error $ "getCtorRepr: no repr for constructor " ++ show g
 
 getDefRepr :: DefGlobal -> Sig -> VTm
 getDefRepr g sig = case M.lookup g.globalName sig.repr of
-  Just t -> t
+  Just (t, _) -> t
   Nothing -> error $ "getDefRepr: no repr for def " ++ show g
 
 getPrimRepr :: PrimGlobal -> Sig -> VTm
 getPrimRepr g sig = case M.lookup g.globalName sig.repr of
-  Just t -> t
+  Just (t, _) -> t
   Nothing -> error $ "getPrimRepr: no repr for prim " ++ show g
 
 getGlobalRepr :: Glob -> Sig -> VTm
