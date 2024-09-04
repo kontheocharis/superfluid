@@ -55,9 +55,9 @@ import Control.Monad.Accum (MonadAccum(add))
 
 data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
 
-data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal]}
+data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal], elimTy :: Maybe VTm} -- might not be set yet
 
-data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet if
+data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
 
 newtype PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
 

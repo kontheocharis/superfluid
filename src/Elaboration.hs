@@ -18,6 +18,7 @@ import Common
     mapSpine,
   )
 import Data.Bifunctor (bimap)
+import Debug.Trace (traceM)
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Presyntax
   ( PCtor (..),
@@ -28,8 +29,10 @@ import Presyntax
     PProgram (..),
     PTm (..),
     pApp,
+    toPSpine,
   )
-import Syntax (STm, toPSpine)
+import Printing (Pretty (..))
+import Syntax (STm)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -39,6 +42,7 @@ import Typechecking
     ctorItem,
     dataItem,
     defItem,
+    endDataItem,
     ensureAllProblemsSolved,
     insertLam,
     lam,
@@ -102,7 +106,9 @@ elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
 elabData :: (Elab m) => PData -> m ()
 elabData dat = do
   dataItem dat.name dat.tags (elab dat.ty)
-  mapM_ (elabCtor (DataGlobal dat.name)) dat.ctors
+  let d = DataGlobal dat.name
+  mapM_ (elabCtor d) dat.ctors
+  endDataItem d
 
 elabPrim :: (Elab m) => PPrim -> m ()
 elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
