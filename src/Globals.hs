@@ -145,32 +145,22 @@ globalInfoToTm n i = case i of
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).vtm
 
-getDataRepr :: DataGlobal -> Sig -> VTm
-getDataRepr g sig = case M.lookup g.globalName sig.repr of
-  Just (t, _) -> t
-  Nothing -> error $ "getDataRepr: no repr for data " ++ show g
+getDataRepr :: DataGlobal -> Sig -> Maybe VTm
+getDataRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getCaseRepr :: DataGlobal -> Sig -> VTm
-getCaseRepr g sig = case M.lookup g.globalName sig.reprCase of
-  Just (t, _) -> t
-  Nothing -> error $ "getCaseRepr: no repr for data " ++ show g
+getCaseRepr :: DataGlobal -> Sig -> Maybe VTm
+getCaseRepr g sig = fst <$> M.lookup g.globalName sig.reprCase
 
-getCtorRepr :: CtorGlobal -> Sig -> VTm
-getCtorRepr g sig = case M.lookup g.globalName sig.repr of
-  Just (t, _) -> t
-  Nothing -> error $ "getCtorRepr: no repr for constructor " ++ show g
+getCtorRepr :: CtorGlobal -> Sig -> Maybe VTm
+getCtorRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getDefRepr :: DefGlobal -> Sig -> VTm
-getDefRepr g sig = case M.lookup g.globalName sig.repr of
-  Just (t, _) -> t
-  Nothing -> error $ "getDefRepr: no repr for def " ++ show g
+getDefRepr :: DefGlobal -> Sig -> Maybe VTm
+getDefRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getPrimRepr :: PrimGlobal -> Sig -> VTm
-getPrimRepr g sig = case M.lookup g.globalName sig.repr of
-  Just (t, _) -> t
-  Nothing -> error $ "getPrimRepr: no repr for prim " ++ show g
+getPrimRepr :: PrimGlobal -> Sig -> Maybe VTm
+getPrimRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getGlobalRepr :: Glob -> Sig -> VTm
+getGlobalRepr :: Glob -> Sig -> Maybe VTm
 getGlobalRepr (DataGlob g) = getDataRepr g
 getGlobalRepr (CtorGlob g) = getCtorRepr g
 getGlobalRepr (DefGlob g) = getDefRepr g

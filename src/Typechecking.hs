@@ -856,6 +856,7 @@ endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
   elimTy <- buildElimTy dat
   modify (modifyDataItem dat (\d -> d {elimTy = Just elimTy}))
+  vReprHere (Finite 1) elimTy >>= pretty >>= traceM
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do

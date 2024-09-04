@@ -104,6 +104,7 @@ import Value
     pattern VGl,
     pattern VGlob,
     pattern VMeta,
+    pattern VRepr,
     pattern VVar,
   )
 
@@ -220,13 +221,21 @@ vRepr _ _ (VLit i) = return $ VLit i
 vRepr l m (VNeu (VApp (VGlobal g) sp)) = do
   g' <- access (getGlobalRepr g)
   sp' <- mapSpineM (vRepr l m) sp
-  vApp g' sp'
+  case g' of
+    Just g'' -> do
+      vApp g'' sp'
+    Nothing -> do
+      vApp (VNeu (VRepr m (VGlobal g))) sp'
 vRepr l m (VNeu (VCaseApp dat v cs sp)) = do
   f <- access (getCaseRepr dat)
   cssp <- caseToSpine v cs
   cssp' <- mapSpineM (vRepr l m) cssp
-  a <- vApp f cssp'
-  vApp a sp
+  sp' <- mapSpineM (vRepr l m) sp
+  case f of
+    Just f' -> do
+      a <- vApp f' cssp'
+      vApp a sp'
+    Nothing -> error "unimplemented"
 vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return $ VNeu (VReprApp m h sp')
