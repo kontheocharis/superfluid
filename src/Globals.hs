@@ -44,18 +44,18 @@ import Common
     Name (..),
     PrimGlobal (..),
     Tag,
-    globalName,
+    globalName, Arg,
   )
+import Control.Monad.Accum (MonadAccum (add))
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set
 import Syntax (STm (..))
 import Value (VTm (..), VTy)
-import Control.Monad.Accum (MonadAccum(add))
 
 data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
 
-data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal], elimTy :: Maybe VTm} -- might not be set yet
+data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal], elimTy :: Maybe VTm, elimTyArity :: [Arg ()]} -- might not be set yet
 
 data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
 
@@ -96,7 +96,6 @@ addCtorRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
 
 addDefRepr :: DefGlobal -> VTm -> Set Tag -> Sig -> Sig
 addDefRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
-
 
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
 modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}

@@ -3,9 +3,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Elaboration
-  ( Elab,
+  ( Elab (..),
     elab,
     elabProgram,
+    ElabError (..),
   )
 where
 
@@ -13,22 +14,36 @@ import Common
   ( Arg (..),
     CtorGlobal (..),
     DataGlobal (..),
+    DefGlobal (..),
+    Glob (..),
+    Has (..),
     HasNameSupply (uniqueName),
+    HasProjectFiles,
+    Loc,
+    Name,
     PiMode (..),
     mapSpine,
+    unName,
   )
+import Control.Monad.Except (MonadError)
 import Data.Bifunctor (bimap)
 import Debug.Trace (traceM)
-import Globals (KnownGlobal (..), knownCtor, knownData)
+import Globals (DataGlobalInfo, GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
-  ( PCtor (..),
+  ( PCaseRep (..),
+    PCtor (..),
+    PCtorRep (..),
     PData (..),
+    PDataRep (..),
     PDef (..),
+    PDefRep (..),
     PItem (..),
     PPrim (..),
     PProgram (..),
     PTm (..),
     pApp,
+    pGatherApps,
+    pLams,
     toPSpine,
   )
 import Printing (Pretty (..))
@@ -53,6 +68,10 @@ import Typechecking
     piTy,
     primItem,
     repr,
+    reprCaseItem,
+    reprCtorItem,
+    reprDataItem,
+    reprDefItem,
     univ,
     wildPat,
   )
@@ -60,7 +79,29 @@ import Value (VTm (..), VTy)
 
 -- Presyntax exists below here
 
-class (Tc m) => Elab m
+data ElabError = PatMustBeBind PTm | PatMustBeHeadWithBinds PTm | ExpectedDataGlobal Name | ExpectedCtorGlobal Name
+  deriving (Show)
+
+instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
+  pretty e = do
+    loc <- (view :: m Loc) >>= pretty
+    err' <- err
+    return $ loc <> "\n" <> err'
+    where
+      err = case e of
+        PatMustBeHeadWithBinds a' -> do
+          e' <- pretty a'
+          return $ "Pattern must be a head with binds, but got:" ++ e'
+        ExpectedDataGlobal n ->
+          return $ "Expected a data type name, but got: `" ++ n.unName ++ "`"
+        ExpectedCtorGlobal n ->
+          return $ "Expected a constructor name, but got: `" ++ n.unName ++ "`"
+        PatMustBeBind a' -> do
+          e' <- pretty a'
+          return $ "Pattern must be a bind, but got: " ++ e'
+
+class (Tc m) => Elab m where
+  elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
 pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit) ts)
@@ -113,14 +154,73 @@ elabData dat = do
 elabPrim :: (Elab m) => PPrim -> m ()
 elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
 
+ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, [Arg Name])
+ensurePatIsHeadWithBinds p =
+  let (h, sp) = pGatherApps p
+   in case h of
+        PLocated l t -> enterLoc l (ensurePatIsHeadWithBinds t)
+        PName n -> (n,) <$> mapM argIsName sp
+        _ -> elabError (PatMustBeHeadWithBinds p)
+  where
+    argIsName = \case
+      Arg m (PLocated l t) -> enterLoc l (argIsName (Arg m t))
+      Arg m (PName an) -> return $ Arg m an
+      _ -> elabError (PatMustBeHeadWithBinds p)
+
+ensurePatIsBind :: (Elab m) => PTm -> m Name
+ensurePatIsBind p = case p of
+  PLocated l t -> enterLoc l (ensurePatIsBind t)
+  PName n -> return n
+  _ -> elabError (PatMustBeBind p)
+
+elabDataRep :: (Elab m) => PDataRep -> m ()
+elabDataRep r = do
+  (h, sp) <- ensurePatIsHeadWithBinds r.src
+  g <- access (lookupGlobal h)
+  case g of
+    Just (DataInfo info) -> do
+      let target' = pLams sp r.target
+      let dat = DataGlobal h
+      reprDataItem dat r.tags (elab target')
+      mapM_ elabCtorRep r.ctors
+      elabCaseRep dat info r.caseExpr
+    _ -> elabError (ExpectedDataGlobal h)
+
+elabCtorRep :: (Elab m) => PCtorRep -> m ()
+elabCtorRep r = do
+  (h, sp) <- ensurePatIsHeadWithBinds r.src
+  g <- access (lookupGlobal h)
+  case g of
+    Just (CtorInfo _) -> do
+      let target' = pLams sp r.target
+      reprCtorItem (CtorGlobal h) r.tags (elab target')
+    _ -> elabError (ExpectedCtorGlobal h)
+
+elabCaseRep :: (Elab m) => DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
+elabCaseRep dat info r = do
+  srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
+  srcBranches <- map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
+  elimTy <- Arg Explicit <$> uniqueName
+  tyParams <- mapM (traverse (const uniqueName)) info.elimTyArity
+  let target' = pLams ([elimTy] ++ tyParams ++ [srcSubject] ++ srcBranches) r.target
+  reprCaseItem dat r.tags (elab target')
+
+elabDefRep :: (Elab m) => PDefRep -> m ()
+elabDefRep r = do
+  x <- ensurePatIsBind r.src
+  g <- access (lookupGlobal x)
+  case g of
+    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elab r.target)
+    _ -> elabError (ExpectedDataGlobal x)
+
 elabItem :: (Elab m) => PItem -> m ()
 elabItem i = do
   case i of
     PDef def -> elabDef def
     PData dat -> elabData dat
     PPrim prim -> elabPrim prim
-    PDataRep {} -> return () -- @@Todo
-    PDefRep {} -> return () -- @@Todo
+    PDataRep dataRep -> elabDataRep dataRep
+    PDefRep defRep -> elabDefRep defRep
     PLocatedItem l i' -> enterLoc l $ elabItem i'
   ensureAllProblemsSolved
 

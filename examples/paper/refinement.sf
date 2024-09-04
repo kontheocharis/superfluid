@@ -9,27 +9,32 @@ data ListWithLength : Type -> Nat -> Type {
   mk-list-with-length : [A : Type] -> [n : Nat] -> (l : List A) -> Equal n (length l) -> ListWithLength A n
 }
 
+def proj-len : [A : Type] -> [n : Nat] -> ListWithLength A n -> Nat {
+  \[_] [n] l => n
+}
+
 def proj-list : [A : Type] -> [n : Nat] -> ListWithLength A n -> List A {
   \l => case l {
     mk-list-with-length l' _ => l'
   }
 }
 
+def proj-eq : [A : Type] -> [n : Nat] -> (xs : ListWithLength A n) -> Equal (proj-len xs) (length (proj-list xs)) {
+  ?proj-eq
+}
+
 def proj-list-len : [A : Type] -> [n : Nat] -> (l : ListWithLength A n) -> Equal n (length (proj-list l)) {
   ?h1
 }
 
-repr data Vec A n as ListWithLength A n {
+repr data Vec A n as ListWithLength A (unrepr n) {
   vnil as mk-list-with-length nil refl,
   vcons x xs as {
-    let l = proj-list (repr xs);
-    -- let p = proj-list-len (repr xs);
-    let m = mk-list-with-length [_] [s _] (cons x l) refl;
-    -- m
-    ?h1
-  },
+    ?hvcons
+    -- mk-list-with-length (cons x (proj-list xs)) (proj-eq xs)
+  }
   case xs {
     vnil => n,
     vcons => c
-  } as ?h3
+  } as ?h4
 }

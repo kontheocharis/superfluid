@@ -4,37 +4,37 @@ data Vec : Type -> Nat -> Type {
   vcons : [A : Type, n : Nat] -> A -> Vec A n -> Vec A (s n),
 }
 
-def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
-  \n a => case n {
-    z => vnil,
-    s n' => vcons a (repeat n' a),
-  }
-}
+-- def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
+--   \n a => case n {
+--     z => vnil,
+--     s n' => vcons a (repeat n' a),
+--   }
+-- }
 
-def upgrade1 : [n : Nat] -> Fin n -> Fin (s n) {
-  \f => case f {
-    fz => fz,
-    fs f' => fs (upgrade1 f'),
-  }
-}
+-- def upgrade1 : [n : Nat] -> Fin n -> Fin (s n) {
+--   \f => case f {
+--     fz => fz,
+--     fs f' => fs (upgrade1 f'),
+--   }
+-- }
 
-def plus-succ-symmetric : [m n : Nat] -> Equal (add (s m) n) (add m (s n)) {
-  \[m] [n] => case m {
-    z => refl,
-    s m' => cong s (plus-succ-symmetric [m'] [n]),
-  }
-}
+-- def plus-succ-symmetric : [m n : Nat] -> Equal (add (s m) n) (add m (s n)) {
+--   \[m] [n] => case m {
+--     z => refl,
+--     s m' => cong s (plus-succ-symmetric [m'] [n]),
+--   }
+-- }
 
-def upgrade-i : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add i n) {
-  \i f => case i {
-    z => f,
-    s i' => ?h2,
-  }
-}
+-- def upgrade-i : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add i n) {
+--   \i f => case i {
+--     z => f,
+--     s i' => ?h2,
+--   }
+-- }
 
-def main : Nat -> (n : Nat) * Vec Nat n {
-  \n => (n, repeat n z)
-}
+-- def main : Nat -> (n : Nat) * Vec Nat n {
+--   \n => (n, repeat n z)
+-- }
 
 
 

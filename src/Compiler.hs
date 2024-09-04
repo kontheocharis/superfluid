@@ -36,7 +36,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Debug.Trace (trace, traceStack)
-import Elaboration (Elab (..), elabProgram)
+import Elaboration (Elab (..), elabProgram, ElabError)
 import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
 import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
@@ -159,13 +159,14 @@ data Compiler = Compiler
     problems :: Seq Problem
   }
 
-data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError
+data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError | ElabCompilerError ElabError
 
 instance Pretty Comp CompilerError where
   pretty e = do
     x <- case e of
       TcCompilerError a -> pretty a
       ParseCompilerError a -> pretty a
+      ElabCompilerError a -> pretty a
     return $ ">> " ++ x
 
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
@@ -203,9 +204,10 @@ instance Tc Comp where
   tcError = throwError . TcCompilerError
   showMessage = msg
 
-  addGoal g = ST.modify (\s -> s {goals = g : s.goals})
+  addGoal g = ST.modify (\s -> s {goals = s.goals ++ [g]})
 
-instance Elab Comp
+instance Elab Comp where
+  elabError = throwError . ElabCompilerError
 
 instance Has Comp Ctx where
   view = gets (\c -> c.ctx)

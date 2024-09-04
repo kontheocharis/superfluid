@@ -35,6 +35,9 @@ module Typechecking
     primItem,
     endDataItem,
     reprDataItem,
+    reprCtorItem,
+    reprCaseItem,
+    reprDefItem,
     ensureAllProblemsSolved,
   )
 where
@@ -133,7 +136,7 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, uniqueSLams, sGatherPis, sPis)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sPis, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -155,6 +158,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Data.Maybe (fromJust)
 
 data TcError
   = Mismatch [UnifyError]
@@ -850,12 +854,12 @@ dataItem n ts ty = do
   vty <- evalHere ty'
   i <- getLvl >>= (`isTypeFamily` vty)
   unless i (tcError $ InvalidDataFamily vty)
-  modify (addItem n (DataInfo (DataGlobalInfo vty [] Nothing)) ts)
+  modify (addItem n (DataInfo (DataGlobalInfo vty [] Nothing [])) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
-  elimTy <- buildElimTy dat
-  modify (modifyDataItem dat (\d -> d {elimTy = Just elimTy}))
+  (elimTy, arity) <- buildElimTy dat
+  modify (modifyDataItem dat (\d -> d {elimTy = Just elimTy, elimTyArity = arity}))
   vReprHere (Finite 1) elimTy >>= pretty >>= traceM
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
@@ -887,6 +891,10 @@ reprItem getGlob addGlob ts r = do
   ty' <- vReprHere (Finite 1) ty
   (r', _) <- r (Check ty')
   vr <- evalHere r'
+
+  vr' <- pretty vr
+  traceM $ "Final type for representation: " ++ vr'
+
   modify (addGlob vr ts)
 
 reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
@@ -899,7 +907,9 @@ reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
 reprDefItem def = reprItem (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
 
 reprCaseItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
-reprCaseItem dat = reprItem (buildElimTy dat) (addCaseRepr dat)
+reprCaseItem dat ts c = do
+  elimTy <- access (getDataGlobal dat) >>= \d -> return $ fromJust d.elimTy
+  reprItem (return elimTy) (addCaseRepr dat) ts c
 
 quoteHere :: (Tc m) => VTm -> m STm
 quoteHere t = do
@@ -921,7 +931,7 @@ telWithNames = do
           Name _ -> return (m, n, a)
     )
 
-buildElimTy :: (Tc m) => DataGlobal -> m VTy
+buildElimTy :: (Tc m) => DataGlobal -> m (VTy, [Arg ()])
 buildElimTy dat = do
   datInfo <- access (getDataGlobal dat)
   sTy <- quoteHere datInfo.ty
@@ -950,7 +960,8 @@ buildElimTy dat = do
           )
           (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
 
-  evalHere elimTy
+  elimTy' <- evalHere elimTy
+  return (elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)
   where
     ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy ctor = do

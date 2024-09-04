@@ -413,17 +413,17 @@ def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
 }
 
 -- Default representations
--- repr data Bool as JS {
---   true as js-true,
---   false as js-false,
+repr data Bool as JS {
+  true as js-true,
+  false as js-false,
 
---   case b {
---     true => t,
---     false => f,
---   } as {
---     js-if (repr b) (cast t) (cast f)
---   }
--- }
+  case b {
+    true => t,
+    false => f,
+  } as {
+    js-if b (cast t) (cast f)
+  }
+}
 
 -- repr def and as \a b => unrepr Bool (js-and (repr a) (repr b))
 -- repr def or as \a b => unrepr Bool (js-or (repr a) (repr b))
