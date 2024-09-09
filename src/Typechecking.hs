@@ -84,6 +84,7 @@ import Data.List (intercalate, zipWith4)
 import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -105,6 +106,7 @@ import Evaluation
     resolve,
     unfoldDefs,
     vApp,
+    vAppNeu,
     vRepr,
     ($$),
   )
@@ -158,7 +160,6 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
-import Data.Maybe (fromJust)
 
 data TcError
   = Mismatch [UnifyError]
@@ -485,11 +486,11 @@ data Goal = Goal
 
 prettyGoal :: (Tc m) => Goal -> m String
 prettyGoal (Goal c n ty) = enterCtx (const c) $ do
-  c <- getCtx >>= pretty
+  c' <- getCtx >>= pretty
   n' <- pretty n
   ty' <- pretty ty
   let g = n' ++ " : " ++ ty'
-  return $ indentedFst c ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
+  return $ indentedFst c' ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
 checkMeta :: (Tc m) => Maybe Name -> VTy -> m (STm, VTy)
 checkMeta n ty = do
@@ -749,7 +750,7 @@ repr mode m t = do
   forbidPat
   case mode of
     Check ty@(VNeu (VRepr m' t')) | m == m' -> do
-      (tc, _) <- t (Check (VNeu (VHead t')))
+      (tc, _) <- t (Check (VNeu t'))
       return (SRepr m tc, ty)
     Check ty | m < mempty -> do
       (t', ty') <- t Infer >>= insert
@@ -960,6 +961,8 @@ buildElimTy dat = do
           )
           (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
 
+  pelimTy <- evalHere elimTy >>= pretty
+  traceM $ "Elimination type (syntax): " ++ pelimTy
   elimTy' <- evalHere elimTy
   return (elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)
   where
@@ -1076,7 +1079,7 @@ type SolveT = ExceptT SolveError
 enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
   ns <- uniqueNames c.numVars
-  enterCtx (const $ typelessBinds ns emptyCtx) m
+  enterCtx (typelessBinds ns) m
 
 enterTypelessPatBinds :: (Tc m) => VPatB -> m a -> m a
 enterTypelessPatBinds p = enterCtx (typelessBinds p.binds)
@@ -1120,7 +1123,7 @@ rename m pren tm = do
       Nothing -> throwError EscapingVariable
       Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
     VNeu (VReprApp n h sp) -> do
-      t' <- rename m pren (VNeu (VApp h Empty))
+      t' <- rename m pren (vAppNeu h sp)
       renameSp m pren (SRepr n t') sp
     VNeu (VCaseApp dat v cs sp) -> do
       v' <- rename m pren (VNeu v)
@@ -1169,8 +1172,17 @@ data Problem = Problem
   }
   deriving (Show)
 
+instance (Tc m) => Pretty m Problem where
+  pretty (Problem ctx _ lhs rhs errs) = enterCtx (const ctx) $ do
+    lhs' <- pretty lhs
+    rhs' <- pretty rhs
+    errs' <- intercalate ", " <$> mapM pretty errs
+    return $ "lhs: " ++ lhs' ++ "\nrhs: " ++ rhs' ++ "\nerrors: " ++ errs'
+
 addProblem :: (Tc m) => Problem -> m ()
 addProblem p = do
+  pp <- pretty p
+  traceM $ "Adding problem: " ++ pp
   modify (S.|> p)
 
 addNewProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
@@ -1282,6 +1294,9 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
+  t1'' <- pretty t1'
+  t2'' <- pretty t2'
+  traceM $ "Unifying " ++ t1'' ++ " with " ++ t2''
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
@@ -1308,8 +1323,8 @@ unify t1 t2 = do
           /\ unifySpines sp sp'
         )
         \/ maybeUnify mempty
-    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' && v == v' -> do
-      unifySpines sp sp' \/ maybeUnify mempty
+    (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
+      (unify (VNeu v) (VNeu v') /\ unifySpines sp sp') \/ maybeUnify mempty -- @@Fixme: alternatives are currently broken
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
       unifySpines sp sp' \/ maybeUnify mempty
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do

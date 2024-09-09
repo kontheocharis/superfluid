@@ -243,8 +243,11 @@ instance (Monad m) => Pretty m PTm where
     return $ "?" ++ pi'
   pretty (PRepr n s) = do
     pn <- pretty n
-    ps <- pretty s
-    return $ "repr " ++ if n == Finite 1 then ps else pn ++ " " ++ ps
+    ps <- singlePretty s
+    case n of
+      Finite 1 -> return $ "repr " ++ ps
+      Finite (-1) -> return $ "unrepr " ++ ps
+      _ -> return $ "repr " ++ show pn ++ " " ++ ps
   pretty (PLocated _ t) = pretty t
   pretty PUnit = return "()"
 

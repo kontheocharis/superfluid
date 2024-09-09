@@ -27,12 +27,9 @@ def proj-list-len : [A : Type] -> [n : Nat] -> (l : ListWithLength A n) -> Equal
   ?h1
 }
 
-repr data Vec A n as ListWithLength A (unrepr n) {
+repr data Vec A n as ListWithLength (unrepr A) (unrepr n) {
   vnil as mk-list-with-length nil refl,
-  vcons x xs as {
-    ?hvcons
-    -- mk-list-with-length (cons x (proj-list xs)) (proj-eq xs)
-  }
+  vcons x xs as mk-list-with-length (cons (unrepr x) (proj-list xs)) (cong s (proj-eq xs)),
   case xs {
     vnil => n,
     vcons => c

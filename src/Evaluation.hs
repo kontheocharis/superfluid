@@ -16,6 +16,7 @@ module Evaluation
     ($$),
     vApp,
     vRepr,
+    vAppNeu,
     evalPat,
     unfoldDefs,
     quoteSpine,
@@ -56,12 +57,14 @@ import Common
     pattern Possible,
   )
 import Control.Arrow ((***))
+import Control.Exception (assert)
 import Control.Monad (foldM)
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT (..), modify)
 import Control.Monad.State.Class (MonadState (..), gets)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
+import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.List.Extra (firstJust, intercalate, (!?))
 import qualified Data.List.NonEmpty as NE
@@ -90,23 +93,7 @@ import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
 import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
-import Value
-  ( Closure (..),
-    Env,
-    Sub,
-    VHead (..),
-    VNeu (..),
-    VPat,
-    VPatB (..),
-    VTm (..),
-    VTy,
-    vars,
-    pattern VGl,
-    pattern VGlob,
-    pattern VMeta,
-    pattern VRepr,
-    pattern VVar,
-  )
+import Value (Closure (..), Env, Sub, VHead (..), VNeu (..), VPat, VPatB (..), VTm (..), VTy, vars, pattern VGl, pattern VGlob, pattern VMeta, pattern VRepr, pattern VVar)
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -187,8 +174,22 @@ postCompose f (Closure n env t) = return $ Closure n env (f t)
 
 preCompose :: (Eval m) => Closure -> (STm -> STm) -> m Closure
 preCompose (Closure n env t) f = do
-  v <- uniqueName
-  return $ Closure n env (SApp Explicit (SLam Explicit v t) (f (SVar (Idx 0))))
+  assert (n == 1) $ return ()
+  return $
+    Closure
+      n
+      env
+      ( SApp
+          Explicit
+          ( sAppSpine
+              ( sLams
+                  (S.fromList $ map (\i -> Arg Explicit $ Name ("c" ++ show i)) [1 .. length env])
+                  (SLam Explicit (Name "x") t)
+              )
+              (S.fromList $ map (Arg Explicit . SVar . Idx) (reverse [1 .. length env]))
+          )
+          (f (SVar (Idx 0)))
+      )
 
 reprClosure :: (Eval m) => Times -> Closure -> m Closure
 reprClosure m t = do
@@ -218,35 +219,35 @@ vRepr _ m (VLam e v t) = do
   return $ VLam e v t'
 vRepr _ _ VU = return VU
 vRepr _ _ (VLit i) = return $ VLit i
-vRepr l m (VNeu (VApp (VGlobal g) sp)) = do
+vRepr l m (VNeu n@(VApp (VGlobal g) sp)) = do
   g' <- access (getGlobalRepr g)
-  sp' <- mapSpineM (vRepr l m) sp
   case g' of
     Just g'' -> do
+      sp' <- mapSpineM (vRepr l m) sp
       vApp g'' sp'
     Nothing -> do
-      vApp (VNeu (VRepr m (VGlobal g))) sp'
-vRepr l m (VNeu (VCaseApp dat v cs sp)) = do
+      return $ VNeu (VRepr m n)
+vRepr l m (VNeu n@(VCaseApp dat v cs sp)) = do
   f <- access (getCaseRepr dat)
-  cssp <- caseToSpine v cs
-  cssp' <- mapSpineM (vRepr l m) cssp
-  sp' <- mapSpineM (vRepr l m) sp
   case f of
     Just f' -> do
+      cssp <- caseToSpine v cs
+      cssp' <- mapSpineM (vRepr l m) cssp
+      sp' <- mapSpineM (vRepr l m) sp
       a <- vApp f' cssp'
       vApp a sp'
-    Nothing -> error "unimplemented"
-vRepr l m (VNeu (VApp h sp)) = do
-  sp' <- mapSpineM (vRepr l m) sp
-  return $ VNeu (VReprApp m h sp')
+    Nothing -> do
+      return $ VNeu (VRepr m n)
 vRepr l m (VNeu (VReprApp m' v sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   let mm' = m <> m'
   if mm' == mempty
     then
-      return $ VNeu (VApp v sp')
+      return $ vAppNeu v sp'
     else
       return $ VNeu (VReprApp mm' v sp')
+vRepr _ m (VNeu n) = do
+  return $ VNeu (VRepr m n)
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t
@@ -361,8 +362,7 @@ quoteHead _ (VGlobal g) = SGlobal g
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
   a <- evalInOwnCtx l cl
-  cl' <- quote (nextLvls l cl.numVars) a
-  return cl'
+  quote (nextLvls l cl.numVars) a
 
 quotePat :: (Eval m) => Lvl -> VPatB -> m SPat
 quotePat l p = do
@@ -379,6 +379,17 @@ quotePat l p = do
     quotePatHead _ (VRigid _) = SVar (Idx 0)
     quotePatHead _ (VGlobal g) = SGlobal g
 
+quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
+quoteNeu l vt = case vt of
+  (VApp h sp) -> quoteSpine l (quoteHead l h) sp
+  (VReprApp m v sp) -> do
+    v' <- quoteNeu l v
+    quoteSpine l (SRepr m v') sp
+  (VCaseApp dat v cs sp) -> do
+    v' <- quote l (VNeu v)
+    cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
+    quoteSpine l (SCase dat v' cs') sp
+
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
   vt' <- force vt
@@ -392,12 +403,7 @@ quote l vt = do
       return $ SPi m x ty' t'
     VU -> return SU
     VLit lit -> SLit <$> traverse (quote l) lit
-    VNeu (VApp h sp) -> quoteSpine l (quoteHead l h) sp
-    VNeu (VReprApp m v sp) -> quoteSpine l (SRepr m (quoteHead l v)) sp
-    VNeu (VCaseApp dat v cs sp) -> do
-      v' <- quote l (VNeu v)
-      cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
-      quoteSpine l (SCase dat v' cs') sp
+    VNeu n -> quoteNeu l n
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do
