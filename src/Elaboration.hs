@@ -23,7 +23,7 @@ import Common
     Name,
     PiMode (..),
     mapSpine,
-    unName,
+    unName, nextLvl,
   )
 import Control.Monad.Except (MonadError)
 import Data.Bifunctor (bimap)
@@ -47,7 +47,7 @@ import Presyntax
     toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (STm)
+import Syntax (STm (..))
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -73,9 +73,10 @@ import Typechecking
     reprDataItem,
     reprDefItem,
     univ,
-    wildPat,
+    wildPat, closeValHere,
   )
-import Value (VTm (..), VTy)
+import Value (VTm (..), VTy, Closure (..))
+import Evaluation (quote)
 
 -- Presyntax exists below here
 
@@ -124,10 +125,10 @@ elab p mode = case (p, mode) of
   (PRepr m t, md) -> repr md m (elab t)
   (PHole n, md) -> meta md (Just n)
   (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
-  (PLambdaCase cs, md) -> do
+  (PLambdaCase r cs, md) -> do
     n <- uniqueName
-    elab (PLam Explicit n (PCase (PName n) cs)) md
-  (PCase s cs, md) -> caseOf md (elab s) (map (bimap elab elab) cs)
+    elab (PLam Explicit n (PCase (PName n) r cs)) md
+  (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
   (PLit l, md) -> lit md (fmap elab l)
   (te, Check ty) -> checkByInfer (elab te Infer) ty
   -- Only infer:

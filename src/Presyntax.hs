@@ -21,13 +21,13 @@ module Presyntax
   )
 where
 
-import Common (Arg (..), Clause (..), Lit, Loc, Name (..), PiMode (..), Pos, Tag (..), Times (..), arg, mode, Spine)
+import Common (Arg (..), Clause (..), Lit, Loc, Name (..), PiMode (..), Pos, Spine, Tag (..), Times (..), arg, mode)
 import Data.List (intercalate)
+import Data.Sequence (Seq (..))
 import Data.Set (Set)
 import Data.Typeable (Typeable)
-import Printing (Pretty (..), curlies)
 import Debug.Trace (traceM)
-import Data.Sequence (Seq(..))
+import Printing (Pretty (..), curlies)
 
 type PTy = PTm
 
@@ -120,8 +120,8 @@ data PTm
   | PLet Name PTy PTm PTm
   | PPair PTm PTm
   | PApp PiMode PTm PTm
-  | PCase PTm [Clause PPat PTm]
-  | PLambdaCase [Clause PPat PTm]
+  | PCase PTm (Maybe PTm) [Clause PPat PTm]
+  | PLambdaCase (Maybe PTm) [Clause PPat PTm]
   | PU
   | PName Name
   | PLit (Lit PTm)
@@ -227,13 +227,23 @@ instance (Monad m) => Pretty m PTm where
     pxs <- mapM singlePretty xs
     return $ px ++ " " ++ intercalate " " pxs
   pretty l@(PLet {}) = prettyLets (pLetToList l)
-  pretty (PCase t cs) = do
+  pretty (PCase t r cs) = do
     pt <- singlePretty t
     pcs <- pretty cs
-    return $ "case " ++ pt ++ " " ++ curlies pcs
-  pretty (PLambdaCase cs) = do
+    pr <- case r of
+      Nothing -> return ""
+      Just r' -> do
+        pr' <- singlePretty r'
+        return $ " to " ++ pr'
+    return $ "case " ++ pt ++ pr ++ " " ++ curlies pcs ++ pr
+  pretty (PLambdaCase r cs) = do
     pcs <- pretty cs
-    return $ "case " ++ curlies pcs
+    pr <- case r of
+      Nothing -> return ""
+      Just r' -> do
+        pr' <- singlePretty r'
+        return $ " to " ++ pr'
+    return $ "\\case " ++ pr ++ curlies pcs
   pretty PU = return "Type"
   pretty PWild = return "_"
   pretty (PName n) = pretty n

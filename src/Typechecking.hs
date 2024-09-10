@@ -33,6 +33,7 @@ module Typechecking
     dataItem,
     ctorItem,
     primItem,
+    closeValHere,
     endDataItem,
     reprDataItem,
     reprCtorItem,
@@ -761,13 +762,13 @@ matchPat vs ssTy sp spTy = do
   u <- canUnifyHere ssTy spTy /\ canUnifyHere vp.vPat vs
   handleUnification vp.vPat vs u
 
-caseOf :: (Tc m) => Mode -> Child m -> [Clause (Child m) (Child m)] -> m (STm, VTy)
-caseOf mode s cs = do
+caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
+caseOf mode s r cs = do
   forbidPat
   case mode of
     Infer -> do
       retTy <- freshMeta >>= evalHere
-      caseOf (Check retTy) s cs
+      caseOf (Check retTy) s r cs
     Check ty -> do
       (ss, ssTy) <- s Infer
       d <- ifIsData ssTy return (tcError $ InvalidCaseSubject ss ssTy)

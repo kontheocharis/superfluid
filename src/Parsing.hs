@@ -77,7 +77,21 @@ anyWhite = skipMany (skipMany1 (satisfy isSpace) <|> comment)
 
 -- | Reserved identifiers.
 reservedIdents :: [String]
-reservedIdents = ["data", "case", "repr", "as", "def", "let", "prim", "rec", "-inf", "inf", "unrepr", "impossible"]
+reservedIdents =
+  [ "data",
+    "case",
+    "repr",
+    "as",
+    "def",
+    "let",
+    "prim",
+    "rec",
+    "-inf",
+    "inf",
+    "unrepr",
+    "impossible",
+    "to"
+  ]
 
 anyIdentifier :: Parser String
 anyIdentifier = try $ do
@@ -417,6 +431,9 @@ lets = curlies $ do
       ret
       bindings
 
+toRet :: Parser (Maybe PTy)
+toRet = optionMaybe $ try (reserved "to") >> singleTerm
+
 -- | Parse a lambda.
 lam :: Parser PTm
 lam = do
@@ -427,7 +444,8 @@ lam = do
   case v of
     Left () -> do
       clauses <- curlies (commaSep caseClause)
-      return $ PLambdaCase clauses
+      r <- toRet
+      return $ PLambdaCase r clauses
     Right v' -> do
       reservedOp "=>"
       t <- term
@@ -460,8 +478,9 @@ caseExpr :: Parser PTm
 caseExpr = locatedTerm $ do
   reserved "case"
   t <- term
+  r <- toRet
   clauses <- curlies (commaSep caseClause)
-  return $ PCase t clauses
+  return $ PCase t r clauses
 
 caseClause :: Parser (Clause PPat PTm)
 caseClause = do
