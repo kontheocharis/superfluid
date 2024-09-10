@@ -374,28 +374,6 @@ ensureAllProblemsSolved = do
     then return ()
     else tcError $ RemainingProblems (toList ps)
 
-applySubToCtx :: (Tc m) => Sub -> m ()
-applySubToCtx sub = do
-  c <- getCtx
-  let (env', bounds', ss) = replaceVars (c.lvl.unLvl - 1) (c.env, c.bounds)
-  modifyCtx $ \(c' :: Ctx) -> c' {env = env', bounds = bounds'}
-  sequence_ ss
-  where
-    replaceVars :: (Tc m) => Int -> (Env VTm, Bounds) -> (Env VTm, Bounds, [m ()])
-    replaceVars _ ([], []) = ([], [], [])
-    replaceVars startingAt (v : vs, b : bs) =
-      let (vs', bs', ss) = replaceVars (startingAt - 1) (vs, bs)
-       in let res = IM.lookup startingAt sub.vars
-           in case res of
-                Nothing -> (v : vs', b : bs', ss)
-                Just v' ->
-                  ( NE.head v' : vs',
-                    Defined : bs',
-                    ss
-                      ++ map (unifyHere v) (NE.toList v')
-                  )
-    replaceVars _ _ = error "impossible"
-
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
 
