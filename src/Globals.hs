@@ -37,14 +37,15 @@ module Globals
 where
 
 import Common
-  ( CtorGlobal (CtorGlobal),
+  ( Arg,
+    CtorGlobal (CtorGlobal),
     DataGlobal (DataGlobal),
     DefGlobal (DefGlobal),
     Glob (..),
     Name (..),
     PrimGlobal (..),
     Tag,
-    globalName, Arg,
+    globalName,
   )
 import Control.Monad.Accum (MonadAccum (add))
 import Data.Map (Map)
@@ -55,7 +56,13 @@ import Value (VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
 
-data DataGlobalInfo = DataGlobalInfo {ty :: VTm, ctors :: [CtorGlobal], elimTy :: Maybe VTm, elimTyArity :: [Arg ()]} -- might not be set yet
+data DataGlobalInfo = DataGlobalInfo
+  { ty :: VTm,
+    ctors :: [CtorGlobal],
+    motiveTy :: Maybe VTm,
+    elimTy :: Maybe VTm,
+    elimTyArity :: [Arg ()] -- might not be set yet
+  }
 
 data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
 

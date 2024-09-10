@@ -21,6 +21,7 @@ module Evaluation
     unfoldDefs,
     quoteSpine,
     unelabSig,
+    ifIsCtor,
     vLams,
     uniqueVLams,
     evalInOwnCtx,
@@ -110,7 +111,7 @@ Closure _ env t $$ us = eval (us ++ env) t
 vAppNeu :: VNeu -> Spine VTm -> VTm
 vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
 vAppNeu (VReprApp m h us) u = VNeu (VReprApp m h (us >< u))
-vAppNeu (VCaseApp dat c cls us) u = VNeu (VCaseApp dat c cls (us >< u))
+vAppNeu (VCaseApp dat c r cls us) u = VNeu (VCaseApp dat c r cls (us >< u))
 
 vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
 vApp a Empty = return a
@@ -145,12 +146,12 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) ps)) (VNeu (VApp (VGlobal
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => DataGlobal -> VTm -> [Clause VPatB Closure] -> m VTm
-vCase dat v cs = do
+vCase :: (Eval m) => DataGlobal -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
+vCase dat v r cs = do
   v' <- unfoldDefs v
   case v' of
     VNeu n ->
-      fromMaybe (return $ VNeu (VCaseApp dat n cs Empty)) $
+      fromMaybe (return $ VNeu (VCaseApp dat n r cs Empty)) $
         firstJust
           ( \clause -> do
               case clause of
@@ -227,7 +228,7 @@ vRepr l m (VNeu n@(VApp (VGlobal g) sp)) = do
       vApp g'' sp'
     Nothing -> do
       return $ VNeu (VRepr m n)
-vRepr l m (VNeu n@(VCaseApp dat v cs sp)) = do
+vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
   f <- access (getCaseRepr dat)
   case f of
     Just f' -> do
@@ -295,10 +296,11 @@ eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
   vApp t1' (S.singleton (Arg m t2'))
-eval env (SCase dat t cs) = do
+eval env (SCase dat t r cs) = do
   t' <- eval env t
   cs' <- mapM (\p -> do bitraverse (evalPat (extendEnvByNVars (length p.pat.binds) env)) (close (length p.pat.binds) env) p) cs
-  vCase dat t' cs'
+  r' <- eval env r
+  vCase dat t' r' cs'
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
@@ -385,10 +387,11 @@ quoteNeu l vt = case vt of
   (VReprApp m v sp) -> do
     v' <- quoteNeu l v
     quoteSpine l (SRepr m v') sp
-  (VCaseApp dat v cs sp) -> do
+  (VCaseApp dat v r cs sp) -> do
     v' <- quote l (VNeu v)
     cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
-    quoteSpine l (SCase dat v' cs') sp
+    r' <- quote l r
+    quoteSpine l (SCase dat v' r' cs') sp
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
@@ -444,6 +447,13 @@ ifIsData v a b = do
   case v' of
     VGlob (DataGlob g@(DataGlobal _)) _ -> a g
     _ -> b
+
+ifIsCtor :: (Eval m) => VTm -> CtorGlobal -> m (Spine VTm) -> m (Spine VTm)
+ifIsCtor v c a = do
+  v' <- force v >>= unfoldDefs
+  case v' of
+    VNeu (VApp (VGlobal (CtorGlob c')) sp) | c == c' -> return sp
+    _ -> a
 
 unelabMeta :: (Eval m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
 unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
@@ -502,9 +512,10 @@ unelab ns = \case
       Just i' -> return $ PName i'
       Nothing -> return $ PName (Name $ "?" ++ show v.unIdx)
   (SApp m t u) -> PApp m <$> unelab ns t <*> unelab ns u
-  (SCase _ t cs) ->
+  (SCase _ t r cs) ->
     PCase
       <$> unelab ns t
+      <*> (Just <$> unelab ns r)
       <*> mapM
         ( \c ->
             Clause

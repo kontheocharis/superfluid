@@ -78,7 +78,7 @@ data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob deriving (Show, Eq)
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCaseApp DataGlobal VNeu [Clause VPatB Closure] (Spine VTm)
+  | VCaseApp DataGlobal VNeu VTm [Clause VPatB Closure] (Spine VTm)
   | VReprApp Times VNeu (Spine VTm)
   deriving (Show)
 
@@ -93,8 +93,8 @@ data VTm
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty
 
-pattern VCase :: DataGlobal -> VNeu -> [Clause VPatB Closure] -> VNeu
-pattern VCase dat m cls = VCaseApp dat m cls Empty
+pattern VCase :: DataGlobal -> VNeu -> VTm -> [Clause VPatB Closure] -> VNeu
+pattern VCase dat m r cls = VCaseApp dat m r cls Empty
 
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty

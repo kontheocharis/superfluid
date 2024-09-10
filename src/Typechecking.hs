@@ -89,7 +89,7 @@ import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Data.Vector.Fusion.Stream.Monadic (zipWith3M)
+import Data.Vector.Fusion.Stream.Monadic (cons, zipWith3M)
 import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
@@ -109,7 +109,7 @@ import Evaluation
     vApp,
     vAppNeu,
     vRepr,
-    ($$),
+    ($$), ifIsCtor,
   )
 import GHC.Records (HasField)
 import Globals
@@ -139,7 +139,7 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sPis, uniqueSLams)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sLams, sPis, uniqueSLams)
 import Value
   ( Closure (..),
     Env,
@@ -161,6 +161,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Control.Monad (zipWithM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -176,6 +177,7 @@ data TcError
   | InvalidDataFamily VTy
   | InvalidCtorType STy
   | DuplicateItem Name
+  | ImpossibleCasesNotSupported
   | Chain [TcError]
 
 data InPat = NotInPat | InPossiblePat [Name] | InImpossiblePat deriving (Eq)
@@ -762,6 +764,25 @@ matchPat vs ssTy sp spTy = do
   u <- canUnifyHere ssTy spTy /\ canUnifyHere vp.vPat vs
   handleUnification vp.vPat vs u
 
+constLamsForPis :: (Tc m) => VTy -> VTm -> m STm
+constLamsForPis pis val = do
+  spis <- quoteHere pis
+  let (args, _) = sGatherPis spis
+  sval <- closeValHere (length args) val
+  uniqueSLams (map (\(m, _, _) -> m) args) sval.body
+
+caseClauses :: (Tc m) => DataGlobalInfo -> [Clause (Child m) (Child m)] -> m [Clause STm STm]
+caseClauses di cs = do
+  zipWithM
+    ( \c cl -> case cl of
+        Possible p t -> do
+          let _ = ifIsCtor p c
+          return undefined
+        Impossible _ -> tcError ImpossibleCasesNotSupported
+    )
+    di.ctors
+    cs
+
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
   forbidPat
@@ -772,6 +793,11 @@ caseOf mode s r cs = do
     Check ty -> do
       (ss, ssTy) <- s Infer
       d <- ifIsData ssTy return (tcError $ InvalidCaseSubject ss ssTy)
+      di <- access (getDataGlobal d)
+      let motive = fromJust di.motiveTy
+      rr <- case r of
+        Just r' -> fst <$> r' (Check motive)
+        Nothing -> constLamsForPis motive ty
       vs <- evalHere ss
       scs <-
         mapM
@@ -783,7 +809,7 @@ caseOf mode s r cs = do
                 return $ Impossible sp
           )
           cs
-      return (SCase d ss scs, ty)
+      return (SCase d ss rr scs, ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)
 wildPat mode = do
@@ -833,12 +859,22 @@ dataItem n ts ty = do
   vty <- evalHere ty'
   i <- getLvl >>= (`isTypeFamily` vty)
   unless i (tcError $ InvalidDataFamily vty)
-  modify (addItem n (DataInfo (DataGlobalInfo vty [] Nothing [])) ts)
+  modify (addItem n (DataInfo (DataGlobalInfo vty [] Nothing Nothing [])) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
-  (elimTy, arity) <- buildElimTy dat
-  modify (modifyDataItem dat (\d -> d {elimTy = Just elimTy, elimTyArity = arity}))
+  (motiveTy, elimTy, arity) <- buildElimTy dat
+  modify
+    ( modifyDataItem
+        dat
+        ( \d ->
+            d
+              { elimTy = Just elimTy,
+                motiveTy = Just motiveTy,
+                elimTyArity = arity
+              }
+        )
+    )
   vReprHere (Finite 1) elimTy >>= pretty >>= traceM
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
@@ -910,7 +946,7 @@ telWithNames = do
           Name _ -> return (m, n, a)
     )
 
-buildElimTy :: (Tc m) => DataGlobal -> m (VTy, [Arg ()])
+buildElimTy :: (Tc m) => DataGlobal -> m (VTy, VTy, [Arg ()])
 buildElimTy dat = do
   datInfo <- access (getDataGlobal dat)
   sTy <- quoteHere datInfo.ty
@@ -942,7 +978,8 @@ buildElimTy dat = do
   pelimTy <- evalHere elimTy >>= pretty
   traceM $ "Elimination type (syntax): " ++ pelimTy
   elimTy' <- evalHere elimTy
-  return (elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)
+  motiveTy' <- evalHere motiveTy
+  return (motiveTy', elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)
   where
     ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy ctor = do
@@ -1098,10 +1135,11 @@ rename m pren tm = do
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (vAppNeu h sp)
       renameSp m pren (SRepr n t') sp
-    VNeu (VCaseApp dat v cs sp) -> do
+    VNeu (VCaseApp dat v r cs sp) -> do
       v' <- rename m pren (VNeu v)
       cs' <- mapM (bitraverse (renamePat m pren) (renameClosure m pren)) cs
-      renameSp m pren (SCase dat v' cs') sp
+      r' <- rename m pren r
+      renameSp m pren (SCase dat v' r' cs') sp
     VLam i x t -> do
       t' <- renameClosure m pren t
       return $ SLam i x t'
@@ -1281,9 +1319,10 @@ unify t1 t2 = do
         else unfoldDefAndUnify f sp t2'
     (VGlob (DefGlob f) sp, t') -> unfoldDefAndUnify f sp t'
     (t, VGlob (DefGlob f') sp') -> unfoldDefAndUnify f' sp' t
-    (VNeu (VCaseApp a s bs sp), VNeu (VCaseApp b s' bs' sp')) | a == b -> do
+    (VNeu (VCaseApp a s r bs sp), VNeu (VCaseApp b s' r' bs' sp')) | a == b -> do
       ( unify (VNeu s) (VNeu s')
           /\ unifyClauses bs bs'
+          /\ unify r r'
           /\ unifySpines sp sp'
         )
         \/ iDontKnow

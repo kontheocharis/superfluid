@@ -44,7 +44,7 @@ data STm
   | SLet Name STy STm STm
   | SMeta MetaVar Bounds
   | SApp PiMode STm STm
-  | SCase DataGlobal STm [Clause SPat STm]
+  | SCase DataGlobal STm STm [Clause SPat STm]
   | SU
   | SGlobal Glob
   | SVar Idx
