@@ -556,16 +556,15 @@ handleUnification t1 t2 r = do
   case p of
     InImpossiblePat -> case r of
       Yes -> tcError $ ImpossibleCaseIsPossible t1 t2
-      Maybe _ -> addNewProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
-      No errs | not $ any unifyErrorIsMetaRelated errs -> return ()
-      No errs -> tcError $ Mismatch errs
+      Maybe -> addNewProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
+      No _ -> return ()
     InPossiblePat _ -> case r of
       Yes -> return ()
-      Maybe _ -> addNewProblem t1 t2 Blocking -- applySubToCtx s
+      Maybe -> addNewProblem t1 t2 Blocking -- applySubToCtx s
       No errs -> tcError $ ImpossibleCase t1 errs
     NotInPat -> case r of
       Yes -> return ()
-      Maybe _ -> addNewProblem t1 t2 Blocking
+      Maybe -> addNewProblem t1 t2 Blocking
       No errs -> tcError $ Mismatch errs
 
 canUnifyHere :: (Tc m) => VTm -> VTm -> m CanUnify
@@ -987,10 +986,6 @@ data UnifyError
   | ErrorInCtx [Name] UnifyError
   deriving (Show)
 
-unifyErrorIsMetaRelated :: UnifyError -> Bool
-unifyErrorIsMetaRelated (SolveError _) = True
-unifyErrorIsMetaRelated _ = False
-
 data SolveError
   = InvertError (Spine VTm)
   | OccursError MetaVar
@@ -999,16 +994,15 @@ data SolveError
   | WithProblem Problem SolveError
   deriving (Show)
 
-data CanUnify = Yes | No [UnifyError] | Maybe Sub deriving (Show)
+data CanUnify = Yes | No [UnifyError] | Maybe deriving (Show)
 
 instance (Tc m) => Pretty m CanUnify where
   pretty Yes = return "can unify"
   pretty (No xs) = do
     xs' <- intercalate ", " <$> mapM pretty xs
     return $ "cannot unify: " ++ xs'
-  pretty (Maybe s) = do
-    s' <- pretty s
-    return $ "can only unify if: " ++ s'
+  pretty Maybe = do
+    return "unclear"
 
 instance (Tc m) => Pretty m SolveError where
   pretty (InvertError s) = do
@@ -1050,12 +1044,12 @@ instance (Eval m) => Lattice (m CanUnify) where
     case a' of
       Yes -> a
       No _ -> b
-      Maybe _ -> do
+      Maybe -> do
         b' <- b
         case b' of
           Yes -> return Yes
           No _ -> a
-          Maybe _ -> return $ Maybe mempty
+          Maybe -> return Maybe
 
   a /\ b = do
     a' <- a
@@ -1066,13 +1060,13 @@ instance (Eval m) => Lattice (m CanUnify) where
         case b' of
           Yes -> a
           No ys -> return $ No (xs ++ ys)
-          Maybe _ -> return $ No xs
-      Maybe xs -> do
+          Maybe -> return $ No xs
+      Maybe -> do
         b' <- b
         case b' of
-          Yes -> return $ Maybe xs
+          Yes -> return Maybe
           No ys -> return $ No ys
-          Maybe ys -> return $ Maybe (xs <> ys)
+          Maybe -> return Maybe
 
 type SolveT = ExceptT SolveError
 
@@ -1243,23 +1237,14 @@ unifyFlex m sp t = runSolveT m sp t $ do
   solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
 
-unifyRigid :: (Tc m) => Lvl -> Spine VTm -> VTm -> m CanUnify
-unifyRigid x Empty t = do
-  maybeUnify (subbing x x t)
-unifyRigid _ _ _ = do
-  maybeUnify mempty
-
-maybeUnify :: (Tc m) => Sub -> m CanUnify
-maybeUnify s =
-  ifInPat
-    (applySubToCtx s >> return Yes)
-    (return $ Maybe s)
+iDontKnow :: (Tc m) => m CanUnify
+iDontKnow = return $ Maybe
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do
   gu <- access (unfoldDef g)
   case gu of
-    Nothing -> maybeUnify mempty
+    Nothing -> iDontKnow
     Just gu' -> do
       t <- vApp gu' sp
       unify t t'
@@ -1310,7 +1295,7 @@ unify t1 t2 = do
     (VGlob (PrimGlob f) sp, VGlob (PrimGlob f') sp') ->
       if f == f'
         then unifySpines sp sp'
-        else maybeUnify mempty
+        else iDontKnow
     (VGlob (DefGlob f) sp, VGlob (DefGlob f') sp') ->
       if f == f'
         then unifySpines sp sp' \/ unfoldDefAndUnify f sp t2'
@@ -1322,19 +1307,19 @@ unify t1 t2 = do
           /\ unifyClauses bs bs'
           /\ unifySpines sp sp'
         )
-        \/ maybeUnify mempty
+        \/ iDontKnow
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
-      (unify (VNeu v) (VNeu v') /\ unifySpines sp sp') \/ maybeUnify mempty -- @@Fixme: alternatives are currently broken
+      (unify (VNeu v) (VNeu v') /\ unifySpines sp sp') \/ iDontKnow
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
-      unifySpines sp sp' \/ maybeUnify mempty
+      unifySpines sp sp' \/ iDontKnow
     (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
-      unifySpines sp sp' \/ maybeUnify mempty
+      unifySpines sp sp' \/ iDontKnow
     (VNeu (VApp (VFlex x) sp), t') -> unifyFlex x sp t'
     (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex x' sp' t
-    (VNeu (VApp (VRigid x) sp), t') -> unifyRigid x sp t'
-    (t, VNeu (VApp (VRigid x') sp')) -> unifyRigid x' sp' t
-    (VNeu (VReprApp {}), _) -> maybeUnify mempty
-    (_, VNeu (VReprApp {})) -> maybeUnify mempty
-    (VNeu (VCaseApp {}), _) -> maybeUnify mempty
-    (_, VNeu (VCaseApp {})) -> maybeUnify mempty
+    (VNeu (VApp (VRigid _) _), _) -> iDontKnow
+    (_, VNeu (VApp (VRigid _) _)) -> iDontKnow
+    (VNeu (VReprApp {}), _) -> iDontKnow
+    (_, VNeu (VReprApp {})) -> iDontKnow
+    (VNeu (VCaseApp {}), _) -> iDontKnow
+    (_, VNeu (VCaseApp {})) -> iDontKnow
     _ -> return $ No [Mismatching t1' t2']
