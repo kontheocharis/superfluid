@@ -23,8 +23,10 @@ import Common
     Lit,
     MetaVar,
     Name,
+    Param (..),
     PiMode,
     Spine,
+    Tel,
     Times,
   )
 import Data.Sequence (Seq (..), fromList)
@@ -68,11 +70,11 @@ sGatherApps :: STm -> (STm, Spine STm)
 sGatherApps (SApp m t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m u)
 sGatherApps t = (t, Empty)
 
-sPis :: [(PiMode, Name, STm)] -> STm -> STm
-sPis [] b = b
-sPis ((m, n, a) : xs) b = SPi m n a (sPis xs b)
+sPis :: Tel STm -> STm -> STm
+sPis Empty b = b
+sPis (Param m n a :<| xs) b = SPi m n a (sPis xs b)
 
-sGatherPis :: STm -> ([(PiMode, Name, STm)], STm)
+sGatherPis :: STm -> (Tel STm, STm)
 sGatherPis = \case
-  SPi m n a b -> let (xs, b') = sGatherPis b in ((m, n, a) : xs, b')
-  t -> ([], t)
+  SPi m n a b -> let (xs, b') = sGatherPis b in (Param m n a :<| xs, b')
+  t -> (Empty, t)

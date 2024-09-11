@@ -60,16 +60,18 @@ import Common
     Lvl (..),
     MetaVar,
     Name (Name),
+    Param (..),
     PiMode (..),
     Spine,
     Tag,
+    Tel,
     Times (Finite),
     inv,
     lvlToIdx,
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, Tel,
+    pattern Possible,
   )
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -83,7 +85,7 @@ import Data.List (intercalate, zipWith4)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
-import Data.Sequence (Seq (..))
+import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
 import Evaluation
@@ -402,6 +404,10 @@ bind x ty ctx =
         }
     )
     ctx
+
+bindTel :: Tel VTy -> Ctx -> Ctx
+bindTel Empty c = c
+bindTel (t :<| ts) c = bindTel ts (bind t.name t.ty c)
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
 insertedBind = bind
@@ -771,7 +777,7 @@ constLamsForPis pis val = do
   spis <- quoteHere pis
   let (args, _) = sGatherPis spis
   sval <- closeValHere (length args) val
-  uniqueSLams (map (\(m, _, _) -> m) args) sval.body
+  uniqueSLams (toList $ fmap (\p -> p.mode) args) sval.body
 
 mzip :: (Alternative m) => [m a] -> [m b] -> [(m a, m b)]
 mzip (a : as) (b : bs) = (a, b) : mzip as bs
@@ -862,14 +868,22 @@ defItem n ts ty tm = do
   modify (modifyDefItem (DefGlobal n) (\d -> d {tm = Just stm, vtm = Just vtm}))
   return ()
 
+tel :: (Tc m) => Tel (Child m) -> m (Tel VTy)
+tel Empty = return Empty
+tel (t :<| ts) = do
+  (t', _) <- t.ty (Check VU)
+  vt <- evalHere t'
+  enterCtx (bind t.name vt) $ tel ts
+
 dataItem :: (Tc m) => Name -> Set Tag -> Tel (Child m) -> Child m -> m ()
 dataItem n ts te ty = do
   ensureNewName n
+  te' <- tel te
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
   i <- getLvl >>= (`isTypeFamily` vty)
   unless i (tcError $ InvalidDataFamily vty)
-  modify (addItem n (DataInfo (DataGlobalInfo vty [] Nothing Nothing [])) ts)
+  modify (addItem n (DataInfo (DataGlobalInfo vty te' [] Nothing Nothing [])) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
@@ -888,14 +902,16 @@ endDataItem dat = do
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
-  ensureNewName n
-  idx <- access (\s -> length (getDataGlobal dat s).ctors)
-  (ty', _) <- ty (Check VU)
-  vty <- evalHere ty'
-  i <- getLvl >>= (\l -> isCtorTy l dat vty)
-  unless i (tcError $ InvalidCtorType ty')
-  modify (addItem n (CtorInfo (CtorGlobalInfo vty idx dat)) ts)
-  modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
+  di <- access (getDataGlobal dat)
+  enterCtx (bindTel di.params) $ do
+    ensureNewName n
+    idx <- access (\s -> length (getDataGlobal dat s).ctors)
+    (ty', _) <- ty (Check VU)
+    vty <- evalHere ty'
+    i <- getLvl >>= (\l -> isCtorTy l dat vty)
+    unless i (tcError $ InvalidCtorType ty')
+    modify (addItem n (CtorInfo (CtorGlobalInfo vty idx dat)) ts)
+    modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
 primItem n ts ty = do
@@ -936,23 +952,24 @@ quoteHere t = do
   l <- accessCtx (\c -> c.lvl)
   quote l t
 
-spineForTel :: Int -> [(PiMode, Name, STm)] -> Spine STm
-spineForTel dist tel =
-  S.fromList $ zipWith (curry (\((m, _, _), i) -> Arg m (SVar (Idx (dist + length tel - i - 1))))) tel [0 ..]
+spineForTel :: Int -> Tel STm -> Spine STm
+spineForTel dist te =
+  S.fromList $ zipWith (curry (\(Param m _ _, i) -> Arg m (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
 
-telWithNames :: (Tc m) => [(PiMode, Name, STy)] -> m [(PiMode, Name, STm)]
+telWithNames :: (Tc m) => Tel a -> m (Tel a)
 telWithNames = do
   mapM
-    ( \(m, n, a) -> do
+    ( \(Param m n a) -> do
         case n of
           Name "_" -> do
             n' <- uniqueName
-            return (m, n', a)
-          Name _ -> return (m, n, a)
+            return (Param m n' a)
+          Name _ -> return (Param m n a)
     )
 
 buildElimTy :: (Tc m) => DataGlobal -> m (VTy, VTy, [Arg ()])
 buildElimTy dat = do
+  -- @@Todo: data type params
   datInfo <- access (getDataGlobal dat)
   sTy <- quoteHere datInfo.ty
   let (sTyBinds', _) = sGatherPis sTy
@@ -968,21 +985,30 @@ buildElimTy dat = do
   elimTyName <- uniqueName
   subjectTyName <- uniqueName
 
-  let motiveTy = sPis (sTyBinds ++ [(Explicit, motiveSubjName, subjSpToData)]) SU
+  let motiveTy = sPis (sTyBinds :|> Param Explicit motiveSubjName subjSpToData) SU
   methodTys <- mapM ctorMethodTy datInfo.ctors
 
   let elimTy =
         sPis
-          ( [(Explicit, elimTyName, motiveTy)]
-              ++ sTyBinds
-              ++ [(Explicit, subjectTyName, subjSpToData)]
-              ++ zipWith (\i (methodTy, methodName) -> (Explicit, methodName, methodTy (distFromMotiveToMethod i))) [0 ..] methodTys
+          ( ( ( Param Explicit elimTyName motiveTy
+                  :<| sTyBinds
+              )
+                :|> Param Explicit subjectTyName subjSpToData
+            )
+              >< S.fromList
+                ( zipWith
+                    ( \i (methodTy, methodName) ->
+                        Param Explicit methodName (methodTy (distFromMotiveToMethod i))
+                    )
+                    [0 ..]
+                    methodTys
+                )
           )
           (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
 
   elimTy' <- evalHere elimTy
   motiveTy' <- evalHere motiveTy
-  return (motiveTy', elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)
+  return (motiveTy', elimTy', map (\p -> Arg p.mode ()) (toList sTyBinds))
   where
     ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy ctor = do
@@ -994,7 +1020,10 @@ buildElimTy dat = do
       let spToCtor = sAppSpine (SGlobal (CtorGlob ctor)) (spineForTel 0 sTyBinds)
       n <- uniqueName
       return . (,n) $ \sMotiveIdx ->
-        let methodRetTy = sAppSpine (SVar (Idx (sMotiveIdx + length sTyBinds))) (sTyRetSp S.|> Arg Explicit spToCtor)
+        let methodRetTy =
+              sAppSpine
+                (SVar (Idx (sMotiveIdx + length sTyBinds)))
+                (sTyRetSp S.|> Arg Explicit spToCtor)
          in sPis sTyBinds methodRetTy
 
 data UnifyError

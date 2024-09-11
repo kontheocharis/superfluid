@@ -45,7 +45,7 @@ import Common
     Name (..),
     PrimGlobal (..),
     Tag,
-    globalName,
+    globalName, Tel,
   )
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -57,6 +57,7 @@ data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataG
 
 data DataGlobalInfo = DataGlobalInfo
   { ty :: VTm,
+    params :: Tel VTy,
     ctors :: [CtorGlobal],
     motiveTy :: Maybe VTm,
     elimTy :: Maybe VTm,

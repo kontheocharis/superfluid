@@ -42,6 +42,7 @@ import Common
     Lvl (..),
     MetaVar,
     Name (..),
+    Param (..),
     PiMode (..),
     Spine,
     Tag,
@@ -539,6 +540,7 @@ unelabSig = do
     unelabData n d ts = do
       sig <- view
       ty' <- unelabValue [] d.ty
+      te' <- traverse (traverse (unelabValue [])) d.params
       ctors' <-
         mapM
           ( \n' ->
@@ -548,7 +550,7 @@ unelabSig = do
                 (getGlobalTags n'.globalName sig)
           )
           d.ctors
-      return $ MkPData n ty' ctors' ts
+      return $ MkPData n te' ty' ctors' ts
 
     unelabCtor :: (Eval m) => Name -> CtorGlobalInfo -> Set Tag -> m PCtor
     unelabCtor n c ts = do
