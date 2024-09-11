@@ -55,7 +55,7 @@ import Common
     nextLvls,
     unMetaVar,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Tel,
   )
 import Control.Exception (assert)
 import Control.Monad (foldM)
@@ -532,6 +532,13 @@ unelab ns = \case
   (SLit l) -> PLit <$> traverse (unelab ns) l
   (SRepr m t) -> PRepr m <$> unelab ns t
 
+unelabTel :: (Eval m) => [Name] -> Tel STm -> m (Tel PTm)
+unelabTel _ Empty = return Empty
+unelabTel ns (Param m n a :<| tel) = do
+  a' <- unelab ns a
+  tel' <- unelabTel (n : ns) tel
+  return $ Param m n a' :<| tel'
+
 unelabSig :: (Eval m) => m PProgram
 unelabSig = do
   s <- view
@@ -541,7 +548,7 @@ unelabSig = do
     unelabData n d ts = do
       sig <- view
       ty' <- unelabValue [] d.ty
-      te' <- traverse (traverse (unelabValue [])) d.params
+      te' <- unelabTel [] d.params
       ctors' <-
         mapM
           ( \n' ->
@@ -614,3 +621,8 @@ instance (Eval m, Has m [Name]) => Pretty m Sub where
         )
         (IM.toList sub.vars)
     return $ intercalate ", " vars
+
+instance (Eval m, Has m [Name]) => Pretty m (Tel STm) where
+  pretty tel = do
+    n <- view
+    unelabTel n tel >>= pretty

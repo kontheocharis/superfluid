@@ -31,6 +31,7 @@ import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 import qualified Data.Sequence as SE
+import Data.Sequence (Seq(..))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -296,9 +297,9 @@ defSig = do
 dataSig :: Parser (Name, Tel PTy, Maybe PTy)
 dataSig = do
   name <- identifier
-  ns <- SE.fromList . map fst <$> tel
+  ns <- optionMaybe . try $ SE.fromList . map fst <$> tel
   ty <- optionMaybe $ colon >> term
-  return (name, ns, ty)
+  return (name, fromMaybe Empty ns, ty)
 
 -- | Parse a term.
 -- Some are grouped to prevent lots of backtracking.

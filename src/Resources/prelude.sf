@@ -9,32 +9,32 @@ data Bool : Type {
   false : Bool
 }
 
-data Sigma : (A : Type, B : A -> Type) -> Type {
-  pair : [A : Type, B : A -> Type] -> (a : A) -> B a -> Sigma A B
+data Sigma (A : Type, B : A -> Type) : Type {
+  pair : (a : A) -> B a -> Sigma A B
 }
 
-def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
-  \p => case p to (\A B p => A) {
-    (a, b) => a
-  }
-}
+-- def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+--   \p => case p to (\A B p => A) {
+--     (a, b) => a
+--   }
+-- }
 
-def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
-  \p => case p to (\A B p => B (fst p)) {
-    (a, b) => b
-  }
-}
+-- def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+--   \p => case p to (\A B p => B (fst p)) {
+--     (a, b) => b
+--   }
+-- }
 
-def id : [A : Type] -> A -> A {
-  \a => a
-}
+-- def id : [A : Type] -> A -> A {
+--   \a => a
+-- }
 
-def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
-  \[A] b t f => case b {
-    true => t tt,
-    false => f tt
-  }
-}
+-- def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+--   \[A] b t f => case b {
+--     true => t tt,
+--     false => f tt
+--   }
+-- }
 
 prim conjure : [A : Type] -> A
 
@@ -326,15 +326,15 @@ def type : [A : Type] -> A -> Type {
   \[A] _ => A
 }
 
-def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
-  \[A] [B] f xs => {
-    let a = case (f, xs) to (\A B p => ()) {
-      nil => ?h1,
-      cons x xs' => ?h2,
-    };
-    a
-  }
-}
+-- def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
+--   \[A] [B] f xs => {
+--     let a = case (f, xs) to (\A B p => ()) {
+--       nil => ?h1,
+--       cons x xs' => ?h2,
+--     };
+--     a
+--   }
+-- }
 
 -- def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
 --   \p xs => case xs {

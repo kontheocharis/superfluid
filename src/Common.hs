@@ -355,9 +355,6 @@ instance (Pretty m t) => Pretty m (Param t) where
     t' <- pretty t
     return $ "[[" ++ n' ++ " : " ++ t' ++ "]]"
 
-instance (Pretty m t) => Pretty m (Tel t) where
-  pretty ps = intercalate " " <$> mapM pretty (toList ps)
-
 -- Files
 
 class (Monad m) => HasProjectFiles m where

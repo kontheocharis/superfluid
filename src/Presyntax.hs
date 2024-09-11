@@ -43,6 +43,7 @@ import Data.Sequence (Seq (..))
 import Data.Set (Set)
 import Data.Typeable (Typeable)
 import Printing (Pretty (..), curlies)
+import Data.Foldable (toList)
 
 type PTy = PTm
 
@@ -292,6 +293,9 @@ instance (Monad m) => Pretty m PData where
     pty <- pretty ty
     pcs <- mapM pretty cs
     return $ pts ++ "data " ++ pn ++ pte ++ " : " ++ pty ++ " " ++ curlies (intercalate ",\n" pcs)
+
+instance (Monad m) => Pretty m (Tel PTy) where
+  pretty ps = intercalate " " <$> mapM pretty (toList ps)
 
 instance (Monad m) => Pretty m PDef where
   pretty (MkPDef n ty tm ts) = do
