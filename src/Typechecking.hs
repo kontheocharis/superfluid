@@ -45,34 +45,35 @@ where
 
 import Algebra.Lattice (Lattice (..), (/\))
 import Common
-    ( Loc,
-      HasProjectFiles,
-      Has(..),
-      Name(Name),
-      HasNameSupply(uniqueName),
-      Tag,
-      Glob(DefGlob, CtorGlob, DataGlob, PrimGlob),
-      DefGlobal(DefGlobal),
-      DataGlobal,
-      CtorGlobal(..),
-      MetaVar,
-      Spine,
-      Arg(Arg, mode),
-      Lvl(..),
-      Idx(..),
-      Times(Finite),
-      Lit(..),
-      Clause,
-      PiMode(..),
-      pattern Impossible,
-      pattern Possible,
-      inv,
-      nextLvl,
-      nextLvls,
-      lvlToIdx )
+  ( Arg (Arg, mode),
+    Clause,
+    CtorGlobal (..),
+    DataGlobal,
+    DefGlobal (DefGlobal),
+    Glob (CtorGlob, DataGlob, DefGlob, PrimGlob),
+    Has (..),
+    HasNameSupply (uniqueName),
+    HasProjectFiles,
+    Idx (..),
+    Lit (..),
+    Loc,
+    Lvl (..),
+    MetaVar,
+    Name (Name),
+    PiMode (..),
+    Spine,
+    Tag,
+    Times (Finite),
+    inv,
+    lvlToIdx,
+    nextLvl,
+    nextLvls,
+    pattern Impossible,
+    pattern Possible,
+  )
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
-import Control.Monad.Except (MonadError (..), runExceptT, ExceptT)
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
@@ -85,7 +86,6 @@ import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -577,7 +577,13 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
-ifForcePiType :: (Tc m) => PiMode -> VTy -> (PiMode -> Name -> VTy -> Closure -> m a) -> (PiMode -> Name -> VTy -> Closure -> m a) -> m a
+ifForcePiType ::
+  (Tc m) =>
+  PiMode ->
+  VTy ->
+  (PiMode -> Name -> VTy -> Closure -> m a) ->
+  (PiMode -> Name -> VTy -> Closure -> m a) ->
+  m a
 ifForcePiType m ty the els = do
   ty' <- force ty >>= unfoldDefs
   case ty' of
@@ -879,7 +885,6 @@ endDataItem dat = do
               }
         )
     )
-  vReprHere (Finite 1) elimTy >>= pretty >>= traceM
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
@@ -910,10 +915,6 @@ reprItem getGlob addGlob ts r = do
   ty' <- vReprHere (Finite 1) ty
   (r', _) <- r (Check ty')
   vr <- evalHere r'
-
-  vr' <- pretty vr
-  traceM $ "Final type for representation: " ++ vr'
-
   modify (addGlob vr ts)
 
 reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
@@ -1193,10 +1194,7 @@ instance (Tc m) => Pretty m Problem where
     return $ "lhs: " ++ lhs' ++ "\nrhs: " ++ rhs' ++ "\nerrors: " ++ errs'
 
 addProblem :: (Tc m) => Problem -> m ()
-addProblem p = do
-  pp <- pretty p
-  traceM $ "Adding problem: " ++ pp
-  modify (S.|> p)
+addProblem p = modify (S.|> p)
 
 addNewProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
 addNewProblem t t' e = do
@@ -1257,7 +1255,7 @@ unifyFlex m sp t = runSolveT m sp t $ do
   lift $ solveMetaVar m solution
 
 iDontKnow :: (Tc m) => m CanUnify
-iDontKnow = return $ Maybe
+iDontKnow = return Maybe
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do
@@ -1298,9 +1296,6 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  t1'' <- pretty t1'
-  t2'' <- pretty t2'
-  traceM $ "Unifying " ++ t1'' ++ " with " ++ t2''
   case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'

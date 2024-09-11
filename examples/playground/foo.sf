@@ -1,15 +1,15 @@
 
-data Vec : Type -> Nat -> Type {
-  vnil : [A : Type] -> Vec A z,
-  vcons : [A : Type, n : Nat] -> A -> Vec A n -> Vec A (s n),
-}
+-- data Vec : Type -> Nat -> Type {
+--   vnil : [A : Type] -> Vec A z,
+--   vcons : [A : Type, n : Nat] -> A -> Vec A n -> Vec A (s n),
+-- }
 
-def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
-  \n a => case n {
-    z => vnil,
-    s n' => vcons a (repeat n' a),
-  }
-}
+-- def repeat : [A : Type] -> (n : Nat) -> A -> Vec A n {
+--   \n a => case n {
+--     z => vnil,
+--     s n' => vcons a (repeat n' a),
+--   }
+-- }
 
 -- def upgrade1 : [n : Nat] -> Fin n -> Fin (s n) {
 --   \f => case f {

@@ -46,6 +46,7 @@ import Printing (Pretty (..))
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Typechecking (Ctx, Goal, InPat (..), Problem, SolveAttempts (..), Tc (addGoal, showMessage, tcError), TcError, emptyCtx, prettyGoal)
+import Control.Monad.Extra (unless)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -235,9 +236,10 @@ runComp c s = do
 
 showGoals :: Comp ()
 showGoals = do
-  msg "\n-- Goals --\n"
   gs <- gets (\s -> s.goals)
-  mapM_ (\g -> prettyGoal g >>= msg) gs
+  unless (null gs) $ do
+    msg "\n-- Goals --\n"
+    mapM_ (\g -> prettyGoal g >>= msg) gs
 
 -- | Run the compiler.
 compile :: Args -> Comp ()
