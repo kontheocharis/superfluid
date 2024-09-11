@@ -48,7 +48,7 @@ import Common
   ( Arg (Arg, mode),
     Clause,
     CtorGlobal (..),
-    DataGlobal,
+    DataGlobal (..),
     DefGlobal (DefGlobal),
     Glob (CtorGlob, DataGlob, DefGlob, PrimGlob),
     Has (..),
@@ -71,7 +71,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, PrimGlobal (..),
   )
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -114,7 +114,7 @@ import Globals
     DefGlobalInfo (..),
     GlobalInfo (..),
     KnownGlobal (..),
-    PrimGlobalInfo (PrimGlobalInfo),
+    PrimGlobalInfo (..),
     Sig,
     addCaseRepr,
     addCtorRepr,
@@ -124,7 +124,6 @@ import Globals
     getCtorGlobal,
     getDataGlobal,
     getDefGlobal,
-    globalInfoToTm,
     hasName,
     knownData,
     lookupGlobal,
@@ -633,7 +632,7 @@ name n =
     ( do
         l <- access (lookupGlobal n)
         case l of
-          Just c@(CtorInfo _) -> return (globalInfoToTm n c)
+          Just c@(CtorInfo _) -> globalInfoToTm n c
           _ -> inferPatBind n
     )
     ( do
@@ -643,7 +642,7 @@ name n =
           Nothing -> do
             l <- access (lookupGlobal n)
             case l of
-              Just x -> return (globalInfoToTm n x)
+              Just x -> globalInfoToTm n x
               Nothing -> tcError $ UnresolvedVariable n
     )
 
@@ -909,8 +908,9 @@ ctorItem dat n ts ty = do
     (ty', _) <- ty (Check VU)
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
+    cty <- closeHere (length di.params) ty'
     unless i (tcError $ InvalidCtorType ty')
-    modify (addItem n (CtorInfo (CtorGlobalInfo vty idx dat)) ts)
+    modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat)) ts)
     modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
@@ -937,7 +937,7 @@ reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
 reprDataItem dat = reprItem (access (getDataGlobal dat) >>= \d -> return d.ty) (addDataRepr dat)
 
 reprCtorItem :: (Tc m) => CtorGlobal -> Set Tag -> Child m -> m ()
-reprCtorItem ctor = reprItem (access (getCtorGlobal ctor) >>= \d -> return d.ty) (addCtorRepr ctor)
+reprCtorItem ctor = reprItem (access (getCtorGlobal ctor) >>= \d -> snd <$> globalInfoToTm ctor.globalName (CtorInfo d)) (addCtorRepr ctor)
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
 reprDefItem def = reprItem (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
@@ -1013,7 +1013,7 @@ buildElimTy dat = do
     ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy ctor = do
       ctorInfo <- access (getCtorGlobal ctor)
-      sTy <- quoteHere ctorInfo.ty
+      let sTy = ctorInfo.ty.body -- @@Todo: wrong
       let (sTyBinds', sTyRet) = sGatherPis sTy
       sTyBinds <- telWithNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet
@@ -1025,6 +1025,17 @@ buildElimTy dat = do
                 (SVar (Idx (sMotiveIdx + length sTyBinds)))
                 (sTyRetSp S.|> Arg Explicit spToCtor)
          in sPis sTyBinds methodRetTy
+
+globalInfoToTm :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
+globalInfoToTm n i = case i of
+  DefInfo d -> return (SGlobal (DefGlob (DefGlobal n)), d.ty)
+  DataInfo d -> return (SGlobal (DataGlob (DataGlobal n)), d.ty)
+  CtorInfo c -> do
+    di <- access (getDataGlobal c.dataGlobal)
+    metas <- replicateM (length di.params) (freshMeta >>= evalHere)
+    ty' <- c.ty $$ metas
+    return (SGlobal (CtorGlob (CtorGlobal n)), ty')
+  PrimInfo p -> return (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
 data UnifyError
   = DifferentSpineLengths (Spine VTm) (Spine VTm)

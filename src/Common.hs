@@ -224,8 +224,14 @@ mapSpine f = fmap (fmap f)
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
-data Param t = Param {mode :: PiMode, name :: Name, ty :: t} deriving (Eq, Show,
-  Functor, Traversable, Foldable)
+data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
+  deriving
+    ( Eq,
+      Show,
+      Functor,
+      Traversable,
+      Foldable
+    )
 
 type Tel t = Seq (Param t)
 

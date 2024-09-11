@@ -27,7 +27,6 @@ module Globals
     lookupGlobal,
     hasName,
     emptySig,
-    globalInfoToTm,
     addItem,
     addCaseRepr,
     addCtorRepr,
@@ -45,15 +44,20 @@ import Common
     Name (..),
     PrimGlobal (..),
     Tag,
-    globalName, Tel,
+    Tel,
+    globalName,
   )
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set
 import Syntax (STm (..))
-import Value (VTm (..), VTy)
+import Value (VTm (..), VTy, Closure)
 
-data CtorGlobalInfo = CtorGlobalInfo {ty :: VTm, idx :: Int, dataGlobal :: DataGlobal}
+data CtorGlobalInfo = CtorGlobalInfo
+  { ty :: Closure,
+    idx :: Int,
+    dataGlobal :: DataGlobal
+  }
 
 data DataGlobalInfo = DataGlobalInfo
   { ty :: VTm,
@@ -140,13 +144,6 @@ getGlobalTags n sig = case M.lookup n sig.tags of
 
 lookupGlobal :: Name -> Sig -> Maybe GlobalInfo
 lookupGlobal n sig = M.lookup n sig.contents
-
-globalInfoToTm :: Name -> GlobalInfo -> (STm, VTy)
-globalInfoToTm n i = case i of
-  DefInfo d -> (SGlobal (DefGlob (DefGlobal n)), d.ty)
-  DataInfo d -> (SGlobal (DataGlob (DataGlobal n)), d.ty)
-  CtorInfo c -> (SGlobal (CtorGlob (CtorGlobal n)), c.ty)
-  PrimInfo p -> (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
 
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).vtm

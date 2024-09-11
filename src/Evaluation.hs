@@ -105,6 +105,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Data.Foldable (toList)
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -547,14 +548,15 @@ unelabSig = do
               unelabCtor
                 n'.globalName
                 (getCtorGlobal n' sig)
+                (reverse . toList $ fmap (\p -> p.name) d.params)
                 (getGlobalTags n'.globalName sig)
           )
           d.ctors
       return $ MkPData n te' ty' ctors' ts
 
-    unelabCtor :: (Eval m) => Name -> CtorGlobalInfo -> Set Tag -> m PCtor
-    unelabCtor n c ts = do
-      ty' <- unelabValue [] c.ty
+    unelabCtor :: (Eval m) => Name ->CtorGlobalInfo -> [Name] -> Set Tag -> m PCtor
+    unelabCtor n c dataParams ts = do
+      ty' <- unelab dataParams c.ty.body
       return $ MkPCtor n ty' ts
 
     unelabDef :: (Eval m) => Name -> DefGlobalInfo -> Set Tag -> m PDef
