@@ -15,6 +15,7 @@ module Value
     liftPRen,
     liftPRenN,
     isEmptySub,
+    vGetSpine,
     pattern VVar,
     pattern VMeta,
     pattern VHead,
@@ -89,6 +90,12 @@ data VTm
   | VLit (Lit VTm)
   | VNeu VNeu
   deriving (Show)
+
+vGetSpine :: VTm -> Spine VTm
+vGetSpine (VNeu (VApp _ sp)) = sp
+vGetSpine (VNeu (VCaseApp _ _ _ _ sp)) = sp
+vGetSpine (VNeu (VReprApp _ _ sp)) = sp
+vGetSpine _ = Empty
 
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty

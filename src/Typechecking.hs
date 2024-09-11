@@ -74,7 +74,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (replicateM, unless, void, (>=>))
+import Control.Monad (replicateM, unless, void, zipWithM, (>=>))
 import Control.Monad.Except (ExceptT (ExceptT), MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -99,6 +99,7 @@ import Evaluation
     evalPat,
     extendEnvByNVars,
     force,
+    ensureIsCtor,
     ifIsData,
     isCtorTy,
     isTypeFamily,
@@ -109,7 +110,7 @@ import Evaluation
     vApp,
     vAppNeu,
     vRepr,
-    ($$), ifIsCtor,
+    ($$),
   )
 import GHC.Records (HasField)
 import Globals
@@ -159,9 +160,9 @@ import Value
     pattern VGlob,
     pattern VHead,
     pattern VRepr,
-    pattern VVar,
+    pattern VVar, vGetSpine,
   )
-import Control.Monad (zipWithM)
+import Control.Applicative (Alternative (empty))
 
 data TcError
   = Mismatch [UnifyError]
@@ -176,6 +177,9 @@ data TcError
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
+  | ExpectedCtor VPatB CtorGlobal
+  | UnexpectedPattern VPatB
+  | MissingCtor CtorGlobal
   | DuplicateItem Name
   | ImpossibleCasesNotSupported
   | Chain [TcError]
@@ -234,6 +238,16 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         DuplicateItem n -> do
           n' <- pretty n
           return $ "Duplicate item: " <> n'
+        ExpectedCtor t c -> do
+          t' <- pretty t
+          return $ "Expected constructor " <> show c.globalName <> " but got " <> t'
+        UnexpectedPattern c -> do
+          c' <- pretty c
+          return $ "Unexpected pattern: " <> c'
+        MissingCtor c -> do
+          return $ "Missing constructor: " <> show c.globalName
+        ImpossibleCasesNotSupported -> do
+          return "Impossible cases are currently not supported"
         RemainingProblems ps -> do
           ps' <-
             mapM
@@ -771,17 +785,30 @@ constLamsForPis pis val = do
   sval <- closeValHere (length args) val
   uniqueSLams (map (\(m, _, _) -> m) args) sval.body
 
-caseClauses :: (Tc m) => DataGlobalInfo -> [Clause (Child m) (Child m)] -> m [Clause STm STm]
-caseClauses di cs = do
-  zipWithM
-    ( \c cl -> case cl of
-        Possible p t -> do
-          let _ = ifIsCtor p c
-          return undefined
-        Impossible _ -> tcError ImpossibleCasesNotSupported
+mzip :: (Alternative m) => [m a] -> [m b] -> [(m a, m b)]
+mzip (a : as) (b : bs) = (a, b) : mzip as bs
+mzip [] (b : bs) = (empty, b) : mzip [] bs
+mzip (a : as) [] = (a, empty) : mzip as []
+mzip _ _ = []
+
+caseClauses :: (Tc m) => DataGlobalInfo -> [Clause (Child m) (Child m)] -> (VPatB -> SPat -> VTy -> Child m -> m a) -> m [a]
+caseClauses di cs f = do
+  mapM
+    ( \case
+        (_, Just (Impossible _)) -> tcError ImpossibleCasesNotSupported
+        (c, Just (Possible p t)) -> do
+          pat (InPossiblePat []) p (const . const $ return ()) $ \sp pTy -> do
+            vp <- evalPatHere sp
+            case c of
+              Just c' -> do
+                ensureIsCtor vp.vPat c' (tcError $ ExpectedCtor vp c')
+                f vp sp pTy t
+              Nothing -> do
+                tcError $ UnexpectedPattern vp
+        (Just c, Nothing) -> tcError $ MissingCtor c
+        (Nothing, Nothing) -> error "impossible"
     )
-    di.ctors
-    cs
+    (mzip (map Just di.ctors) (map Just cs))
 
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
@@ -798,17 +825,12 @@ caseOf mode s r cs = do
       rr <- case r of
         Just r' -> fst <$> r' (Check motive)
         Nothing -> constLamsForPis motive ty
-      vs <- evalHere ss
-      scs <-
-        mapM
-          ( \case
-              Possible p t -> pat (InPossiblePat []) p (matchPat vs ssTy) $ \sp _ -> do
-                (st, _) <- t (Check ty)
-                return $ Possible sp st
-              Impossible p -> pat InImpossiblePat p (matchPat vs ssTy) $ \sp _ -> do
-                return $ Impossible sp
-          )
-          cs
+      vrr <- evalHere rr
+      scs <- caseClauses di cs $ \vp sp pTy t -> do
+        let pTySp = vGetSpine pTy
+        branchTy <- vApp vrr (pTySp S.:|> Arg Explicit vp.vPat)
+        (st, _) <- t (Check branchTy)
+        return $ Possible sp st
       return (SCase d ss rr scs, ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)

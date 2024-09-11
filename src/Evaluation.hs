@@ -21,7 +21,7 @@ module Evaluation
     unfoldDefs,
     quoteSpine,
     unelabSig,
-    ifIsCtor,
+    ensureIsCtor,
     vLams,
     uniqueVLams,
     evalInOwnCtx,
@@ -448,11 +448,11 @@ ifIsData v a b = do
     VGlob (DataGlob g@(DataGlobal _)) _ -> a g
     _ -> b
 
-ifIsCtor :: (Eval m) => VTm -> CtorGlobal -> m (Spine VTm) -> m (Spine VTm)
-ifIsCtor v c a = do
+ensureIsCtor :: (Eval m) => VTm -> CtorGlobal -> m () -> m ()
+ensureIsCtor v c a = do
   v' <- force v >>= unfoldDefs
   case v' of
-    VNeu (VApp (VGlobal (CtorGlob c')) sp) | c == c' -> return sp
+    VNeu (VApp (VGlobal (CtorGlob c')) _) | c == c' -> return ()
     _ -> a
 
 unelabMeta :: (Eval m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
