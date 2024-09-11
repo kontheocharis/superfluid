@@ -28,7 +28,6 @@ import Common
     Times,
   )
 import Data.Sequence (Seq (..), fromList)
-import Presyntax (PTm (..))
 
 type STy = STm
 

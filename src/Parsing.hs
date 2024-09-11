@@ -1,19 +1,17 @@
 module Parsing (parseProgram, parseTerm, ParseError (..)) where
 
 import Common
-  ( Arg (..),
-    Clause (..),
+  ( Arg (Arg),
+    Clause (Clause),
     Filename,
     HasProjectFiles,
-    Lit (..),
-    Loc (..),
-    Name (Name),
-    PiMode (..),
-    Pos (..),
+    Lit (CharLit, FinLit, NatLit, StringLit),
+    Loc (Loc),
+    Name (..),
+    PiMode (Explicit, Implicit),
+    Pos (Pos),
     Tag,
-    Times (..),
-    globalName,
-    unName,
+    Times (Finite),
   )
 import Data.Char (isDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, singleton)

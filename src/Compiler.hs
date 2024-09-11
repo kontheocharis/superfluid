@@ -1,21 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use >=>" #-}
 
 module Compiler (runCli) where
-
--- import Checking.Context (Tc, TcState)
--- import Checking.Normalisation (normaliseTermFully, normaliseProgram)
--- import Checking.Representation (representProgram)
--- import Checking.Typechecking (checkProgram, inferTerm)
--- import Checking.Utils (runTc)
-
--- import Interface.Pretty
-
--- import Codegen.Generate (Gen, runGen, generateProgram, JsProg, renderJsProg)
 
 import Common
   ( Has (..),
@@ -27,19 +13,18 @@ import Common
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.State (MonadState (get, put), StateT (..))
-import Control.Monad.State.Class (gets, modify)
+import Control.Monad.State (MonadState (..), StateT (..))
+import Control.Monad.State.Class (gets)
 import qualified Control.Monad.State.Class as ST
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
-import Debug.Trace (trace, traceStack)
-import Elaboration (Elab (..), elabProgram, ElabError)
+import Elaboration (Elab (..), ElabError, elabProgram)
 import Evaluation (Eval (..), unelabSig)
 import Globals (Sig, emptySig)
-import Meta (HasMetas (..), SolvedMetas, emptySolvedMetas)
+import Meta (SolvedMetas, emptySolvedMetas)
 import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
 import Options.Applicative.Builder
   ( fullDesc,
@@ -58,7 +43,6 @@ import Parsing (ParseError, parseProgram)
 import Persistence (preludePath)
 import Presyntax (PProgram)
 import Printing (Pretty (..))
-import System.Console.Haskeline (InputT, defaultSettings, runInputT)
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Typechecking (Ctx, Goal, InPat (..), Problem, SolveAttempts (..), Tc (addGoal, showMessage, tcError), TcError, emptyCtx, prettyGoal)
@@ -272,11 +256,11 @@ compile args = do
       parsed <- parseFile file
       when flags.verbose $ msg $ "Parsing file " ++ file
       when flags.dump $ pretty parsed >>= msg
-    Args (RepresentFile file) flags -> error "unimplemented"
+    Args (RepresentFile _) _ -> error "unimplemented"
     -- represented <- andPotentiallyNormalise flags <$> representFile file
     -- when flags.verbose $ msg "\nTypechecked and represented program successfully"
     -- when flags.dump $ msg $ printVal represented
-    Args (GenerateCode file) flags -> error "unimplemented"
+    Args (GenerateCode _) _ -> error "unimplemented"
 
 -- code <- generateCode file
 -- when flags.verbose $ msg "Generated code successfully"

@@ -26,14 +26,25 @@ module Value
   )
 where
 
-import Common (Arg (..), Clause, DataGlobal, Glob, HasNameSupply (..), Lit, Lvl (..), MetaVar, Name, PiMode, Spine, Times, WithNames (..), nextLvl, unLvl)
+import Common
+  ( Clause,
+    DataGlobal,
+    Glob,
+    Lit,
+    Lvl (..),
+    MetaVar,
+    Name,
+    PiMode,
+    Spine,
+    Times,
+    unLvl,
+  )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
-import Data.Sequence (Seq (..), fromList)
-import Printing (Pretty (..))
-import Syntax (STm, sLams)
+import Data.Sequence (Seq (..))
+import Syntax (STm)
 
 data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 
@@ -56,10 +67,11 @@ data PRen = PRen
   { domSize :: Lvl,
     codSize :: Lvl,
     vars :: IntMap Lvl
-  } deriving (Show)
+  }
+  deriving (Show)
 
 liftPRen :: PRen -> PRen
-liftPRen (PRen dom cod ren) =  PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl dom ren)
+liftPRen (PRen dom cod ren) = PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl dom ren)
 
 liftPRenN :: Int -> PRen -> PRen
 liftPRenN 0 ren = ren

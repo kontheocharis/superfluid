@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Common
@@ -41,9 +40,6 @@ module Common
   )
 where
 
-import Control.Monad.State (MonadState, State, StateT, MonadTrans (..))
-import qualified Control.Monad.State as MS
-import Criterion.Main.Options (MatchType (Glob))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
@@ -52,7 +48,6 @@ import Data.Generics (Data, Typeable)
 import Data.List (intercalate)
 import Data.Sequence (Seq (..))
 import Data.Set (Set)
-import Debug.Trace (trace)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
 
@@ -191,11 +186,6 @@ startPos (Loc _ start _) = Just start
 endPos :: Loc -> Maybe Pos
 endPos NoLoc = Nothing
 endPos (Loc _ _ end) = Just end
-
--- | Get the project file name of a location.
-locProjectFileName :: Loc -> Maybe String
-locProjectFileName NoLoc = Nothing
-locProjectFileName (Loc f _ _) = Just f
 
 -- De Brujin indices and levels
 

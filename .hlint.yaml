@@ -54,6 +54,7 @@
 # - ignore: {name: Use const, within: SpecialModule} # Only within certain modules
 - ignore: { name: Use <$> }
 - ignore: { name: Use unwords }
+- ignore: { name: Use >=> }
 # Define some custom infix operators
 # - fixity: infixr 3 ~^#^~
 

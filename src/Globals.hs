@@ -47,7 +47,6 @@ import Common
     Tag,
     globalName,
   )
-import Control.Monad.Accum (MonadAccum (add))
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set

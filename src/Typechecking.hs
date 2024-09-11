@@ -45,61 +45,55 @@ where
 
 import Algebra.Lattice (Lattice (..), (/\))
 import Common
-  ( Arg (..),
-    Clause (..),
-    CtorGlobal (..),
-    DataGlobal (..),
-    DefGlobal (..),
-    Glob (..),
-    Has (..),
-    HasNameSupply (..),
-    HasProjectFiles,
-    Idx (..),
-    Lit (..),
-    Loc (NoLoc),
-    Lvl (..),
-    MetaVar,
-    Name (..),
-    PiMode (..),
-    Spine,
-    Tag,
-    Times (..),
-    inv,
-    lvlToIdx,
-    mapSpineM,
-    nextLvl,
-    nextLvls,
-    pat,
-    unMetaVar,
-    pattern Impossible,
-    pattern Possible,
-  )
-import Control.Monad (replicateM, unless, void, zipWithM, (>=>))
-import Control.Monad.Except (ExceptT (ExceptT), MonadError (..), runExceptT)
+    ( Loc,
+      HasProjectFiles,
+      Has(..),
+      Name(Name),
+      HasNameSupply(uniqueName),
+      Tag,
+      Glob(DefGlob, CtorGlob, DataGlob, PrimGlob),
+      DefGlobal(DefGlobal),
+      DataGlobal,
+      CtorGlobal(..),
+      MetaVar,
+      Spine,
+      Arg(Arg, mode),
+      Lvl(..),
+      Idx(..),
+      Times(Finite),
+      Lit(..),
+      Clause,
+      PiMode(..),
+      pattern Impossible,
+      pattern Possible,
+      inv,
+      nextLvl,
+      nextLvls,
+      lvlToIdx )
+import Control.Applicative (Alternative (empty))
+import Control.Monad (replicateM, unless)
+import Control.Monad.Except (MonadError (..), runExceptT, ExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate, zipWith4)
-import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Data.Vector.Fusion.Stream.Monadic (cons, zipWith3M)
 import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
+    ensureIsCtor,
     eval,
     evalInOwnCtx,
     evalPat,
-    extendEnvByNVars,
     force,
-    ensureIsCtor,
     ifIsData,
     isCtorTy,
     isTypeFamily,
@@ -112,7 +106,6 @@ import Evaluation
     vRepr,
     ($$),
   )
-import GHC.Records (HasField)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -140,29 +133,24 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sLams, sPis, uniqueSLams)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sPis, uniqueSLams)
 import Value
-  ( Closure (..),
+  ( Closure (body, numVars),
     Env,
     PRen (..),
-    Sub (..),
-    VHead (..),
-    VNeu (..),
+    Sub,
+    VHead (VFlex, VGlobal, VRigid),
+    VNeu (VApp, VCaseApp, VReprApp),
     VPatB (..),
     VTm (..),
     VTy,
-    env,
     isEmptySub,
     liftPRenN,
-    numVars,
-    subbing,
-    vars,
+    vGetSpine,
     pattern VGlob,
-    pattern VHead,
     pattern VRepr,
-    pattern VVar, vGetSpine,
+    pattern VVar,
   )
-import Control.Applicative (Alternative (empty))
 
 data TcError
   = Mismatch [UnifyError]
@@ -772,12 +760,6 @@ pat inPt pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
     return (p', t', ns)
   runOutsidePatScope (SPat p' ns) t
 
-matchPat :: (Tc m) => VTm -> VTy -> SPat -> VTy -> m ()
-matchPat vs ssTy sp spTy = do
-  vp <- evalPatHere sp
-  u <- canUnifyHere ssTy spTy /\ canUnifyHere vp.vPat vs
-  handleUnification vp.vPat vs u
-
 constLamsForPis :: (Tc m) => VTy -> VTm -> m STm
 constLamsForPis pis val = do
   spis <- quoteHere pis
@@ -997,8 +979,6 @@ buildElimTy dat = do
           )
           (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
 
-  pelimTy <- evalHere elimTy >>= pretty
-  traceM $ "Elimination type (syntax): " ++ pelimTy
   elimTy' <- evalHere elimTy
   motiveTy' <- evalHere motiveTy
   return (motiveTy', elimTy', map (\(m, _, _) -> Arg m ()) sTyBinds)

@@ -15,7 +15,6 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
-    Glob (..),
     Has (..),
     HasNameSupply (uniqueName),
     HasProjectFiles,
@@ -23,11 +22,9 @@ import Common
     Name,
     PiMode (..),
     mapSpine,
-    unName, nextLvl,
+    unName,
   )
-import Control.Monad.Except (MonadError)
 import Data.Bifunctor (bimap)
-import Debug.Trace (traceM)
 import Globals (DataGlobalInfo, GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
@@ -73,10 +70,9 @@ import Typechecking
     reprDataItem,
     reprDefItem,
     univ,
-    wildPat, closeValHere,
+    wildPat,
   )
-import Value (VTm (..), VTy, Closure (..))
-import Evaluation (quote)
+import Value (VTm (..), VTy)
 
 -- Presyntax exists below here
 

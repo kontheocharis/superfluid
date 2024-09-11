@@ -18,7 +18,7 @@ import Value
   )
 
 minusOneNat :: VTm -> VTm
-minusOneNat (VLit l@(NatLit n)) = minusOneNat (unfoldLit l)
+minusOneNat (VLit l@(NatLit _)) = minusOneNat (unfoldLit l)
 minusOneNat (VNeu (VApp (VGlobal (CtorGlob g)) sp)) | g == knownCtor KnownSucc = case sp of
   (Arg Explicit x :<| Empty) -> x
   _ -> error "minusOneNat: invalid spine"

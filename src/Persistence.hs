@@ -4,8 +4,6 @@ module Persistence (preludePath, preludeContents) where
 
 import Data.FileEmbed (embedStringFile, makeRelativeToProject, strToExp)
 import Data.String (IsString)
-import System.IO (FilePath)
-import Control.Monad ((>>=))
 
 -- | The contents of the Prelude file.
 preludePath :: FilePath

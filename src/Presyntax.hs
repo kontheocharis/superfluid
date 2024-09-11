@@ -21,12 +21,23 @@ module Presyntax
   )
 where
 
-import Common (Arg (..), Clause (..), Lit, Loc, Name (..), PiMode (..), Pos, Spine, Tag (..), Times (..), arg, mode)
+import Common
+  ( Arg (..),
+    Clause (..),
+    Lit,
+    Loc,
+    Name (..),
+    PiMode (..),
+    Spine,
+    Tag (..),
+    Times (..),
+    arg,
+    mode,
+  )
 import Data.List (intercalate)
 import Data.Sequence (Seq (..))
 import Data.Set (Set)
 import Data.Typeable (Typeable)
-import Debug.Trace (traceM)
 import Printing (Pretty (..), curlies)
 
 type PTy = PTm

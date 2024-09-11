@@ -35,7 +35,6 @@ import Common
     Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
-    DefGlobal (DefGlobal),
     Glob (..),
     Has (..),
     HasNameSupply (..),
@@ -57,24 +56,20 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Arrow ((***))
 import Control.Exception (assert)
 import Control.Monad (foldM)
 import Control.Monad.Extra (concatMapM)
-import Control.Monad.State (StateT (..), modify)
-import Control.Monad.State.Class (MonadState (..), gets)
+import Control.Monad.State (StateT (..))
+import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.List.Extra (firstJust, intercalate, (!?))
 import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Debug.Trace (trace, traceM)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -87,14 +82,28 @@ import Globals
     getGlobal,
     getGlobalRepr,
     getGlobalTags,
-    lookupGlobal,
     unfoldDef,
   )
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, uniqueSLams)
-import Value (Closure (..), Env, Sub, VHead (..), VNeu (..), VPat, VPatB (..), VTm (..), VTy, vars, pattern VGl, pattern VGlob, pattern VMeta, pattern VRepr, pattern VVar)
+import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams)
+import Value
+  ( Closure (..),
+    Env,
+    Sub (..),
+    VHead (..),
+    VNeu (..),
+    VPat,
+    VPatB (..),
+    VTm (..),
+    VTy,
+    pattern VGl,
+    pattern VGlob,
+    pattern VMeta,
+    pattern VRepr,
+    pattern VVar,
+  )
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -162,13 +171,6 @@ vCase dat v r cs = do
           )
           cs
     _ -> error "impossible"
-
-evalToNeu :: (Eval m) => Env VTm -> STm -> m VNeu
-evalToNeu env t = do
-  t' <- eval env t
-  case t' of
-    VNeu n -> return n
-    _ -> error $ "expected neutral term, got " ++ show t'
 
 postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
 postCompose f (Closure n env t) = return $ Closure n env (f t)
@@ -350,7 +352,7 @@ unfoldDefs s = case s of
   _ -> return s
 
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
-quoteSpine l t Empty = return t
+quoteSpine _ t Empty = return t
 quoteSpine l t (sp :|> Arg m u) = do
   t' <- quoteSpine l t sp
   u' <- quote l u
@@ -595,11 +597,10 @@ instance (Eval m, Has m [Name]) => Pretty m Closure where
     pretty cl'
 
 instance (Eval m, Has m [Name]) => Pretty m VPatB where
-  pretty (VPatB pat names) = enter (\n -> names ++ n) $ pretty pat
+  pretty (VPatB pat names) = enter (names ++) $ pretty pat
 
 instance (Eval m, Has m [Name]) => Pretty m Sub where
   pretty sub = do
-    let l = IM.size sub.vars
     vars <-
       concatMapM
         ( \(x, v) -> do
