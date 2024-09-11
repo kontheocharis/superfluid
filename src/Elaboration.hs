@@ -143,7 +143,7 @@ elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
 
 elabData :: (Elab m) => PData -> m ()
 elabData dat = do
-  dataItem dat.name dat.tags (elab dat.ty)
+  dataItem dat.name dat.tags (fmap (fmap elab) dat.params) (elab dat.ty)
   let d = DataGlobal dat.name
   mapM_ (elabCtor d) dat.ctors
   endDataItem d

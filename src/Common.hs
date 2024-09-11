@@ -24,7 +24,9 @@ module Common
     nextLvls,
     lvlToIdx,
     Arg (..),
+    Param (..),
     Spine,
+    Tel,
     mapSpine,
     mapSpineM,
     MetaVar (..),
@@ -222,6 +224,11 @@ mapSpine f = fmap (fmap f)
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
+data Param t = Param {mode :: PiMode, name :: Name, ty :: t} deriving (Eq, Show,
+  Functor, Traversable, Foldable)
+
+type Tel t = Seq (Param t)
+
 -- Metas
 
 newtype MetaVar = MetaVar {unMetaVar :: Int} deriving (Eq, Show)
@@ -327,6 +334,23 @@ instance (Pretty m p, Pretty m t) => Pretty m (Clause p t) where
     pp <- pretty p
     pc <- maybe (return "impossible") pretty c
     return $ pp ++ " => " ++ pc
+
+instance (Pretty m t) => Pretty m (Param t) where
+  pretty (Param Explicit n t) = do
+    n' <- pretty n
+    t' <- pretty t
+    return $ "(" ++ n' ++ " : " ++ t' ++ ")"
+  pretty (Param Implicit n t) = do
+    n' <- pretty n
+    t' <- pretty t
+    return $ "[" ++ n' ++ " : " ++ t' ++ "]"
+  pretty (Param Instance n t) = do
+    n' <- pretty n
+    t' <- pretty t
+    return $ "[[" ++ n' ++ " : " ++ t' ++ "]]"
+
+instance (Pretty m t) => Pretty m (Tel t) where
+  pretty ps = intercalate " " <$> mapM pretty (toList ps)
 
 -- Files
 

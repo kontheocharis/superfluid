@@ -11,7 +11,7 @@ import Common
     PiMode (Explicit, Implicit),
     Pos (Pos),
     Tag,
-    Times (Finite),
+    Times (Finite), Param (..), Tel,
   )
 import Data.Char (isDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, singleton)
@@ -30,6 +30,7 @@ import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
+import qualified Data.Sequence as SE
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -246,11 +247,12 @@ ctorItem = do
 dataItem :: Parser PData
 dataItem = do
   symbol "data"
-  (name, ty) <- defSig
+  (name, te, ty) <- dataSig
   ctors <- curlies (commaSep ctorItem)
   return $
     MkPData
       name
+      te
       (fromMaybe PU ty)
       ctors
       mempty
@@ -290,6 +292,13 @@ defSig = do
   name <- identifier
   ty <- optionMaybe $ colon >> term
   return (name, ty)
+
+dataSig :: Parser (Name, Tel PTy, Maybe PTy)
+dataSig = do
+  name <- identifier
+  ns <- SE.fromList . map fst <$> tel
+  ty <- optionMaybe $ colon >> term
+  return (name, ns, ty)
 
 -- | Parse a term.
 -- Some are grouped to prevent lots of backtracking.
@@ -348,30 +357,28 @@ singlePat = singleTerm
 var :: Parser Name
 var = identifier
 
-data Typing = Typing {mode :: PiMode, name :: Name, ty :: PTy, loc :: Loc}
-
--- | Parse a named parameter like `(n : Nat)`.
-named :: Parser [Typing]
-named =
+-- | Parse named parameters like `(n : Nat)`.
+tel :: Parser [(Param PTy, Loc)]
+tel =
   ( concatMap NE.toList
       <$> many1
         ((try . parens) (typings Explicit) <|> (try . square) (typings Implicit))
   )
     <|> NE.toList <$> namelessTyping
   where
-    namelessTyping :: Parser (NonEmpty Typing)
+    namelessTyping :: Parser (NonEmpty (Param PTy, Loc))
     namelessTyping =
       located
-        (\(n, t) l -> singleton $ Typing Explicit n t l)
+        (\(n, t) l -> singleton (Param Explicit n t,  l))
         ( do
             t <- app
             return (Name "_", t)
         )
 
-    typings :: PiMode -> Parser (NonEmpty Typing)
+    typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
     typings m = do
       ts <- commaSep1
-        . located (\ts l -> map (\(n, t) -> Typing m n t l) ts)
+        . located (\ts l -> map (\(n, t) -> (Param m n t, l)) ts)
         . try
         $ do
           n <- many1 var
@@ -383,10 +390,10 @@ named =
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy
 piTOrSigmaT = try $ do
-  ns <- named
+  ns <- tel
   op <- (reservedOp "->" >> return PPi) <|> (reservedOp "*" >> return (const PSigma))
   ret <- term
-  return $ foldr (\t acc -> PLocated t.loc (op t.mode t.name t.ty acc)) ret ns
+  return $ foldr (\(t, l) acc -> PLocated l (op t.mode t.name t.ty acc)) ret ns
 
 -- | Parse an application.
 app :: Parser PTy

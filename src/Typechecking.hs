@@ -69,7 +69,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Tel,
   )
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -862,8 +862,8 @@ defItem n ts ty tm = do
   modify (modifyDefItem (DefGlobal n) (\d -> d {tm = Just stm, vtm = Just vtm}))
   return ()
 
-dataItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
-dataItem n ts ty = do
+dataItem :: (Tc m) => Name -> Set Tag -> Tel (Child m) -> Child m -> m ()
+dataItem n ts te ty = do
   ensureNewName n
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'

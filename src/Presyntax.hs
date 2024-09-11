@@ -1,3 +1,5 @@
+{-# LANGUAGE InstanceSigs #-}
+
 module Presyntax
   ( PTy,
     PPat,
@@ -27,9 +29,11 @@ import Common
     Lit,
     Loc,
     Name (..),
+    Param,
     PiMode (..),
     Spine,
     Tag (..),
+    Tel,
     Times (..),
     arg,
     mode,
@@ -69,6 +73,7 @@ data PCtor = MkPCtor
 
 data PData = MkPData
   { name :: Name,
+    params :: Tel PTy,
     ty :: PTy,
     ctors :: [PCtor],
     tags :: Set Tag
@@ -280,12 +285,13 @@ instance (Monad m) => Pretty m PCtor where
     return $ pts ++ pn ++ " : " ++ pty
 
 instance (Monad m) => Pretty m PData where
-  pretty (MkPData n ty cs ts) = do
+  pretty (MkPData n te ty cs ts) = do
     pts <- pretty ts
     pn <- pretty n
+    pte <- if null te then return "" else (" " ++) <$> pretty te
     pty <- pretty ty
     pcs <- mapM pretty cs
-    return $ pts ++ "data " ++ pn ++ " : " ++ pty ++ " " ++ curlies (intercalate ",\n" pcs)
+    return $ pts ++ "data " ++ pn ++ pte ++ " : " ++ pty ++ " " ++ curlies (intercalate ",\n" pcs)
 
 instance (Monad m) => Pretty m PDef where
   pretty (MkPDef n ty tm ts) = do
