@@ -547,7 +547,7 @@ unelabSig = do
     unelabData :: (Eval m) => Name -> DataGlobalInfo -> Set Tag -> m PData
     unelabData n d ts = do
       sig <- view
-      ty' <- unelabValue [] d.ty
+      ty' <- unelab [] d.ty.body
       te' <- unelabTel [] d.params
       ctors' <-
         mapM

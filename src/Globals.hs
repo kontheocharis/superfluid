@@ -51,7 +51,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set
 import Syntax (STm (..), STy)
-import Value (VTm (..), VTy, Closure)
+import Value (Closure, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { ty :: Closure,
@@ -60,10 +60,10 @@ data CtorGlobalInfo = CtorGlobalInfo
   }
 
 data DataGlobalInfo = DataGlobalInfo
-  { ty :: VTm,
-    params :: Tel STy,
+  { params :: Tel STy,
+    ty :: Closure,
     ctors :: [CtorGlobal],
-    motiveTy :: Maybe VTm,
+    motiveTy :: Maybe Closure,
     elimTy :: Maybe VTm,
     elimTyArity :: [Arg ()] -- might not be set yet
   }

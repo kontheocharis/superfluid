@@ -37,7 +37,7 @@ import Common
     PiMode,
     Spine,
     Times,
-    unLvl,
+    unLvl, Tel,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM

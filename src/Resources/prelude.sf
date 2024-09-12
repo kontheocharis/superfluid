@@ -13,17 +13,17 @@ data Sigma (A : Type, B : A -> Type) : Type {
   pair : (a : A) -> B a -> Sigma A B
 }
 
--- def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
---   \p => case p to (\A B p => A) {
---     (a, b) => a
---   }
--- }
+def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+  \p => case p to (\_ => A) {
+    (a, b) => a
+  }
+}
 
--- def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
---   \p => case p to (\A B p => B (fst p)) {
---     (a, b) => b
---   }
--- }
+def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+\[_] [B] p => case p to (\p => B (fst p)) {
+    (a, b) => b
+  }
+}
 
 -- def id : [A : Type] -> A -> A {
 --   \a => a

@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Typechecking
@@ -408,9 +407,9 @@ bind x ty ctx =
 
 enterTel :: (Tc m) => Tel STy -> m a -> m a
 enterTel Empty f = f
-enterTel (t :<| ts) f = enterTel ts $ do
+enterTel (t :<| ts) f = do
   t' <- evalHere t.ty
-  enterCtx (bind t.name t') f
+  enterCtx (bind t.name t') (enterTel ts f)
 
 insertedBind :: Name -> VTy -> Ctx -> Ctx
 insertedBind = bind
@@ -819,9 +818,11 @@ caseOf mode s r cs = do
       d <- ifIsData ssTy return (tcError $ InvalidCaseSubject ss ssTy)
       di <- access (getDataGlobal d)
       let motive = fromJust di.motiveTy
+      freshArgsForParams <- replicateM (length di.params) (freshMeta >>= evalHere)
+      motiveApplied <- motive $$ freshArgsForParams
       rr <- case r of
-        Just r' -> fst <$> r' (Check motive)
-        Nothing -> constLamsForPis motive ty
+        Just r' -> fst <$> r' (Check motiveApplied)
+        Nothing -> constLamsForPis motiveApplied ty
       vrr <- evalHere rr
       scs <- caseClauses di cs $ \vp sp pTy t -> do
         let pTySp = vGetSpine pTy
@@ -884,11 +885,14 @@ dataItem n ts te ty = do
   ensureNewName n
   te' <- tel te
   pretty te' >>= traceM
-  (ty', _) <- ty (Check VU)
-  vty <- evalHere ty'
-  i <- getLvl >>= (`isTypeFamily` vty)
-  unless i (tcError $ InvalidDataFamily vty)
-  modify (addItem n (DataInfo (DataGlobalInfo vty te' [] Nothing Nothing [])) ts)
+  ty' <- enterTel te' $ do
+    (ty', _) <- ty (Check VU)
+    vty <- evalHere ty'
+    i <- getLvl >>= (`isTypeFamily` vty)
+    unless i (tcError $ InvalidDataFamily vty)
+    return ty'
+  cty <- closeHere (length te') ty'
+  modify (addItem n (DataInfo (DataGlobalInfo te' cty [] Nothing Nothing [])) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
@@ -910,18 +914,18 @@ endDataItem dat = do
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
   di <- access (getDataGlobal dat)
-  enterTel di.params $ do
-    traceM "HERE"
-    getCtx >>= pretty >>= traceM
+  idx <- access (\s -> length (getDataGlobal dat s).ctors)
+  ty' <- enterTel di.params $ do
     ensureNewName n
-    idx <- access (\s -> length (getDataGlobal dat s).ctors)
     (ty', _) <- ty (Check VU)
+    pretty ty' >>= traceM
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
-    cty <- closeHere (length di.params) ty'
     unless i (tcError $ InvalidCtorType ty')
-    modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat)) ts)
-    modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
+    return ty'
+  cty <- closeHere (length di.params) ty'
+  modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat)) ts)
+  modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
 primItem n ts ty = do
@@ -944,7 +948,7 @@ reprItem getGlob addGlob ts r = do
   modify (addGlob vr ts)
 
 reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
-reprDataItem dat = reprItem (access (getDataGlobal dat) >>= \d -> return d.ty) (addDataRepr dat)
+reprDataItem dat = reprItem (access (getDataGlobal dat) >>= \d -> snd <$> globalInfoToTm dat.globalName (DataInfo d)) (addDataRepr dat)
 
 reprCtorItem :: (Tc m) => CtorGlobal -> Set Tag -> Child m -> m ()
 reprCtorItem ctor = reprItem (access (getCtorGlobal ctor) >>= \d -> snd <$> globalInfoToTm ctor.globalName (CtorInfo d)) (addCtorRepr ctor)
@@ -977,13 +981,13 @@ telWithNames = do
           Name _ -> return (Param m n a)
     )
 
-buildElimTy :: (Tc m) => DataGlobal -> m (VTy, VTy, [Arg ()])
+buildElimTy :: (Tc m) => DataGlobal -> m (Closure, VTy, [Arg ()])
 buildElimTy dat = do
   datInfo <- access (getDataGlobal dat)
 
   let sTyParams = datInfo.params
 
-  sTy <- quoteHere datInfo.ty
+  let sTy = datInfo.ty.body
   let (sTyIndices, _) = sGatherPis sTy
   sTyIndicesBinds <- telWithNames sTyIndices
   let spToData i = sAppSpine (SGlobal (DataGlob dat)) (spineForTel i sTyParams >< spineForTel i sTyIndicesBinds)
@@ -1019,7 +1023,7 @@ buildElimTy dat = do
           (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
 
   elimTy' <- evalHere elimTy
-  motiveTy' <- evalHere motiveTy
+  motiveTy' <- closeHere (length datInfo.params) motiveTy
   return (motiveTy', elimTy', map (\p -> Arg p.mode ()) (toList sTyIndicesBinds))
   where
     ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
@@ -1041,7 +1045,9 @@ buildElimTy dat = do
 globalInfoToTm :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
 globalInfoToTm n i = case i of
   DefInfo d -> return (SGlobal (DefGlob (DefGlobal n)), d.ty)
-  DataInfo d -> return (SGlobal (DataGlob (DataGlobal n)), d.ty)
+  DataInfo d -> do
+    ty' <- evalHere $ sPis d.params d.ty.body
+    return (SGlobal (DataGlob (DataGlobal n)), ty')
   CtorInfo c -> do
     di <- access (getDataGlobal c.dataGlobal)
     metas <- replicateM (length di.params) (freshMeta >>= evalHere)
