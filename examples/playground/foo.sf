@@ -1,3 +1,9 @@
+def fin-to-nat : [n : Nat] -> Fin n -> Nat {
+  \f => case f {
+    fz => z,
+    fs f' => ?h2,
+  }
+}
 
 -- data Vec : Type -> Nat -> Type {
 --   vnil : [A : Type] -> Vec A z,

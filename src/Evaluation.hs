@@ -539,6 +539,9 @@ unelabTel ns (Param m n a :<| tel) = do
   tel' <- unelabTel (n : ns) tel
   return $ Param m n a' :<| tel'
 
+telNames :: Tel a -> [Name]
+telNames = reverse . toList . fmap (\p -> p.name)
+
 unelabSig :: (Eval m) => m PProgram
 unelabSig = do
   s <- view
@@ -547,15 +550,15 @@ unelabSig = do
     unelabData :: (Eval m) => Name -> DataGlobalInfo -> Set Tag -> m PData
     unelabData n d ts = do
       sig <- view
-      ty' <- unelab [] d.ty.body
       te' <- unelabTel [] d.params
+      ty' <- unelab (telNames d.params) d.ty.body
       ctors' <-
         mapM
           ( \n' ->
               unelabCtor
                 n'.globalName
                 (getCtorGlobal n' sig)
-                (reverse . toList $ fmap (\p -> p.name) d.params)
+                (telNames d.params)
                 (getGlobalTags n'.globalName sig)
           )
           d.ctors
