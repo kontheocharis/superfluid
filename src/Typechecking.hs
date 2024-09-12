@@ -740,8 +740,10 @@ checkByInfer t ty = do
 pat :: (Tc m) => InPat -> m VTy -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
 pat inPt wideTyM pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
   (p', t, ns) <- enterPat inPt $ do
+    (p', t') <- pt Infer >>= insert
     wideTy <- wideTyM
-    (p', t') <- pt (Check wideTy) >>= insert
+    unifyHere t' wideTy
+
     ns <- inPatNames <$> inPat
     runInsidePatScope (SPat p' ns) t'
     return (p', t', ns)
@@ -812,7 +814,7 @@ caseOf mode s r cs = do
         Nothing -> constLamsForPis motiveApplied ty
       vrr <- evalHere rr
       scs <- caseClauses di wideTyM cs $ \vp sp pTy t -> do
-        let pTySp = vGetSpine pTy
+        let pTySp = S.drop (length di.params) $ vGetSpine pTy
         branchTy <- vApp vrr (pTySp S.:|> Arg Explicit vp.vPat)
         (st, _) <- t (Check branchTy)
         return $ Possible sp st
