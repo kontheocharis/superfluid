@@ -44,36 +44,7 @@ module Typechecking
 where
 
 import Algebra.Lattice (Lattice (..), (/\))
-import Common
-  ( Arg (Arg, mode),
-    Clause,
-    CtorGlobal (..),
-    DataGlobal (..),
-    DefGlobal (DefGlobal),
-    Glob (CtorGlob, DataGlob, DefGlob, PrimGlob),
-    Has (..),
-    HasNameSupply (uniqueName),
-    HasProjectFiles,
-    Idx (..),
-    Lit (..),
-    Loc,
-    Lvl (..),
-    MetaVar,
-    Name (Name),
-    Param (..),
-    PiMode (..),
-    PrimGlobal (..),
-    Spine,
-    Tag,
-    Tel,
-    Times (Finite),
-    inv,
-    lvlToIdx,
-    nextLvl,
-    nextLvls,
-    pattern Impossible,
-    pattern Possible,
-  )
+import Common (Arg (..), Clause, CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (CtorGlob, DataGlob, DefGlob, PrimGlob), Has (..), HasNameSupply (uniqueName), HasProjectFiles, Idx (..), Lit (..), Loc, Lvl (..), MetaVar, Name (Name), Param (..), PiMode (..), PrimGlobal (..), Spine, Tag, Tel, Times (Finite), inv, lvlToIdx, nextLvl, nextLvls, pattern Impossible, pattern Possible)
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless, (>=>))
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
@@ -154,7 +125,6 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
-import Common (Arg(..))
 
 data TcError
   = Mismatch [UnifyError]
@@ -901,7 +871,6 @@ dataItem :: (Tc m) => Name -> Set Tag -> Tel (Child m) -> Child m -> m ()
 dataItem n ts te ty = do
   ensureNewName n
   te' <- tel te
-  pretty te' >>= traceM
   ty' <- enterTel te' $ do
     (ty', _) <- ty (Check VU)
     vty <- evalHere ty'
@@ -925,8 +894,6 @@ endDataItem dat = do
               }
         )
     )
-  elimTy' <- pretty elimTy
-  traceM $ "Eliminator type is " ++ elimTy'
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
@@ -935,7 +902,6 @@ ctorItem dat n ts ty = do
   ty' <- enterTel di.params $ do
     ensureNewName n
     (ty', _) <- ty (Check VU)
-    pretty ty' >>= traceM
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
     unless i (tcError $ InvalidCtorType ty')
@@ -1000,53 +966,52 @@ telWithNames = do
 
 buildElimTy :: (Tc m) => DataGlobal -> m (Closure, VTy, [Arg ()])
 buildElimTy dat = do
+  -- @@Cleanup: this is a fucking mess, ideally should hide all the index acrobatics..
+
   datInfo <- access (getDataGlobal dat)
 
   let sTyParams = datInfo.params
-
   let sTy = datInfo.ty.body
   let (sTyIndices, _) = sGatherPis sTy
   sTyIndicesBinds <- telWithNames sTyIndices
-  let spToData i = sAppSpine (SGlobal (DataGlob dat)) (spineForTel i sTyParams >< spineForTel i sTyIndicesBinds)
-
-  let distFromMotiveToMethod i = i + length sTyIndicesBinds + 1
-  let subjSpToData = spToData 0
-  let distFromTyBindsToRet = length datInfo.ctors + 1
-  let retSp = spineForTel distFromTyBindsToRet sTyIndicesBinds
+  let spToData i j = sAppSpine (SGlobal (DataGlob dat)) (spineForTel i sTyParams >< spineForTel j sTyIndicesBinds)
 
   motiveSubjName <- uniqueName
   elimTyName <- uniqueName
   subjectTyName <- uniqueName
 
-  let motiveTy = sPis (sTyIndicesBinds :|> Param Explicit motiveSubjName subjSpToData) SU
-  methodTys <- mapM ctorMethodTy datInfo.ctors
+  let motiveTy = sPis (sTyIndicesBinds :|> Param Explicit motiveSubjName (spToData (length sTyIndicesBinds) 0)) SU
+  methodTys <- mapM (ctorMethodTy (length sTyParams)) datInfo.ctors
+
+  let subjSpToData = spToData (length sTyIndicesBinds + length methodTys + 1) 0
 
   let elimTy =
         sPis
-          ( ( ( (sTyParams :|> Param Explicit elimTyName motiveTy)
-                  >< sTyIndicesBinds
-              )
-                :|> Param Explicit subjectTyName subjSpToData
-            )
-              >< S.fromList
-                ( zipWith
-                    ( \i (methodTy, methodName) ->
-                        Param Explicit methodName (methodTy (distFromMotiveToMethod i))
-                    )
-                    [0 ..]
-                    methodTys
-                )
+          ( foldr
+              (><)
+              Empty
+              [ sTyParams,
+                S.singleton (Param Explicit elimTyName motiveTy),
+                S.fromList
+                  ( zipWith
+                      (\i (methodTy, methodName) -> Param Explicit methodName (methodTy i))
+                      [0 ..]
+                      methodTys
+                  ),
+                sTyIndicesBinds,
+                S.singleton (Param Explicit subjectTyName subjSpToData)
+              ]
           )
-          (sAppSpine (SVar (Idx (distFromMotiveToMethod (length methodTys)))) (retSp S.|> Arg Explicit (SVar (Idx (length methodTys)))))
+          (sAppSpine (SVar (Idx (1 + length sTyIndicesBinds + length methodTys))) (spineForTel 1 sTyIndicesBinds S.|> Arg Explicit (SVar (Idx 0))))
 
   elimTy' <- evalHere elimTy
   motiveTy' <- closeHere (length datInfo.params) motiveTy
   return (motiveTy', elimTy', map (\p -> Arg p.mode ()) (toList sTyIndicesBinds))
   where
-    ctorMethodTy :: (Tc m) => CtorGlobal -> m (Int -> STy, Name)
-    ctorMethodTy ctor = do
+    ctorMethodTy :: (Tc m) => Int -> CtorGlobal -> m (Int -> STy, Name)
+    ctorMethodTy sTyParamLen ctor = do
       ctorInfo <- access (getCtorGlobal ctor)
-      let sTy = ctorInfo.ty.body
+      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) (reverse [0 .. sTyParamLen - 1])) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
       let (sTyBinds', sTyRet) = sGatherPis sTy
       sTyBinds <- telWithNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet
@@ -1056,7 +1021,7 @@ buildElimTy dat = do
         let methodRetTy =
               sAppSpine
                 (SVar (Idx (sMotiveIdx + length sTyBinds)))
-                (sTyRetSp S.|> Arg Explicit spToCtor)
+                (S.drop sTyParamLen sTyRetSp S.|> Arg Explicit spToCtor)
          in sPis sTyBinds methodRetTy
 
 globalInfoToTm :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)

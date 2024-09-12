@@ -252,7 +252,7 @@ instance (Monad m) => Pretty m PTm where
       Just r' -> do
         pr' <- singlePretty r'
         return $ " to " ++ pr'
-    return $ "case " ++ pt ++ pr ++ " " ++ curlies pcs ++ pr
+    return $ "case " ++ pt ++ pr ++ " " ++ curlies pcs
   pretty (PLambdaCase r cs) = do
     pcs <- pretty cs
     pr <- case r of

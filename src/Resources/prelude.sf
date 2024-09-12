@@ -183,18 +183,18 @@ def debug-print : [A : Type] -> A -> IO Unit {
   \a => js-console-log (to-js a)
 }
 
-data Maybe : Type -> Type {
-  nothing : [A : Type] -> Maybe A,
-  just : [A : Type] -> A -> Maybe A
+data Maybe (A : Type) : Type {
+  nothing : Maybe A,
+  just : A -> Maybe A
 }
 
-data Either : Type -> Type -> Type {
-  left : [A : Type, B : Type] -> A -> Either A B,
-  right : [A : Type, B : Type] -> B -> Either A B
+data Either (L : Type) (R : Type) : Type {
+  left : L -> Either L R,
+  right : R -> Either L R
 }
 
-data Equal : [A : Type] -> A -> A -> Type {
-  refl : [A : Type] -> [x : A] -> Equal x x
+data Equal [A : Type] : A -> A -> Type {
+  refl : [x : A] -> Equal x x
 }
 
 data Nat : Type {
@@ -202,9 +202,9 @@ data Nat : Type {
   s : Nat -> Nat
 }
 
-data List : Type -> Type {
-  nil : [A : Type] -> List A,
-  cons : [A : Type] -> A -> List A -> List A
+data List (A : Type) : Type {
+  nil : List A,
+  cons : A -> List A -> List A
 }
 
 data Fin : Nat -> Type {
@@ -218,9 +218,9 @@ def void : [A : Type] -> Empty -> A {
   \m => case m {}
 }
 
-data Dec : Type -> Type {
-  yes : [A : Type] -> A -> Dec A,
-  no : [A : Type] -> (A -> Empty) -> Dec A
+data Dec (A : Type) : Type {
+  yes : A -> Dec A,
+  no : (A -> Empty) -> Dec A
 }
 
 def add : Nat -> Nat -> Nat {
