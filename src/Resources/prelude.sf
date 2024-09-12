@@ -13,17 +13,21 @@ data Sigma (A : Type, B : A -> Type) : Type {
   pair : (a : A) -> B a -> Sigma A B
 }
 
-def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
-  \p => case p to (\_ => A) {
-    (a, b) => a
-  }
+def dup : [A : Type] -> A -> A * A {
+  \a => (a, a)
 }
 
-def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
-\[_] [B] p => case p to (\p => B (fst p)) {
-    (a, b) => b
-  }
-}
+-- def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+--   \p => case p {
+--     (a, b) => a
+--   }
+-- }
+
+-- def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+-- \[_] [B] p => case p to (\p => B (fst p)) {
+--     (a, b) => b
+--   }
+-- }
 
 -- def id : [A : Type] -> A -> A {
 --   \a => a
@@ -281,50 +285,50 @@ def not : Bool -> Bool {
   }
 }
 
-def fin-to-nat : [n : Nat] -> Fin n -> Nat {
-  \f => case f {
-    fz => z,
-    fs f' => s (fin-to-nat f'),
-  }
-}
+-- def fin-to-nat : [n : Nat] -> Fin n -> Nat {
+--   \f => case f {
+--     fz => z,
+--     fs f' => s (fin-to-nat f'),
+--   }
+-- }
 
-def fin-is-even : [n : Nat] -> Fin n -> Bool {
-  \x => case x {
-    fz => true,
-    fs x => case x {
-      fz => false,
-      fs y => fin-is-even y
-    }
-  }
-}
+-- def fin-is-even : [n : Nat] -> Fin n -> Bool {
+--   \x => case x {
+--     fz => true,
+--     fs x => case x {
+--       fz => false,
+--       fs y => fin-is-even y
+--     }
+--   }
+-- }
 
-def upgrade : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add (s i) n) {
-  ?upgrade
-}
+-- def upgrade : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add (s i) n) {
+--   ?upgrade
+-- }
 
-def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
-  \a b => case a {
-    fz => case b {
-      fz => true,
-      fs y => false
-    },
-    fs x => case b {
-      fz => false,
-      fs y => fin-eq x y
-    }
-  }
-}
+-- def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
+--   \a b => case a {
+--     fz => case b {
+--       fz => true,
+--       fs y => false
+--     },
+--     fs x => case b {
+--       fz => false,
+--       fs y => fin-eq x y
+--     }
+--   }
+-- }
 
-def length : [A : Type] -> List A -> Nat {
-  \xs => case xs {
-    nil => z,
-    cons _ xs' => s (length xs'),
-  }
-}
+-- def length : [A : Type] -> List A -> Nat {
+--   \xs => case xs {
+--     nil => z,
+--     cons _ xs' => s (length xs'),
+--   }
+-- }
 
-def type : [A : Type] -> A -> Type {
-  \[A] _ => A
-}
+-- def type : [A : Type] -> A -> Type {
+--   \[A] _ => A
+-- }
 
 -- def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
 --   \[A] [B] f xs => {

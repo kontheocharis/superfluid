@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -74,7 +75,7 @@ import Common
     pattern Possible,
   )
 import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless)
+import Control.Monad (replicateM, unless, (>=>))
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -153,6 +154,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Common (Arg(..))
 
 data TcError
   = Mismatch [UnifyError]
@@ -765,10 +767,11 @@ checkByInfer t ty = do
   unifyHere ty ty'
   return (t', ty)
 
-pat :: (Tc m) => InPat -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
-pat inPt pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
+pat :: (Tc m) => InPat -> m VTy -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
+pat inPt wideTyM pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
   (p', t, ns) <- enterPat inPt $ do
-    (p', t') <- pt Infer >>= insert
+    wideTy <- wideTyM
+    (p', t') <- pt (Check wideTy) >>= insert
     ns <- inPatNames <$> inPat
     runInsidePatScope (SPat p' ns) t'
     return (p', t', ns)
@@ -787,13 +790,13 @@ mzip [] (b : bs) = (empty, b) : mzip [] bs
 mzip (a : as) [] = (a, empty) : mzip as []
 mzip _ _ = []
 
-caseClauses :: (Tc m) => DataGlobalInfo -> [Clause (Child m) (Child m)] -> (VPatB -> SPat -> VTy -> Child m -> m a) -> m [a]
-caseClauses di cs f = do
+caseClauses :: (Tc m) => DataGlobalInfo -> m VTy -> [Clause (Child m) (Child m)] -> (VPatB -> SPat -> VTy -> Child m -> m a) -> m [a]
+caseClauses di wideTyM cs f = do
   mapM
     ( \case
         (_, Just (Impossible _)) -> tcError ImpossibleCasesNotSupported
         (c, Just (Possible p t)) -> do
-          pat (InPossiblePat []) p (const . const $ return ()) $ \sp pTy -> do
+          pat (InPossiblePat []) wideTyM p (const . const $ return ()) $ \sp pTy -> do
             vp <- evalPatHere sp
             case c of
               Just c' -> do
@@ -806,6 +809,21 @@ caseClauses di cs f = do
     )
     (mzip (map Just di.ctors) (map Just cs))
 
+ensureDataAndGetWide :: (Tc m) => VTy -> (forall a. m a) -> m (DataGlobal, Spine VTm, m VTy)
+ensureDataAndGetWide ssTy =
+  ifIsData
+    ssTy
+    ( \d sp -> do
+        di <- access (getDataGlobal d)
+        let paramSp = S.take (length di.params) sp
+        let rest =
+              VNeu . VApp (VGlobal (DataGlob d)) . (paramSp ><)
+                <$> traverse
+                  (traverse (\_ -> freshMeta >>= evalHere))
+                  (S.drop (length di.params) sp)
+        return (d, paramSp, rest)
+    )
+
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
   forbidPat
@@ -815,16 +833,15 @@ caseOf mode s r cs = do
       caseOf (Check retTy) s r cs
     Check ty -> do
       (ss, ssTy) <- s Infer
-      d <- ifIsData ssTy return (tcError $ InvalidCaseSubject ss ssTy)
+      (d, paramSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
       di <- access (getDataGlobal d)
       let motive = fromJust di.motiveTy
-      freshArgsForParams <- replicateM (length di.params) (freshMeta >>= evalHere)
-      motiveApplied <- motive $$ freshArgsForParams
+      motiveApplied <- motive $$ map (\a -> a.arg) (toList paramSp)
       rr <- case r of
         Just r' -> fst <$> r' (Check motiveApplied)
         Nothing -> constLamsForPis motiveApplied ty
       vrr <- evalHere rr
-      scs <- caseClauses di cs $ \vp sp pTy t -> do
+      scs <- caseClauses di wideTyM cs $ \vp sp pTy t -> do
         let pTySp = vGetSpine pTy
         branchTy <- vApp vrr (pTySp S.:|> Arg Explicit vp.vPat)
         (st, _) <- t (Check branchTy)

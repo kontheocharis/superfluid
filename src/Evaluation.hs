@@ -445,11 +445,11 @@ isCtorTy l d t = do
     (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
     _ -> return False
 
-ifIsData :: (Eval m) => VTy -> (DataGlobal -> m a) -> m a -> m a
+ifIsData :: (Eval m) => VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
 ifIsData v a b = do
   v' <- force v >>= unfoldDefs
   case v' of
-    VGlob (DataGlob g@(DataGlobal _)) _ -> a g
+    VGlob (DataGlob g@(DataGlobal _)) sp -> a g sp
     _ -> b
 
 ensureIsCtor :: (Eval m) => VTm -> CtorGlobal -> m () -> m ()
