@@ -117,7 +117,7 @@ class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
 infixl 8 $$
 
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
-Closure _ env t $$ us = eval (us ++ env) t
+Closure _ env t $$ us = eval (reverse us ++ env) t
 
 vAppNeu :: VNeu -> Spine VTm -> VTm
 vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
@@ -151,7 +151,7 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) ps)) (VNeu (VApp (VGlobal
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
             env <- vMatch p x
-            return $ env ++ acc
+            return $ acc ++ env
         )
         []
         (S.zip ps xs)

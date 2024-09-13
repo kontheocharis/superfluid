@@ -46,7 +46,7 @@ where
 import Algebra.Lattice (Lattice (..), (/\))
 import Common (Arg (..), Clause, CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (CtorGlob, DataGlob, DefGlob, PrimGlob), Has (..), HasNameSupply (uniqueName), HasProjectFiles, Idx (..), Lit (..), Loc, Lvl (..), MetaVar, Name (Name), Param (..), PiMode (..), PrimGlobal (..), Spine, Tag, Tel, Times (Finite), inv, lvlToIdx, nextLvl, nextLvls, pattern Impossible, pattern Possible)
 import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless, (>=>))
+import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -60,7 +60,6 @@ import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -125,6 +124,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Debug.Trace (traceM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1013,7 +1013,7 @@ buildElimTy dat = do
     ctorMethodTy :: (Tc m) => Int -> CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy sTyParamLen ctor = do
       ctorInfo <- access (getCtorGlobal ctor)
-      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) (reverse [0 .. sTyParamLen - 1])) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
+      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) ([0 .. sTyParamLen - 1])) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
       let (sTyBinds', sTyRet) = sGatherPis sTy
       sTyBinds <- telWithNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet

@@ -17,28 +17,28 @@ def dup : [A : Type] -> A -> A * A {
   \a => (a, a)
 }
 
--- def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
---   \p => case p {
---     (a, b) => a
---   }
--- }
+def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+  \p => case p {
+    (a, b) => a
+  }
+}
 
--- def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
--- \[_] [B] p => case p to (\p => B (fst p)) {
---     (a, b) => b
---   }
--- }
+def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+  \[_] [B] p => case p to (\p => B (fst p)) {
+    (a, b) => b
+  }
+}
 
--- def id : [A : Type] -> A -> A {
---   \a => a
--- }
+def id : [A : Type] -> A -> A {
+  \a => a
+}
 
--- def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
---   \[A] b t f => case b {
---     true => t tt,
---     false => f tt
---   }
--- }
+def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+  \[A] b t f => case b {
+    true => t tt,
+    false => f tt
+  }
+}
 
 prim conjure : [A : Type] -> A
 
@@ -364,61 +364,61 @@ def index : [A : Type] -> Nat -> List A -> Maybe A {
   }
 }
 
--- def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
---   \P e p => case e to (\x y _ => P y) {
---     refl => p
---   }
--- }
+def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
+  \P e => case e to (\x y _ => P x -> P y) {
+    refl => id
+  }
+}
 
--- def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
---   \f e => case e {
---     refl => refl
---   }
--- }
+def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
+  \f e => case e to (\x y _ => Equal (f x) (f y)) {
+    refl => refl
+  }
+}
 
--- def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
---   \e => case e {
---     refl => refl
---   }
--- }
+def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
+  \e => case e to (\x y _ => Equal y x) {
+    refl => refl
+  }
+}
 
--- def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
---   \p => subst [Nat] (\n => case n {
---     z => Unit,
---     s _ => Empty,
---   }) p tt
--- }
+def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
+  \p => subst [Nat] (\n => case n {
+    z => Unit,
+    s _ => Empty,
+  }) p tt
+}
 
--- def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
---   \m p => m (sym p)
--- }
+def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
+  \m p => m (sym p)
+}
 
--- -- @@Fixme : this can prove that any f : A -> B is injective!!
--- def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
---   \e => case e {
---     refl => refl
---   }
--- }
+def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
+  \e => subst [Nat] (\x => Equal n (case x {
+    z => n,
+    s k => k
+  })) e refl
+}
 
--- def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
---   \m p => m (s-inj p)
--- }
+def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
+  \m p => m (s-inj p)
+}
 
--- def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
---   \n m => case n {
---     z => case m {
---       z => yes refl,
---       s m' => no z-neq-s,
---     },
---     s n' => case m {
---       z => no (co-sym z-neq-s),
---       s m' => case nat-eq n' m' {
---         yes e => yes (cong s e),
---         no f => no (s-co-cong f)
---       }
---     }
---   }
--- }
+def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
+  \n m => case n to (\n => Dec (Equal n m)) {
+    z => case m to (\m => Dec (Equal z m)) {
+      z => yes refl,
+      s m' => no z-neq-s,
+    },
+    s n' => case m to (\m => Dec (Equal (s n') m)) {
+      z => no (co-sym z-neq-s),
+      s m' => case nat-eq n' m' to (\e => Dec (Equal (s n') (s m'))) {
+        yes e => yes (cong s e),
+        no f => no (s-co-cong f)
+      }
+    }
+  }
+}
 
 -- -- Default representations
 -- repr data Bool as JS {
