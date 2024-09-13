@@ -47,7 +47,7 @@ data STm
   | SApp PiMode STm STm
   | SCase DataGlobal STm STm [Clause SPat STm]
   | SU
-  | SGlobal Glob
+  | SGlobal Glob [STm]
   | SVar Idx
   | SLit (Lit STm)
   | SRepr Times STm

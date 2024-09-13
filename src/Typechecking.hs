@@ -789,7 +789,7 @@ ensureDataAndGetWide ssTy =
         let paramSp = S.take (length di.params) sp
         let indexSp = S.drop (length di.params) sp
         let rest =
-              VNeu . VApp (VGlobal (DataGlob d)) . (paramSp ><)
+              VNeu . VApp (VGlobal (DataGlob d) []) . (paramSp ><)
                 <$> traverse
                   (traverse (\_ -> freshMeta >>= evalHere))
                   (S.drop (length di.params) sp)
@@ -979,7 +979,7 @@ buildElimTy dat = do
   let sTy = datInfo.ty.body
   let (sTyIndices, _) = sGatherPis sTy
   sTyIndicesBinds <- telWithNames sTyIndices
-  let spToData i j = sAppSpine (SGlobal (DataGlob dat)) (spineForTel i sTyParams >< spineForTel j sTyIndicesBinds)
+  let spToData i j = sAppSpine (SGlobal (DataGlob dat) []) (spineForTel i sTyParams >< spineForTel j sTyIndicesBinds)
 
   motiveSubjName <- uniqueName
   elimTyName <- uniqueName
@@ -1020,7 +1020,16 @@ buildElimTy dat = do
       let (sTyBinds', sTyRet) = sGatherPis sTy
       sTyBinds <- telWithNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet
-      let spToCtor = sAppSpine (SGlobal (CtorGlob ctor)) (spineForTel 0 sTyBinds)
+
+      let spToCtor =
+            sAppSpine
+              ( SGlobal
+                  (CtorGlob ctor)
+                  ( toList . fmap (\a -> a.arg) $
+                      S.take sTyParamLen sTyRetSp
+                  )
+              )
+              (spineForTel 0 sTyBinds)
       n <- uniqueName
       return . (,n) $ \sMotiveIdx ->
         let methodRetTy =
@@ -1031,16 +1040,17 @@ buildElimTy dat = do
 
 globalInfoToTm :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
 globalInfoToTm n i = case i of
-  DefInfo d -> return (SGlobal (DefGlob (DefGlobal n)), d.ty)
+  DefInfo d -> return (SGlobal (DefGlob (DefGlobal n)) [], d.ty)
   DataInfo d -> do
     ty' <- evalHere $ sPis d.params d.ty.body
-    return (SGlobal (DataGlob (DataGlobal n)), ty')
+    return (SGlobal (DataGlob (DataGlobal n)) [], ty')
   CtorInfo c -> do
     di <- access (getDataGlobal c.dataGlobal)
-    metas <- replicateM (length di.params) (freshMeta >>= evalHere)
-    ty' <- c.ty $$ metas
-    return (SGlobal (CtorGlob (CtorGlobal n)), ty')
-  PrimInfo p -> return (SGlobal (PrimGlob (PrimGlobal n)), p.ty)
+    metas <- replicateM (length di.params) freshMeta
+    vmetas <- mapM evalHere metas
+    ty' <- c.ty $$ vmetas
+    return (SGlobal (CtorGlob (CtorGlobal n)) metas, ty')
+  PrimInfo p -> return (SGlobal (PrimGlob (PrimGlobal n)) [], p.ty)
 
 data UnifyError
   = DifferentSpineLengths (Spine VTm) (Spine VTm)
@@ -1196,7 +1206,9 @@ rename m pren tm = do
       b' <- renameClosure m pren b
       return $ SPi i x a' b'
     VU -> return SU
-    VNeu (VApp (VGlobal g) sp) -> renameSp m pren (SGlobal g) sp
+    VNeu (VApp (VGlobal g pp) sp) -> do
+      pp' <- mapM (rename m pren) pp
+      renameSp m pren (SGlobal g pp') sp
     VLit l -> SLit <$> traverse (rename m pren) l
 
 unifySpines :: (Tc m) => Spine VTm -> Spine VTm -> m CanUnify

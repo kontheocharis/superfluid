@@ -146,7 +146,7 @@ vLams (Arg m x :<| sp) t = do
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
-vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) ps)) (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c'))) xs))
+vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) _) ps)) (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c')) _) xs))
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -224,7 +224,7 @@ vRepr _ m (VLam e v t) = do
   return $ VLam e v t'
 vRepr _ _ VU = return VU
 vRepr _ _ (VLit i) = return $ VLit i
-vRepr l m (VNeu n@(VApp (VGlobal g) sp)) = do
+vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
   g' <- access (getGlobalRepr g)
   case g' of
     Just g'' -> do
@@ -273,8 +273,9 @@ evalPat env pat = do
   where
     evalPat' :: (Eval m) => Env VTm -> STm -> StateT Int m VTm
     evalPat' e pat' = case pat' of
-      (SGlobal (CtorGlob (CtorGlobal c))) -> do
-        return $ VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c))) Empty)
+      (SGlobal (CtorGlob (CtorGlobal c)) pp) -> do
+        pp' <- mapM (lift . eval e) pp
+        return $ VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) pp') Empty)
       (SApp m a b) -> do
         a' <- evalPat' e a
         b' <- evalPat' e b
@@ -310,7 +311,7 @@ eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
-eval _ (SGlobal g) = do
+eval _ (SGlobal g _) = do
   return $ VGl g
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
@@ -346,7 +347,7 @@ force v = return v
 
 unfoldDefs :: (Eval m) => VTm -> m VTm
 unfoldDefs s = case s of
-  VNeu (VApp (VGlobal (DefGlob g)) sp) -> do
+  VNeu (VApp (VGlobal (DefGlob g) _) sp) -> do
     g' <- access (unfoldDef g)
     case g' of
       Just t -> vApp t sp >>= unfoldDefs
@@ -360,10 +361,12 @@ quoteSpine l t (sp :|> Arg m u) = do
   u' <- quote l u
   return $ SApp m t' u'
 
-quoteHead :: Lvl -> VHead -> STm
-quoteHead _ (VFlex m) = SMeta m []
-quoteHead l (VRigid l') = SVar (lvlToIdx l l')
-quoteHead _ (VGlobal g) = SGlobal g
+quoteHead :: (Eval m) => Lvl -> VHead -> m STm
+quoteHead _ (VFlex m) = return $ SMeta m []
+quoteHead l (VRigid l') = return $ SVar (lvlToIdx l l')
+quoteHead l (VGlobal g pp) = do
+  pp' <- mapM (quote l) pp
+  return $ SGlobal g pp'
 
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
@@ -378,16 +381,21 @@ quotePat l p = do
     quotePat' :: (Eval m) => Lvl -> VTm -> m STm
     quotePat' l' (VNeu (VApp vh sp)) = do
       sp' <- mapSpineM (quotePat' l') sp
-      return $ sAppSpine (quotePatHead l' vh) sp'
+      vh' <- quotePatHead l' vh
+      return $ sAppSpine vh' sp'
     quotePat' _ _ = error "impossible"
-    quotePatHead :: Lvl -> VHead -> STm
+    quotePatHead :: (Eval m) => Lvl -> VHead -> m STm
     quotePatHead _ (VFlex _) = error "impossible"
-    quotePatHead _ (VRigid _) = SVar (Idx 0)
-    quotePatHead _ (VGlobal g) = SGlobal g
+    quotePatHead _ (VRigid _) = return $ SVar (Idx 0)
+    quotePatHead _ (VGlobal g pp) = do
+      pp' <- mapM (quote l) pp
+      return $ SGlobal g pp'
 
 quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
 quoteNeu l vt = case vt of
-  (VApp h sp) -> quoteSpine l (quoteHead l h) sp
+  (VApp h sp) -> do
+    h' <- quoteHead l h
+    quoteSpine l h' sp
   (VReprApp m v sp) -> do
     v' <- quoteNeu l v
     quoteSpine l (SRepr m v') sp
@@ -442,7 +450,7 @@ isCtorTy l d t = do
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
-    (VNeu (VApp (VGlobal (DataGlob d')) _)) -> return $ d == d'
+    (VNeu (VApp (VGlobal (DataGlob d') _) _)) -> return $ d == d'
     _ -> return False
 
 ifIsData :: (Eval m) => VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
@@ -456,7 +464,7 @@ ensureIsCtor :: (Eval m) => VTm -> CtorGlobal -> m () -> m ()
 ensureIsCtor v c a = do
   v' <- force v >>= unfoldDefs
   case v' of
-    VNeu (VApp (VGlobal (CtorGlob c')) _) | c == c' -> return ()
+    VNeu (VApp (VGlobal (CtorGlob c') _) _) | c == c' -> return ()
     _ -> a
 
 unelabMeta :: (Eval m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
@@ -485,7 +493,7 @@ unelabPat _ pat = do
   where
     unelabPat' :: (HasMetas m) => STm -> StateT [Name] m PTm
     unelabPat' pat' = case pat' of
-      (SGlobal (CtorGlob (CtorGlobal c))) -> do
+      (SGlobal (CtorGlob (CtorGlobal c)) _) -> do
         return $ PName c
       (SApp m a b) -> do
         a' <- unelabPat' a
@@ -528,7 +536,7 @@ unelab ns = \case
         )
         cs
   SU -> return PU
-  (SGlobal g) -> return $ PName (globName g)
+  (SGlobal g _) -> return $ PName (globName g)
   (SLit l) -> PLit <$> traverse (unelab ns) l
   (SRepr m t) -> PRepr m <$> unelab ns t
 

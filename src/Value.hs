@@ -36,8 +36,9 @@ import Common
     Name,
     PiMode,
     Spine,
+    Tel,
     Times,
-    unLvl, Tel,
+    unLvl,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -87,7 +88,8 @@ type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
 
-data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob deriving (Show, Eq)
+-- The spine in global is just for constructor params!
+data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob [VTm] deriving (Show)
 
 data VNeu
   = VApp VHead (Spine VTm)
@@ -125,7 +127,7 @@ pattern VRepr :: Times -> VNeu -> VNeu
 pattern VRepr m t = VReprApp m t Empty
 
 pattern VGl :: Glob -> VTm
-pattern VGl g = VNeu (VHead (VGlobal g))
+pattern VGl g = VNeu (VHead (VGlobal g []))
 
 pattern VGlob :: Glob -> Spine VTm -> VTm
-pattern VGlob g sp = VNeu (VApp (VGlobal g) sp)
+pattern VGlob g sp = VNeu (VApp (VGlobal g []) sp)
