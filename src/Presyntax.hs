@@ -144,6 +144,7 @@ data PTm
   | PLit (Lit PTm)
   | PHole Name
   | PRepr Times PTm
+  | PParams PTm [PTm]
   | PWild
   | PUnit
   | PLocated Loc PTm
@@ -184,6 +185,7 @@ isCompound (PCase {}) = True
 isCompound (PApp {}) = True
 isCompound (PRepr {}) = True
 isCompound (PLocated _ t) = isCompound t
+isCompound (PParams t _) = True
 isCompound _ = False
 
 prettyLets :: (Monad m) => ([(Name, PTy, PTm)], PTm) -> m String
@@ -277,6 +279,11 @@ instance (Monad m) => Pretty m PTm where
       _ -> return $ "repr " ++ show pn ++ " " ++ ps
   pretty (PLocated _ t) = pretty t
   pretty PUnit = return "()"
+  pretty (PParams t []) = pretty t
+  pretty (PParams t ps) = do
+    pt <- singlePretty t
+    pps <- mapM pretty ps
+    return $ pt ++ "@[" ++  intercalate ", " pps ++ "]"
 
 instance (Monad m) => Pretty m PCtor where
   pretty (MkPCtor n ty ts) = do

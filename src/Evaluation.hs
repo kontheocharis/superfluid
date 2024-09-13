@@ -93,6 +93,7 @@ import Value
   ( Closure (..),
     Env,
     Sub (..),
+    pattern VHead,
     VHead (..),
     VNeu (..),
     VPat,
@@ -311,8 +312,9 @@ eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
-eval _ (SGlobal g _) = do
-  return $ VGl g
+eval env (SGlobal g pp) = do
+  pp' <- mapM (eval env) pp
+  return $ VNeu (VHead (VGlobal g pp'))
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t
@@ -487,14 +489,15 @@ unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
   _ -> error "impossible"
 
 unelabPat :: (Eval m) => [Name] -> SPat -> m PTm
-unelabPat _ pat = do
+unelabPat ns pat = do
   (n, _) <- runStateT (unelabPat' pat.asTm) pat.binds
   return n
   where
-    unelabPat' :: (HasMetas m) => STm -> StateT [Name] m PTm
+    unelabPat' :: (Eval m) => STm -> StateT [Name] m PTm
     unelabPat' pat' = case pat' of
-      (SGlobal (CtorGlob (CtorGlobal c)) _) -> do
-        return $ PName c
+      (SGlobal (CtorGlob (CtorGlobal c)) pp) -> do
+        pp' <- lift $ mapM (unelab ns) pp
+        return $ PParams (PName c) pp'
       (SApp m a b) -> do
         a' <- unelabPat' a
         b' <- unelabPat' b
@@ -536,7 +539,9 @@ unelab ns = \case
         )
         cs
   SU -> return PU
-  (SGlobal g _) -> return $ PName (globName g)
+  (SGlobal g pp) -> do
+    pp' <- mapM (unelab ns) pp
+    return $ PParams (PName (globName g)) pp'
   (SLit l) -> PLit <$> traverse (unelab ns) l
   (SRepr m t) -> PRepr m <$> unelab ns t
 
