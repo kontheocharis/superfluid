@@ -28,6 +28,7 @@ module Typechecking
     wildPat,
     caseOf,
     checkByInfer,
+    enterTel,
     lit,
     defItem,
     dataItem,
@@ -78,6 +79,7 @@ import Evaluation
     vApp,
     vAppNeu,
     vRepr,
+    vReprTel,
     ($$),
   )
 import Globals
@@ -124,6 +126,7 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Debug.Trace (traceM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -927,27 +930,42 @@ vReprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
 
-reprItem :: (Tc m) => m VTy -> (VTy -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m ()
-reprItem getGlob addGlob ts r = do
+vReprTelHere :: (Tc m) => Times -> Tel STm -> m (Tel STm)
+vReprTelHere m te = do
+  l <- accessCtx (\c -> c.lvl)
+  vReprTel l m te
+
+reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m ()
+reprItem te getGlob addGlob ts r = do
   ty <- getGlob
-  ty' <- vReprHere (Finite 1) ty
-  (r', _) <- r (Check ty')
-  vr <- evalHere r'
+  rte <- vReprTelHere (Finite 1) te
+  r' <- enterTel rte $ do
+    getCtx >>= pretty >>= traceM
+    ty' <- vReprHere (Finite 1) ty
+    (r', _) <- r (Check ty')
+    r'' <- pretty r'
+    traceM r''
+    return r'
+  vr <- closeHere (length te) r'
   modify (addGlob vr ts)
 
 reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
-reprDataItem dat = reprItem (access (getDataGlobal dat) >>= \d -> snd <$> globalInfoToTm dat.globalName (DataInfo d)) (addDataRepr dat)
+reprDataItem dat = reprItem Empty (access (getDataGlobal dat) >>= \d -> snd <$> globalInfoToTm dat.globalName (DataInfo d)) (addDataRepr dat)
 
 reprCtorItem :: (Tc m) => CtorGlobal -> Set Tag -> Child m -> m ()
-reprCtorItem ctor = reprItem (access (getCtorGlobal ctor) >>= \d -> snd <$> globalInfoToTm ctor.globalName (CtorInfo d)) (addCtorRepr ctor)
+reprCtorItem ctor ts c = do
+  ci <- access (getCtorGlobal ctor)
+  di <- access (getDataGlobal ci.dataGlobal)
+  reprItem di.params (access (getCtorGlobal ctor) >>= \d -> snd <$> globalInfoToTm ctor.globalName (CtorInfo d)) (addCtorRepr ctor) ts c
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
-reprDefItem def = reprItem (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
+reprDefItem def = reprItem Empty (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
 
 reprCaseItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
 reprCaseItem dat ts c = do
+  di <- access (getDataGlobal dat)
   elimTy <- access (getDataGlobal dat) >>= \d -> return $ fromJust d.elimTy
-  reprItem (return elimTy) (addCaseRepr dat) ts c
+  reprItem Empty (return elimTy) (addCaseRepr dat) ts c
 
 quoteHere :: (Tc m) => VTm -> m STm
 quoteHere t = do

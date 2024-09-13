@@ -78,8 +78,8 @@ data Sig = Sig
   { contents :: Map Name GlobalInfo,
     nameOrder :: [Name],
     tags :: Map Name (Set Tag),
-    repr :: Map Name (VTm, Set Tag),
-    reprCase :: Map Name (VTm, Set Tag)
+    repr :: Map Name (Closure, Set Tag),
+    reprCase :: Map Name (Closure, Set Tag)
   }
 
 emptySig :: Sig
@@ -96,16 +96,16 @@ addItem n i ts s =
       tags = M.insert n ts s.tags
     }
 
-addDataRepr :: DataGlobal -> VTm -> Set Tag -> Sig -> Sig
+addDataRepr :: DataGlobal -> Closure -> Set Tag -> Sig -> Sig
 addDataRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
 
-addCaseRepr :: DataGlobal -> VTm -> Set Tag -> Sig -> Sig
+addCaseRepr :: DataGlobal -> Closure -> Set Tag -> Sig -> Sig
 addCaseRepr g t ts s = s {reprCase = M.insert g.globalName (t, ts) s.reprCase}
 
-addCtorRepr :: CtorGlobal -> VTm -> Set Tag -> Sig -> Sig
+addCtorRepr :: CtorGlobal -> Closure -> Set Tag -> Sig -> Sig
 addCtorRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
 
-addDefRepr :: DefGlobal -> VTm -> Set Tag -> Sig -> Sig
+addDefRepr :: DefGlobal -> Closure -> Set Tag -> Sig -> Sig
 addDefRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
 
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
@@ -148,22 +148,22 @@ lookupGlobal n sig = M.lookup n sig.contents
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).vtm
 
-getDataRepr :: DataGlobal -> Sig -> Maybe VTm
+getDataRepr :: DataGlobal -> Sig -> Maybe Closure
 getDataRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getCaseRepr :: DataGlobal -> Sig -> Maybe VTm
+getCaseRepr :: DataGlobal -> Sig -> Maybe Closure
 getCaseRepr g sig = fst <$> M.lookup g.globalName sig.reprCase
 
-getCtorRepr :: CtorGlobal -> Sig -> Maybe VTm
+getCtorRepr :: CtorGlobal -> Sig -> Maybe Closure
 getCtorRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getDefRepr :: DefGlobal -> Sig -> Maybe VTm
+getDefRepr :: DefGlobal -> Sig -> Maybe Closure
 getDefRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getPrimRepr :: PrimGlobal -> Sig -> Maybe VTm
+getPrimRepr :: PrimGlobal -> Sig -> Maybe Closure
 getPrimRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
-getGlobalRepr :: Glob -> Sig -> Maybe VTm
+getGlobalRepr :: Glob -> Sig -> Maybe Closure
 getGlobalRepr (DataGlob g) = getDataRepr g
 getGlobalRepr (CtorGlob g) = getCtorRepr g
 getGlobalRepr (DefGlob g) = getDefRepr g

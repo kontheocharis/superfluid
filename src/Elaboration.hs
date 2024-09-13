@@ -24,8 +24,10 @@ import Common
     mapSpine,
     unName,
   )
+import Control.Monad (replicateM)
 import Data.Bifunctor (bimap)
-import Globals (DataGlobalInfo, GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
+import Debug.Trace (traceM)
+import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -56,6 +58,7 @@ import Typechecking
     defItem,
     endDataItem,
     ensureAllProblemsSolved,
+    enterTel,
     insertLam,
     lam,
     letIn,
@@ -134,6 +137,7 @@ elab p mode = case (p, mode) of
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
+  (PParams t ts, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()
 elabDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
@@ -198,8 +202,9 @@ elabCaseRep dat info r = do
   srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
   srcBranches <- map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
   elimTy <- Arg Explicit <$> uniqueName
-  tyParams <- mapM (traverse (const uniqueName)) info.elimTyArity
-  let target' = pLams ([elimTy] ++ tyParams ++ [srcSubject] ++ srcBranches) r.target
+  tyIndices <- mapM (traverse (const uniqueName)) info.elimTyArity
+  tyParams <- replicateM (length info.params) (Arg Explicit <$> uniqueName)
+  let target' = pLams (tyParams ++ [elimTy] ++ srcBranches ++ tyIndices ++ [srcSubject]) r.target
   reprCaseItem dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()

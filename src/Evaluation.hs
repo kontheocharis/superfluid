@@ -23,6 +23,7 @@ module Evaluation
     unelabSig,
     ensureIsCtor,
     vLams,
+    vReprTel,
     uniqueVLams,
     evalInOwnCtx,
     extendEnvByNVars,
@@ -46,6 +47,7 @@ import Common
     PiMode (..),
     Spine,
     Tag,
+    Tel,
     Times (..),
     globName,
     inv,
@@ -55,7 +57,7 @@ import Common
     nextLvls,
     unMetaVar,
     pattern Impossible,
-    pattern Possible, Tel,
+    pattern Possible,
   )
 import Control.Exception (assert)
 import Control.Monad (foldM)
@@ -64,6 +66,7 @@ import Control.Monad.State (StateT (..))
 import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
+import Data.Foldable (toList)
 import qualified Data.IntMap as IM
 import Data.List.Extra (firstJust, intercalate, (!?))
 import qualified Data.List.NonEmpty as NE
@@ -93,7 +96,6 @@ import Value
   ( Closure (..),
     Env,
     Sub (..),
-    pattern VHead,
     VHead (..),
     VNeu (..),
     VPat,
@@ -102,11 +104,11 @@ import Value
     VTy,
     pattern VGl,
     pattern VGlob,
+    pattern VHead,
     pattern VMeta,
     pattern VRepr,
     pattern VVar,
   )
-import Data.Foldable (toList)
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -214,6 +216,14 @@ caseToSpine v cls = do
     (Arg Explicit (VNeu v) :<| Empty)
     cls
 
+vReprTel :: (Eval m) => Lvl -> Times -> Tel STm -> m (Tel STm)
+vReprTel _ _ Empty = return Empty
+vReprTel l m (Param m' n a :<| xs) = do
+  a' <- (\a' -> a'.body) <$> postCompose (SRepr m) (Closure 0 [] a)
+  xs' <- vReprTel l m xs
+  xs'' <- traverse (traverse (\x -> (\x' -> x'.body) <$> reprClosure m (Closure 0 [] x))) xs'
+  return $ Param m' n a' :<| xs''
+
 vRepr :: (Eval m) => Lvl -> Times -> VTm -> m VTm
 vRepr _ (Finite 0) t = return t
 vRepr l m (VPi e v ty t) = do
@@ -226,11 +236,13 @@ vRepr _ m (VLam e v t) = do
 vRepr _ _ VU = return VU
 vRepr _ _ (VLit i) = return $ VLit i
 vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
-  g' <- access (getGlobalRepr g)
-  case g' of
-    Just g'' -> do
-      sp' <- mapSpineM (vRepr l m) sp
-      vApp g'' sp'
+  r <- access (getGlobalRepr g)
+  case r of
+    Just r' -> do
+      rpp <- mapM (vRepr l m) pp
+      r'' <- r' $$ rpp
+      rsp <- mapSpineM (vRepr l m) sp
+      vApp r'' rsp
     Nothing -> do
       return $ VNeu (VRepr m n)
 vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
@@ -240,7 +252,8 @@ vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
       cssp <- caseToSpine v cs
       cssp' <- mapSpineM (vRepr l m) cssp
       sp' <- mapSpineM (vRepr l m) sp
-      a <- vApp f' cssp'
+      -- a <- vApp f' cssp'
+      a <- vApp undefined cssp' -- @@Todo
       vApp a sp'
     Nothing -> do
       return $ VNeu (VRepr m n)
@@ -577,7 +590,7 @@ unelabSig = do
           d.ctors
       return $ MkPData n te' ty' ctors' ts
 
-    unelabCtor :: (Eval m) => Name ->CtorGlobalInfo -> [Name] -> Set Tag -> m PCtor
+    unelabCtor :: (Eval m) => Name -> CtorGlobalInfo -> [Name] -> Set Tag -> m PCtor
     unelabCtor n c dataParams ts = do
       ty' <- unelab dataParams c.ty.body
       return $ MkPCtor n ty' ts

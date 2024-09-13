@@ -424,103 +424,102 @@ def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
 }
 
 -- -- Default representations
--- repr data Bool as JS {
---   true as js-true,
---   false as js-false,
+repr data Bool as JS {
+  true as js-true,
+  false as js-false,
 
---   case b {
---     true => t,
---     false => f,
---   } as {
---     js-if b (cast t) (cast f)
---   }
--- }
+  case b {
+    true => t,
+    false => f,
+  } as {
+    js-if b (cast t) (cast f)
+  }
+}
 
--- -- repr def and as \a b => unrepr Bool (js-and (repr a) (repr b))
--- -- repr def or as \a b => unrepr Bool (js-or (repr a) (repr b))
--- -- repr def not as \a => unrepr Bool (js-not (repr a))
+repr def and as \a b => js-and a b
+repr def or as \a b => js-or a b
+repr def not as \a => js-not a
 
 
--- -- repr data Nat as JS {
--- --   z as js-zero,
--- --   s n as js-plus js-one (repr n),
--- --   case n {
--- --     z => b,
--- --     s => r,
--- --   } as {
--- --     js-if (js-eqq (repr n) js-zero)
--- --       (cast b)
--- --       (cast (r (unrepr Nat (js-minus (repr n) js-one))))
--- --   }
--- -- }
+repr data Nat as JS {
+  z as js-zero,
+  s n as js-plus js-one n,
+  case n {
+    z => b,
+    s => r,
+  } as {
+    js-if (js-eqq n js-zero)
+      (cast b)
+      (cast (r (js-minus n js-one)))
+  }
+}
 
--- -- repr def add as \a b => unrepr Nat (js-plus (repr a) (repr b))
--- -- repr def mul as \a b => unrepr Nat (js-times (repr a) (repr b))
--- -- repr def pow as \a b => unrepr Nat (js-pow (repr a) (repr b))
--- -- repr def is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
+repr def add as \a b => js-plus a b
+repr def mul as \a b => js-times a b
+repr def pow as \a b => js-pow a b
+repr def is-even as \n => js-eqq (js-mod n js-two) js-zero
 
--- -- repr data Fin n as JS {
--- --   fz as js-zero,
--- --   fs n as js-plus js-one (repr n),
--- --   case n {
--- --     fz => b,
--- --     fs => r,
--- --   } as {
--- --     js-if (js-eqq (repr n) js-zero)
--- --       (cast b)
--- --       (cast (r (unrepr Fin (js-minus (repr n) js-one))))
--- --   }
--- -- }
+repr data Fin n as JS {
+  fz as js-zero,
+  fs n as js-plus js-one n,
+  case n {
+    fz => b,
+    fs => r,
+  } as {
+    js-if (js-eqq n js-zero)
+      (cast b)
+      (cast (r (js-minus n js-one)))
+  }
+}
 
--- -- repr def fin-to-nat as \n => unrepr Nat (repr n)
--- -- repr def fin-is-even as \n => unrepr Bool (js-eqq (js-mod (repr n) js-two) js-zero)
--- -- repr def fin-eq as \x y => unrepr Bool (js-eqq (repr x) (repr y))
+repr def fin-to-nat as \n => {
+  let n' : Nat = unrepr n;
+  repr n'
+}
 
--- -- repr data Maybe A as JS { -- Here we really need a bound "A represents as JS"
--- --   nothing as js-null,
--- --   just a as to-js a,
+repr def fin-is-even as \n => js-eqq (js-mod n js-two) js-zero
+repr def fin-eq as \x y => js-eqq x y
 
--- --   case m {
--- --     nothing => n,
--- --     just => j,
--- --   } as {
--- --     js-if (js-eqq (repr m) js-null)
--- --       (cast n)
--- --       (cast (j (cast m)))
--- --   }
--- -- }
+repr data Maybe A as JS {
+  nothing as js-null,
+  just a as to-js a,
 
--- -- repr data List A as JS {
--- --   nil as js-empty-array,
--- --   cons x xs as js-array-extend-l (to-js x) (repr xs),
+  case m {
+    nothing => n,
+    just => j,
+  } as {
+    js-if (js-eqq m js-null)
+      (cast n)
+      (cast (j (cast m)))
+  }
+}
 
--- --   case l {
--- --     nil => n,
--- --     cons => c,
--- --   } as {
--- --     let l' = repr l;
--- --     js-if (js-eqq (js-length l') js-zero)
--- --       (cast n)
--- --       (cast (c (cast (js-index l' js-zero)) (unrepr List (js-slice l' js-one (js-length l')))))
--- --   }
--- -- }
+repr data List A as JS {
+  nil as js-empty-array,
+  cons x xs as js-array-extend-l (to-js x) xs,
 
--- -- repr def index as {
--- --   \i l => {
--- --     let l' = repr l;
--- --     let i' = repr i;
+  case l {
+    nil => n,
+    cons => c,
+  } as {
+    js-if (js-eqq (js-length l) js-zero)
+      (cast n)
+      (cast (c (cast (js-index l js-zero)) (js-slice l js-one (js-length l))))
+  }
+}
 
--- --     unrepr Maybe (
--- --       js-if (js-lt i' (js-length l'))
--- --         (cast (js-index l' i'))
--- --         (cast js-null)
--- --     )
--- --   }
--- -- }
+repr def index as {
+  \i l => {
+    js-if (js-lt i (js-length l))
+      (cast (js-index l i))
+      (cast js-null)
+  }
+}
 
--- -- repr def length as \l => unrepr Nat (js-length (repr l))
--- -- repr def map as \f xs => unrepr List (js-map (cast f) (repr xs))
--- -- repr def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) (repr xs))
+repr def length as \l => js-length l
+repr def map as \f xs => js-map (cast f) xs
+repr def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) xs)
+
 
 -- -- More definitions
 
