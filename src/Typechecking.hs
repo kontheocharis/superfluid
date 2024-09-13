@@ -124,7 +124,6 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
-import Debug.Trace (traceM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1017,7 +1016,7 @@ buildElimTy dat = do
     ctorMethodTy :: (Tc m) => Int -> CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy sTyParamLen ctor = do
       ctorInfo <- access (getCtorGlobal ctor)
-      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) ([0 .. sTyParamLen - 1])) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
+      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) [0 .. sTyParamLen - 1]) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
       let (sTyBinds', sTyRet) = sGatherPis sTy
       sTyBinds <- telWithNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet
@@ -1301,9 +1300,7 @@ unifyFlex m sp t = runSolveT m sp t $ do
   lift $ solveMetaVar m solution
 
 iDontKnow :: (Tc m) => m CanUnify
-iDontKnow = do
-  traceM $ "iDontKnow"
-  return Maybe
+iDontKnow = return Maybe
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do
@@ -1344,10 +1341,7 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  t1'' <- pretty t1'
-  t2'' <- pretty t2'
-  traceM $ "unify: " ++ t1'' ++ " =? " ++ t2''
-  result <- case (t1', t2') of
+  case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
     (t, VLam m' _ c') -> etaConvert t m' c'
@@ -1389,6 +1383,3 @@ unify t1 t2 = do
     (VNeu (VCaseApp {}), _) -> iDontKnow
     (_, VNeu (VCaseApp {})) -> iDontKnow
     _ -> return $ No [Mismatching t1' t2']
-  t1''' <- pretty result
-  traceM $ "unify result: "  ++ t1'' ++ " =? " ++ t2'' ++ " is " ++ t1'''
-  return result
