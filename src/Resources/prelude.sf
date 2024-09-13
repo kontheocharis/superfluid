@@ -302,8 +302,11 @@ def fin-is-even : [n : Nat] -> Fin n -> Bool {
   }
 }
 
-def upgrade : [n : Nat] -> (i : Nat) -> Fin n -> Fin (add (s i) n) {
-  ?upgrade
+def upgrade : [n : Nat] -> (k : Nat) -> Fin n -> Fin (add k n) {
+  \[n] k => case k to (\m => Fin n -> Fin (add m n)) {
+    z => id,
+    s k' => \x => fs (upgrade k' x)
+  }
 }
 
 def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {

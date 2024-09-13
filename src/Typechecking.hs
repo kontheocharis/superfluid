@@ -781,19 +781,20 @@ caseClauses di wideTyM cs f = do
     )
     (mzip (map Just di.ctors) (map Just cs))
 
-ensureDataAndGetWide :: (Tc m) => VTy -> (forall a. m a) -> m (DataGlobal, Spine VTm, m VTy)
+ensureDataAndGetWide :: (Tc m) => VTy -> (forall a. m a) -> m (DataGlobal, Spine VTm, Spine VTm, m VTy)
 ensureDataAndGetWide ssTy =
   ifIsData
     ssTy
     ( \d sp -> do
         di <- access (getDataGlobal d)
         let paramSp = S.take (length di.params) sp
+        let indexSp = S.drop (length di.params) sp
         let rest =
               VNeu . VApp (VGlobal (DataGlob d)) . (paramSp ><)
                 <$> traverse
                   (traverse (\_ -> freshMeta >>= evalHere))
                   (S.drop (length di.params) sp)
-        return (d, paramSp, rest)
+        return (d, paramSp, indexSp, rest)
     )
 
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
@@ -805,7 +806,7 @@ caseOf mode s r cs = do
       caseOf (Check retTy) s r cs
     Check ty -> do
       (ss, ssTy) <- s Infer
-      (d, paramSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
+      (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
       di <- access (getDataGlobal d)
       let motive = fromJust di.motiveTy
       motiveApplied <- motive $$ map (\a -> a.arg) (toList paramSp)
@@ -818,6 +819,9 @@ caseOf mode s r cs = do
         branchTy <- vApp vrr (pTySp S.:|> Arg Explicit vp.vPat)
         (st, _) <- t (Check branchTy)
         return $ Possible sp st
+      vs <- evalHere ss
+      retTy <- vApp vrr (indexSp S.:|> Arg Explicit vs)
+      unifyHere ty retTy
       return (SCase d ss rr scs, ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)
@@ -1206,17 +1210,17 @@ unifyClauses [] [] = return Yes
 unifyClauses (c : cs) (c' : cs') = unifyClause c c' /\ unifyClauses cs cs'
 unifyClauses a b = return $ No [DifferentClauses a b]
 
-unifyPat :: (Tc m) => VPatB -> VPatB -> m CanUnify
-unifyPat pt@(VPatB p binds) (VPatB p' binds') = do
-  let n = length binds
-  let n' = length binds'
-  if n == n'
-    then enterTypelessPatBinds pt $ unify p p'
-    else return $ No []
+-- unifyPat :: (Tc m) => VPatB -> VPatB -> m CanUnify
+-- unifyPat pt@(VPatB p binds) (VPatB p' binds') = do
+--   let n = length binds
+--   let n' = length binds'
+--   if n == n'
+--     then enterTypelessPatBinds pt $ unify p p'
+--     else return $ No []
 
 unifyClause :: (Tc m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
-unifyClause (Possible p t) (Possible p' t') = unifyPat p p' /\ unifyClosure t t'
-unifyClause (Impossible p) (Impossible p') = unifyPat p p'
+unifyClause (Possible _ t) (Possible _ t') = unifyClosure t t'
+unifyClause (Impossible _) (Impossible _) = return Yes
 unifyClause a b = return $ No [DifferentClauses [a] [b]]
 
 data Problem = Problem
@@ -1297,7 +1301,9 @@ unifyFlex m sp t = runSolveT m sp t $ do
   lift $ solveMetaVar m solution
 
 iDontKnow :: (Tc m) => m CanUnify
-iDontKnow = return Maybe
+iDontKnow = do
+  traceM $ "iDontKnow"
+  return Maybe
 
 unfoldDefAndUnify :: (Tc m) => DefGlobal -> Spine VTm -> VTm -> m CanUnify
 unfoldDefAndUnify g sp t' = do
@@ -1338,7 +1344,10 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  case (t1', t2') of
+  t1'' <- pretty t1'
+  t2'' <- pretty t2'
+  traceM $ "unify: " ++ t1'' ++ " =? " ++ t2''
+  result <- case (t1', t2') of
     (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
     (t, VLam m' _ c') -> etaConvert t m' c'
@@ -1380,3 +1389,6 @@ unify t1 t2 = do
     (VNeu (VCaseApp {}), _) -> iDontKnow
     (_, VNeu (VCaseApp {})) -> iDontKnow
     _ -> return $ No [Mismatching t1' t2']
+  t1''' <- pretty result
+  traceM $ "unify result: "  ++ t1'' ++ " =? " ++ t2'' ++ " is " ++ t1'''
+  return result
