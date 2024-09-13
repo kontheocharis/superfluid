@@ -939,6 +939,7 @@ reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> 
 reprItem te getGlob addGlob ts r = do
   ty <- getGlob
   rte <- vReprTelHere (Finite 1) te
+  -- @@Todo: inherit arg names from header
   r' <- enterTel rte $ do
     getCtx >>= pretty >>= traceM
     ty' <- vReprHere (Finite 1) ty
@@ -963,7 +964,6 @@ reprDefItem def = reprItem Empty (access (getDefGlobal def) >>= \d -> return d.t
 
 reprCaseItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
 reprCaseItem dat ts c = do
-  di <- access (getDataGlobal dat)
   elimTy <- access (getDataGlobal dat) >>= \d -> return $ fromJust d.elimTy
   reprItem Empty (return elimTy) (addCaseRepr dat) ts c
 

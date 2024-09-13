@@ -204,6 +204,7 @@ elabCaseRep dat info r = do
   elimTy <- Arg Explicit <$> uniqueName
   tyIndices <- mapM (traverse (const uniqueName)) info.elimTyArity
   tyParams <- replicateM (length info.params) (Arg Explicit <$> uniqueName)
+  -- @@Todo: inherit arg names from header
   let target' = pLams (tyParams ++ [elimTy] ++ srcBranches ++ tyIndices ++ [srcSubject]) r.target
   reprCaseItem dat r.tags (elab target')
 
