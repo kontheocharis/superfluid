@@ -29,6 +29,7 @@ def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
   }
 }
 
+#unfold
 def id : [A : Type] -> A -> A {
   \a => a
 }
@@ -458,6 +459,7 @@ repr def add as \a b => js-plus a b
 repr def mul as \a b => js-times a b
 repr def pow as \a b => js-pow a b
 repr def is-even as \n => js-eqq (js-mod n js-two) js-zero
+repr def nat-eq as \a b => cast (js-eqq a b)
 
 repr data Fin n as JS {
   fz as js-zero,
@@ -521,6 +523,47 @@ repr def map as \f xs => js-map (cast f) xs
 repr def fold as \f i xs => cast (js-fold (\acc x => cast (f (cast x) (cast acc))) (to-js i) xs)
 
 
+-- data ByteVec : Nat -> Type {
+--   bnil : ByteVec z,
+--   bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
+-- }
+
+-- repr data ByteVec n as JS {
+--   bnil as js-buffer-alloc (repr 0),
+--   bcons x xs as {
+--     let old-len = js-buffer-byte-length xs;
+--     let new-len = js-plus old-len (repr 1);
+--     let b = js-buffer-alloc new-len;
+--     let b' = js-buffer-write-uint8 x (repr 0) b;
+--     js-buffer-copy xs (repr 0) old-len (repr 1) b'
+--   },
+--   case l {
+--     bnil => n,
+--     bcons => c
+--   } as {
+--     let n' = n;
+--     let c' = c (js-index l (repr 0)) (js-buffer-subarray l (repr 1) (js-buffer-byte-length l));
+--     let _ = ?h1;
+
+--     js-if (js-eqq (js-buffer-byte-length l) (repr 0))
+--       (cast n')
+--       (cast c')
+--   }
+-- }
+
+-- repr data Dec A as JS {
+--   yes _ as js-true,
+--   no _ as js-false,
+--   case d {
+--     yes => y,
+--     no => n,
+--   } as {
+--     js-if d
+--       (cast y (cast (refl [x])))
+--       (cast (n (conjure A)))
+--   }
+-- }
+
 -- -- More definitions
 
 data Char : Type {
@@ -530,4 +573,16 @@ data Char : Type {
 data String : Type {
   snil : String,
   scons : Char -> String -> String,
+}
+
+def Word : Type {
+  Fin 65536
+}
+
+def Byte : Type {
+  Fin 256
+}
+
+def word-to-nat : Word -> Nat {
+  fin-to-nat
 }

@@ -941,11 +941,8 @@ reprItem te getGlob addGlob ts r = do
   rte <- vReprTelHere (Finite 1) te
   -- @@Todo: inherit arg names from header
   r' <- enterTel rte $ do
-    getCtx >>= pretty >>= traceM
     ty' <- vReprHere (Finite 1) ty
     (r', _) <- r (Check ty')
-    r'' <- pretty r'
-    traceM r''
     return r'
   vr <- closeHere (length te) r'
   modify (addGlob vr ts)
