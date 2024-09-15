@@ -886,7 +886,7 @@ dataItem n ts te ty = do
     unless i (tcError $ InvalidDataFamily vty)
     return ty'
   cty <- closeHere (length te') ty'
-  modify (addItem n (DataInfo (DataGlobalInfo te' cty [] Nothing Nothing [])) ts)
+  modify (addItem n (DataInfo (DataGlobalInfo te' cty [] Nothing Nothing Empty)) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
@@ -976,8 +976,8 @@ spineForTel :: Int -> Tel STm -> Spine STm
 spineForTel dist te =
   S.fromList $ zipWith (curry (\(Param m _ _, i) -> Arg m (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
 
-telWithNames :: (Tc m) => Tel a -> m (Tel a)
-telWithNames = do
+telWithUniqueNames :: (Tc m) => Tel a -> m (Tel a)
+telWithUniqueNames = do
   mapM
     ( \(Param m n a) -> do
         case n of
@@ -987,7 +987,7 @@ telWithNames = do
           Name _ -> return (Param m n a)
     )
 
-buildElimTy :: (Tc m) => DataGlobal -> m (Closure, VTy, [Arg ()])
+buildElimTy :: (Tc m) => DataGlobal -> m (Closure, VTy, Spine ())
 buildElimTy dat = do
   -- @@Cleanup: this is a fucking mess, ideally should hide all the index acrobatics..
 
@@ -996,7 +996,7 @@ buildElimTy dat = do
   let sTyParams = datInfo.params
   let sTy = datInfo.ty.body
   let (sTyIndices, _) = sGatherPis sTy
-  sTyIndicesBinds <- telWithNames sTyIndices
+  sTyIndicesBinds <- telWithUniqueNames sTyIndices
   let spToData i j = sAppSpine (SGlobal (DataGlob dat) []) (spineForTel i sTyParams >< spineForTel j sTyIndicesBinds)
 
   motiveSubjName <- uniqueName
@@ -1029,14 +1029,14 @@ buildElimTy dat = do
 
   elimTy' <- evalHere elimTy
   motiveTy' <- closeHere (length datInfo.params) motiveTy
-  return (motiveTy', elimTy', map (\p -> Arg p.mode ()) (toList sTyIndicesBinds))
+  return (motiveTy', elimTy', fmap (\p -> Arg p.mode ()) sTyIndicesBinds)
   where
     ctorMethodTy :: (Tc m) => Int -> CtorGlobal -> m (Int -> STy, Name)
     ctorMethodTy sTyParamLen ctor = do
       ctorInfo <- access (getCtorGlobal ctor)
       sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) [0 .. sTyParamLen - 1]) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
       let (sTyBinds', sTyRet) = sGatherPis sTy
-      sTyBinds <- telWithNames sTyBinds'
+      sTyBinds <- telWithUniqueNames sTyBinds'
       let (_, sTyRetSp) = sGatherApps sTyRet
 
       let spToCtor =

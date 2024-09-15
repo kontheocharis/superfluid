@@ -22,7 +22,7 @@ import Common
     Name,
     PiMode (..),
     mapSpine,
-    unName,
+    unName, Spine,
   )
 import Control.Monad (replicateM)
 import Data.Bifunctor (bimap)
@@ -76,6 +76,7 @@ import Typechecking
     wildPat,
   )
 import Value (VTm (..), VTy)
+import qualified Data.Sequence as S
 
 -- Presyntax exists below here
 
@@ -155,7 +156,7 @@ elabData dat = do
 elabPrim :: (Elab m) => PPrim -> m ()
 elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
 
-ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, [Arg Name])
+ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =
   let (h, sp) = pGatherApps p
    in case h of
@@ -200,12 +201,12 @@ elabCtorRep r = do
 elabCaseRep :: (Elab m) => DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
 elabCaseRep dat info r = do
   srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
-  srcBranches <- map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
+  srcBranches <- S.fromList . map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
   elimTy <- Arg Explicit <$> uniqueName
-  tyIndices <- mapM (traverse (const uniqueName)) info.elimTyArity
-  tyParams <- replicateM (length info.params) (Arg Explicit <$> uniqueName)
+  tyIndices <-  mapM (traverse (const uniqueName)) info.elimTyArity
+  tyParams <- S.replicateM (length info.params) (Arg Explicit <$> uniqueName)
   -- @@Todo: inherit arg names from header
-  let target' = pLams (tyParams ++ [elimTy] ++ srcBranches ++ tyIndices ++ [srcSubject]) r.target
+  let target' = pLams (tyParams S.>< S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject) r.target
   reprCaseItem dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()

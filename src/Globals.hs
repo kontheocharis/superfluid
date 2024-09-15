@@ -45,7 +45,7 @@ import Common
     PrimGlobal (..),
     Tag,
     Tel,
-    globalName,
+    globalName, Spine,
   )
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -65,7 +65,7 @@ data DataGlobalInfo = DataGlobalInfo
     ctors :: [CtorGlobal],
     motiveTy :: Maybe Closure,
     elimTy :: Maybe VTm,
-    elimTyArity :: [Arg ()] -- might not be set yet
+    elimTyArity :: Spine () -- might not be set yet
   }
 
 data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet

@@ -29,6 +29,7 @@ module Common
     Tel,
     mapSpine,
     mapSpineM,
+    telWithNames,
     MetaVar (..),
     Glob (..),
     Tag (..),
@@ -52,6 +53,7 @@ import Data.Sequence (Seq (..))
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import qualified Data.Sequence as S
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -234,6 +236,9 @@ data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
     )
 
 type Tel t = Seq (Param t)
+
+telWithNames :: Tel a -> Spine Name -> Tel a
+telWithNames = S.zipWith (\(Param m _ t) (Arg _ n) -> Param m n t)
 
 -- Metas
 

@@ -44,6 +44,7 @@ import Data.Set (Set)
 import Data.Typeable (Typeable)
 import Printing (Pretty (..), curlies)
 import Data.Foldable (toList)
+import qualified Data.Sequence as S
 
 type PTy = PTm
 
@@ -162,14 +163,14 @@ pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m n : ns, b)
 pLamsToList (PLocated _ t) = pLamsToList t
 pLamsToList t = ([], t)
 
-pLams :: [Arg Name] -> PTm -> PTm
-pLams [] b = b
-pLams (Arg m n : xs) b = PLam m n (pLams xs b)
+pLams :: Spine Name -> PTm -> PTm
+pLams Empty b = b
+pLams (Arg m n :<| xs) b = PLam m n (pLams xs b)
 
-pGatherApps :: PTm -> (PTm, [Arg PTm])
-pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us ++ [Arg m u])
+pGatherApps :: PTm -> (PTm, Spine PTm)
+pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
 pGatherApps (PLocated _ t) = pGatherApps t
-pGatherApps t = (t, [])
+pGatherApps t = (t, Empty)
 
 pLetToList :: PTm -> ([(Name, PTy, PTm)], PTm)
 pLetToList (PLet n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((n, ty, t1) : binds, ret)
@@ -244,7 +245,7 @@ instance (Monad m) => Pretty m PTm where
     let (x, xs) = pGatherApps t
     px <- singlePretty x
     pxs <- mapM singlePretty xs
-    return $ px ++ " " ++ intercalate " " pxs
+    return $ px ++ " " ++ intercalate " " (toList pxs)
   pretty l@(PLet {}) = prettyLets (pLetToList l)
   pretty (PCase t r cs) = do
     pt <- singlePretty t
