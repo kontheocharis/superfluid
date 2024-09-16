@@ -61,6 +61,7 @@ import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
+import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -126,7 +127,6 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
-import Debug.Trace (traceM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1338,6 +1338,17 @@ unfoldDefAndUnify g sp t' = do
       t <- vApp gu' sp
       unify t t'
 
+unfoldReprDefAndUnify :: (Tc m) => Times -> DefGlobal -> Spine VTm -> Spine VTm -> VTm -> m CanUnify
+unfoldReprDefAndUnify m g sp rp t' = do
+  gu <- access (unfoldDef g)
+  case gu of
+    Nothing -> iDontKnow
+    Just gu' -> do
+      t <- vApp gu' sp
+      tr <- vReprHere m t
+      tr' <- vApp tr rp
+      unify tr' t'
+
 unifyLit :: (Tc m) => Lit VTm -> VTm -> m CanUnify
 unifyLit a t = case t of
   VLit a' -> case (a, a') of
@@ -1369,15 +1380,19 @@ unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
   case (t1', t2') of
-    (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
     (t, VLam m' _ c') -> etaConvert t m' c'
     (VLam m _ c, t) -> etaConvert t m c
+    (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
     (VU, VU) -> return Yes
-    (t, VLit a') -> unifyLit a' t
-    (VLit a, t') -> unifyLit a t'
+    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
+      unifySpines sp sp' \/ iDontKnow
+    (VNeu (VApp (VFlex x) sp), t') -> unifyFlex x sp t'
+    (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex x' sp' t
     (VGlob (CtorGlob c) sp, VGlob (CtorGlob c') sp') | c == c' -> unifySpines sp sp'
     (VGlob (DataGlob d) sp, VGlob (DataGlob d') sp') | d == d' -> unifySpines sp sp'
+    (t, VLit a') -> unifyLit a' t
+    (VLit a, t') -> unifyLit a t'
     (VGlob (PrimGlob f) sp, VGlob (PrimGlob f') sp') ->
       if f == f'
         then unifySpines sp sp'
@@ -1395,14 +1410,20 @@ unify t1 t2 = do
           /\ unifySpines sp sp'
         )
         \/ iDontKnow
+    ( VNeu (VReprApp m (VApp (VGlobal (DefGlob f) _) sp1) sp2),
+      VNeu (VReprApp m' (VApp (VGlobal (DefGlob f') _) sp1') sp2')
+      ) ->
+        if m == m' && f == f'
+          then (unifySpines sp1 sp1' /\ unifySpines sp2 sp2') \/ unfoldReprDefAndUnify m f sp1 sp2 t2
+          else unfoldReprDefAndUnify m f sp1 sp2 t2
+    (VNeu (VReprApp m (VApp (VGlobal (DefGlob f) _) sp1) sp2), _) -> do
+      unfoldReprDefAndUnify m f sp1 sp2 t2
+    (_, VNeu (VReprApp m' (VApp (VGlobal (DefGlob f') _) sp1') sp2')) -> do
+      unfoldReprDefAndUnify m' f' sp1' sp2' t1
     (VNeu (VReprApp m v sp), VNeu (VReprApp m' v' sp')) | m == m' -> do
       (unify (VNeu v) (VNeu v') /\ unifySpines sp sp') \/ iDontKnow
     (VNeu (VApp (VRigid x) sp), VNeu (VApp (VRigid x') sp')) | x == x' -> do
       unifySpines sp sp' \/ iDontKnow
-    (VNeu (VApp (VFlex x) sp), VNeu (VApp (VFlex x') sp')) | x == x' -> do
-      unifySpines sp sp' \/ iDontKnow
-    (VNeu (VApp (VFlex x) sp), t') -> unifyFlex x sp t'
-    (t, VNeu (VApp (VFlex x') sp')) -> unifyFlex x' sp' t
     (VNeu (VApp (VRigid _) _), _) -> iDontKnow
     (_, VNeu (VApp (VRigid _) _)) -> iDontKnow
     (VNeu (VReprApp {}), _) -> iDontKnow

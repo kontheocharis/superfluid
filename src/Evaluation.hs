@@ -246,29 +246,19 @@ vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
       r'' <- r' $$ rpp
       rsp <- mapSpineM (vRepr l m) sp
       vApp r'' rsp
-    -- Nothing -> do
-    --   case g of
-    --     (DefGlob d) -> do
-    --       d' <- access (unfoldDef d)
-    --       case d' of
-    --         Just d'' -> do
-    --           d''' <- vApp d'' sp
-    --           traceM $ "got d''': " ++ show d'''
-    --           vRepr l m d'''
-    --         Nothing -> return $ VNeu (VRepr m n)
-    _ -> return $ VNeu (VRepr m n)
+    Nothing -> return $ VNeu (VRepr m n)
 vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
-  f <- access (getCaseRepr dat)
-  case f of
-    Just f' -> do
-      cssp <- caseToSpine v cs
-      cssp' <- mapSpineM (vRepr l m) cssp
-      sp' <- mapSpineM (vRepr l m) sp
-      -- a <- vApp f' cssp'
-      a <- vApp undefined cssp' -- @@Todo
-      vApp a sp'
-    Nothing -> do
-      return $ VNeu (VRepr m n)
+  -- f <- access (getCaseRepr dat)
+  -- case f of
+  --   Just f' -> do
+  --     cssp <- caseToSpine v cs
+  --     cssp' <- mapSpineM (vRepr l m) cssp
+  --     sp' <- mapSpineM (vRepr l m) sp
+  --     -- a <- vApp f' cssp'
+  --     a <- vApp undefined cssp' -- @@Todo
+  --     vApp a sp'
+  --   Nothing -> do
+  return $ VNeu (VRepr m n)
 vRepr l m (VNeu (VReprApp m' v sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   let mm' = m <> m'
