@@ -1,27 +1,33 @@
 
-data IPPacketHeader : Type {
-  mk-ip-packet : (
+data IpHeader : Type {
+  mk-ip-header : (
     src-ip : Word,
     dst-ip : Word,
     protocol : Word,
     len : Word,
-  ) -> IPPacketHeader
+  ) -> IpHeader
 }
 
-data TcpPacketHeader : Type {
-  mk-tcp-packet-header : (
+def ip-len : IpHeader -> Word {
+  \case {
+    mk-ip-header src-ip dst-ip protocol len => len
+  }
+}
+
+data TcpHeader : Type {
+  mk-tcp-header : (
     src-port : Word,
     dst-port : Word,
     seq : Word,
     ack : Word,
     checksum : Word,
     len : Word,
-  ) -> TcpPacketHeader
+  ) -> TcpHeader
 }
 
-def tcp-packet-len : TcpPacketHeader -> Word {
+def tcp-len : TcpHeader -> Word {
   \case {
-    mk-tcp-packet-header src-port dst-port seq ack checksum len => len
+    mk-tcp-header src-port dst-port seq ack checksum len => len
   }
 }
 
@@ -30,79 +36,88 @@ data ByteVec : Nat -> Type {
   bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
 }
 
-def Reprs : Nat -> Type -> Type {
-  \l T => case l {
-    z => T,
-    s l' => repr (Reprs l' T)
+data IsFlatN (T : Type) (n : Nat) : Type {
+  is-flat-n : (IsValid : ByteVec n -> Type) -> ReprBy T ((b : ByteVec n) * IsValid b) -> IsFlatN T n
+}
+
+data IsFlat (T : Type) : Type {
+  is-flat : (n : Nat) -> IsFlatN T n -> IsFlat T
+}
+
+def flat-len : [T : Type] -> IsFlat T -> Nat {
+  \case {
+    is-flat n _ => n
   }
 }
 
-def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
-  \l t => case l to (\l => Reprs l T) {
-    z => t,
-    s l' => repr (reprs l' t)
+def IsValid : [T : Type] [n : Nat] -> IsFlatN T n -> ByteVec n -> Type {
+  \case {
+    is-flat-n IsValid _ => IsValid
   }
 }
 
-def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
-  \l => case l to (\l => Reprs l T -> T) {
-    z => id,
-    s l' => \r => unreprs l' (unrepr r)
-  }
+data IsFlatDep (T : Nat -> Type) : Type {
+  is-flat-dep : (f : Nat -> Nat) -> ((n : Nat) -> IsFlatN (T n) (f n)) -> IsFlatDep T
 }
 
-def subst-type : [A B : Type] -> Equal A B -> A -> B {
-  subst [Type] (\X => X)
+data Packet (H : Type) (flat-h : IsFlat H) (len : H -> Nat) (C : Nat -> Type) (flat-c : IsFlatDep C) : Nat -> Type {
+  mk-packet : (header : H) (contents : C (len header)) -> Packet H flat-h len C flat-c (add (flat-len flat-h) (len header))
 }
 
-def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
-  subst-type
+def tcp-header-is-valid : ByteVec 20 -> Bool {
+  \b => true -- always true
 }
 
-def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
-  \p => subst-type (sym p)
+def ip-header-is-valid : ByteVec 16 -> Bool {
+  \b => true -- always true
 }
 
-def ReprBy : Type -> Type -> Type {
-  \T U => (l : Nat) * Equal (Reprs l T) U
-}
-
-def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
-  \r a => case r {
-    (l, p) => subst-type p (reprs l a)
-  }
-}
-
-def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
-  \r b => case r {
-    (l, p) => unreprs l (subst-type (sym p) b)
-  }
-}
-
-def IsFlatN : Type -> Nat -> Type {
-  \T n => ReprBy T (ByteVec n)
-}
-
-def IsFlat : Type -> Type {
-  \T => (n : Nat) * IsFlatN T n
-}
-
-def IsFlatDep : (Nat -> Type) -> Type {
-  \T => ((n : Nat) -> IsFlatN (T n) n)
-}
-
-data Packet (H : Type) (flat-h : IsFlat H) (len : H -> Nat) (C : Nat -> Type) (flat-c : IsFlatDep C) : Type {
-  mk-packet : (header : H) (contents : C (len header)) -> Packet H flat-h len C flat-c
-}
-
-repr data TcpPacketHeader as ByteVec 20 {
-  mk-tcp-packet-header src-port dst-port seq ack checksum as ?h1
+repr data TcpHeader as (b : ByteVec 20) * Holds (tcp-header-is-valid b) {
+  mk-tcp-header src-port dst-port seq ack checksum as ?repr-tcp-header-ctor
   case s {
-    mk-tcp-packet-header => mk,
-  } as ?h2
+    mk-tcp-header => mk,
+  } as ?repr-tcp-header-case
 }
 
-def TcpPacket : (C : Nat -> Type) (flat-c : IsFlatDep C) -> Type {
-  Packet TcpPacketHeader (20, (1, refl)) (\p => word-to-nat (tcp-packet-len p))
+repr data IpHeader as (b : ByteVec 16) * Holds (ip-header-is-valid b) {
+  mk-ip-header src-ip dst-ip protocol len as ?repr-ip-header-ctor
+  case s {
+    mk-ip-header => mk,
+  } as ?repr-ip-header-case
 }
 
+-- def IsValidPacket : (H : Type) (flat-h : IsFlat H) (len : H -> Nat)
+--   (C : Nat -> Type) (flat-c : IsFlatDep C) (n : Nat) (b : ByteVec n) -> Type {
+--   \H flat-h len C flat-c n b => {
+
+--   }
+-- }
+
+repr data Packet H flat-h len C flat-c n as (b : ByteVec n) * IsValidPacket H flat-h len C flat-c n b {
+  mk-packet header contents as ?repr-packet-ctor
+  case s {
+    mk-packet => mk,
+  } as ?repr-packet-case
+}
+
+def tcp-header-is-flat : IsFlat TcpHeader {
+  is-flat 20 (is-flat-n (\b => Holds (tcp-header-is-valid b)) (1, refl))
+}
+
+-- def packet-is-flat : [H : Type] [flat-h : IsFlat H] [len : H -> Nat] [C : Nat -> Type] [flat-c : IsFlatDep C]
+--   -> IsFlatDep (Packet H flat-h len C flat-c)
+-- {
+--   is-flat-dep (\n => is-flat-n (\b => ) ?reprby)
+-- }
+
+-- def IpPacket : (C : Nat -> Type) (flat-c : IsFlatDep C) -> Type {
+--   Packet IpHeader ip-header-is-flat (\p => word-to-nat (ip-len p))
+-- }
+
+-- def TcpPacket : (C : Nat -> Type) (flat-c : IsFlatDep C) -> Type {
+--   IpPacket (Packet TcpHeader tcp-header-is-flat (\p => word-to-nat (tcp-len p))) packet-is-flat
+-- }
+
+-- def HttpPacket : Type {
+--   TcpPacket (\l => (ByteVec l) * Unit) (\n => (\_ => Unit, 0, refl))
+-- }

@@ -1,47 +1,175 @@
-
-def is-timezone : String -> Bool {
-  ?is-timezone
+data ByteVec : Nat -> Type {
+  bnil : ByteVec z,
+  bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
 }
 
-data TZ : Type {
-  mk-tz : (s : String) -> Equal (is-timezone s) true -> TZ
+data Time : Type {
+  millis : Fin (pow 2 64) -> Time
 }
 
-def current-time : IO Word {
+def current-time : IO Time {
   ?current-time
 }
 
-def fin-add-saturating : [n : Nat, m : Nat] -> Fin n -> Fin m -> Fin n {
-  ?fin-add-saturating
+data UdpHeader : Type {
+  udp-header : (
+    src-port : Word,
+    dst-port : Word,
+    len : Word,
+    checksum : Word,
+  ) -> UdpHeader
 }
 
-def repeat : (n : Nat) -> Byte -> ByteVec n {
-  \n b => case n to (\n => ByteVec n) {
-    z => bnil,
-    s n' => bcons b (repeat n' b)
+def udp-len : UdpHeader -> Nat {
+  \case {
+    udp-header src-port dst-port len checksum => fin-to-nat len
   }
 }
 
-def io-mapM_ : [A : Type] -> (A -> IO Unit) -> List A -> IO Unit {
-  \f xs => case xs {
-    nil => io-return tt,
-    cons x xs' => {
-      let m = io-bind (f x) (\_ => io-mapM_ f xs'); -- @@FIXME dies without this let??
-      m
+data UdpPacket : Type {
+  udp-packet : (h : UdpHeader) -> (contents : ByteVec (udp-len h)) -> UdpPacket
+}
+
+data FizzBuzz : Type {
+  fizz : FizzBuzz,
+  buzz : FizzBuzz,
+  fizzbuzz : FizzBuzz,
+}
+
+data Response (T : Type) : Type {
+  ok : T -> Response T,
+  drop : Response T,
+  error : String -> Response T,
+}
+
+def udp-server : (UdpPacket -> IO (Response UdpPacket)) -> IO () {
+  ?udp-server
+}
+
+def get-fizzbuzz : Nat -> Maybe FizzBuzz {
+  \n => case fin-eq (mod n 15) 0n {
+    true => just fizzbuzz,
+    false => case fin-eq (mod n 3) 0n {
+      true => just fizz,
+      false => case fin-eq (mod n 5) 0n {
+        true => just buzz,
+        false => nothing
+      }
     }
   }
 }
 
-def count-to-starting-at : (start : Nat, n : Nat) -> List Nat {
-  \start n => case n {
-    z => nil,
-    s n' => cons (add start n') (count-to-starting-at n' start)
+def nat-from-digits : [n : Nat] -> (digits : ByteVec n) -> Maybe Nat {
+  ?nat-from-digits
+}
+
+def MY_PORT : Word {
+  1234n
+}
+
+def nat-to-fin-trunc : [n : Nat] -> Nat -> Fin n {
+  ?nat-to-fin-trunc
+}
+
+def reply-to : UdpHeader -> (l : Nat) -> ByteVec l -> UdpPacket {
+  \h l b => case h {
+    udp-header src-port dst-port len checksum => {
+      -- udp-header MY_PORT src-port (nat-to-fin-trunc l) checksum
+      ?reply-to
+    }
   }
 }
 
-def count-to : Nat -> List Nat {
-  count-to-starting-at 0
+def string-bytes : String -> (l : Nat) * ByteVec l {
+  ?string-bytes
 }
+
+def handle-packet : UdpPacket -> IO (Response UdpPacket) {
+  \case {
+    udp-packet h contents => {
+      let contents-num = nat-from-digits contents;
+      case contents-num {
+        nothing => io-return (error "Invalid number in packet"),
+        just n => {
+          let reply = \m => case string-bytes m {
+            (l, b) => io-return (ok (reply-to h l b))
+          };
+          case get-fizzbuzz n {
+            nothing => reply "I got nothing",
+            just fb => case fb {
+              fizz => reply "Fizz",
+              buzz => reply "Buzz",
+              fizzbuzz => reply "FizzBuzz",
+            }
+          }
+        },
+      }
+    }
+  }
+}
+
+def main : IO () {
+  udp-server handle-packet
+}
+
+-- -- def handle-packet : Nat -> UdpPacket -> IO (Maybe UdpPacket) {
+-- --   \seq p => case p {
+-- --     mk-udp-packet src-port dst-port len checksum contents => {
+-- --       case contents {  -- The contents are expected to be three bytes forming a timezone
+-- --         bcons byte-a (bcons byte-b (bcons byte-c bnil)) => {
+-- --           let tz = tz-from-string (scons (byte-to-char byte-a) (scons (byte-to-char byte-b) (scons (byte-to-char byte-c) snil)));
+-- --           case tz {
+-- --             just tz' => {
+-- --               let offset-ms = tz-to-offset tz';
+-- --               let current-time = io-bind current-time (\t => io-return (fin-add-saturating t offset-ms));
+
+-- --               io-bind current-time (\ct => {
+-- --                 let res-contents = bv-chain (bv-write-word ct 0n) (bv-zeroed 3n);
+-- --                 let res-checksum = 0n; -- TODO
+-- --                 let res = mk-udp-packet dst-port src-port _ res-checksum ?res-contents;
+-- --                 just res
+-- --               })
+-- --             },
+-- --             nothing => nothing
+-- --           }
+-- --         },
+-- --         _ => io-return nothing
+-- --       }
+-- --     }
+-- --   }
+-- -- }
+
+
+
+--- OLD:
+
+-- def repeat : (n : Nat) -> Byte -> ByteVec n {
+--   \n b => case n to (\n => ByteVec n) {
+--     z => bnil,
+--     s n' => bcons b (repeat n' b)
+--   }
+-- }
+
+-- def io-mapM_ : [A : Type] -> (A -> IO Unit) -> List A -> IO Unit {
+--   \f xs => case xs {
+--     nil => io-return tt,
+--     cons x xs' => {
+--       let m = io-bind (f x) (\_ => io-mapM_ f xs'); -- @@FIXME dies without this let??
+--       m
+--     }
+--   }
+-- }
+
+-- def count-to-starting-at : (start : Nat, n : Nat) -> List Nat {
+--   \start n => case n {
+--     z => nil,
+--     s n' => cons (add start n') (count-to-starting-at n' start)
+--   }
+-- }
+
+-- def count-to : Nat -> List Nat {
+--   count-to-starting-at 0
+-- }
 
 -- repr data UdpPacket as JS {
 --   mk-udp-packet src-port dst-port len checksum contents as {

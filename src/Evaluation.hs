@@ -74,6 +74,7 @@ import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
+import Debug.Trace (traceM)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -88,6 +89,7 @@ import Globals
     getGlobalTags,
     unfoldDef,
   )
+import Literals (unfoldLit)
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
@@ -109,8 +111,6 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
-import Literals (unfoldLit)
-import Debug.Trace (traceM)
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -259,14 +259,17 @@ vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
   --     vApp a sp'
   --   Nothing -> do
   return $ VNeu (VRepr m n)
-vRepr l m (VNeu (VReprApp m' v sp)) = do
-  sp' <- mapSpineM (vRepr l m) sp
-  let mm' = m <> m'
-  if mm' == mempty
-    then
-      return $ vAppNeu v sp'
-    else
-      return $ VNeu (VReprApp mm' v sp')
+vRepr l m (VNeu (VReprApp m' v sp))
+  | (m > Finite 0 && m' < Finite 0)
+      || (m > Finite 0 && m' > Finite 0)
+      || (m < Finite 0 && m' < Finite 0) = do
+      sp' <- mapSpineM (vRepr l m) sp
+      let mm' = m <> m'
+      if mm' == mempty
+        then
+          return $ vAppNeu v sp'
+        else
+          return $ VNeu (VReprApp mm' v sp')
 vRepr _ m (VNeu n) = do
   return $ VNeu (VRepr m n)
 

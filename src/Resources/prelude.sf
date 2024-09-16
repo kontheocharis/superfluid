@@ -286,6 +286,10 @@ def not : Bool -> Bool {
   }
 }
 
+def mod : Nat -> (n : Nat) -> Fin n {
+  ?mod
+}
+
 def fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
@@ -420,6 +424,19 @@ def nat-eq : (n : Nat, m : Nat) -> Dec (Equal n m) {
         yes e => yes (cong s e),
         no f => no (s-co-cong f)
       }
+    }
+  }
+}
+
+def bool-eq : (a : Bool, b : Bool) -> Bool {
+  \a b => case a {
+    true => case b {
+      true => true,
+      false => false,
+    },
+    false => case b {
+      true => false,
+      false => true,
     }
   }
 }
@@ -585,4 +602,60 @@ def Byte : Type {
 
 def word-to-nat : Word -> Nat {
   fin-to-nat
+}
+
+def Holds : Bool -> Type {
+  \b => Equal b true
+}
+
+
+-- REPR helpers
+
+def Reprs : Nat -> Type -> Type {
+  \l T => case l {
+    z => T,
+    s l' => repr (Reprs l' T)
+  }
+}
+
+def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
+  \l t => case l to (\l => Reprs l T) {
+    z => t,
+    s l' => repr (reprs l' t)
+  }
+}
+
+def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
+  \l => case l to (\l => Reprs l T -> T) {
+    z => id,
+    s l' => \r => unreprs l' (unrepr r)
+  }
+}
+
+def subst-type : [A B : Type] -> Equal A B -> A -> B {
+  subst [Type] (\X => X)
+}
+
+def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
+  subst-type
+}
+
+def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
+  \p => subst-type (sym p)
+}
+
+def ReprBy : Type -> Type -> Type {
+  \T U => (l : Nat) * Equal (Reprs l T) U
+}
+
+def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
+  \r a => case r {
+    (l, p) => subst-type p (reprs l a)
+  }
+}
+
+def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
+  \r b => case r {
+    (l, p) => unreprs l (subst-type (sym p) b)
+  }
 }
