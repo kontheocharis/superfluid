@@ -109,6 +109,8 @@ import Value
     pattern VRepr,
     pattern VVar,
   )
+import Literals (unfoldLit)
+import Debug.Trace (traceM)
 
 class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -164,6 +166,7 @@ vCase :: (Eval m) => DataGlobal -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
 vCase dat v r cs = do
   v' <- unfoldDefs v
   case v' of
+    VLit l -> vCase dat (unfoldLit l) r cs
     VNeu n ->
       fromMaybe (return $ VNeu (VCaseApp dat n r cs Empty)) $
         firstJust
@@ -243,8 +246,17 @@ vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
       r'' <- r' $$ rpp
       rsp <- mapSpineM (vRepr l m) sp
       vApp r'' rsp
-    Nothing -> do
-      return $ VNeu (VRepr m n)
+    -- Nothing -> do
+    --   case g of
+    --     (DefGlob d) -> do
+    --       d' <- access (unfoldDef d)
+    --       case d' of
+    --         Just d'' -> do
+    --           d''' <- vApp d'' sp
+    --           traceM $ "got d''': " ++ show d'''
+    --           vRepr l m d'''
+    --         Nothing -> return $ VNeu (VRepr m n)
+    _ -> return $ VNeu (VRepr m n)
 vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
   f <- access (getCaseRepr dat)
   case f of

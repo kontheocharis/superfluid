@@ -42,24 +42,34 @@ def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
   }
 }
 
-def IsFlatD : Type -> Nat -> Type {
-  \T n => Equal (repr T) (ByteVec n)
+def Reprs : Nat -> Type -> Type {
+  \l T => case l {
+    z => T,
+    s l' => repr (Reprs l' T)
+  }
+}
+
+def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
+  \l t => case l to (\l => Reprs l T) {
+    z => t,
+    s l' => repr (reprs l' t)
+  }
+}
+
+def ReprBy : Type -> Type -> Type {
+  \T U => (l : Nat) * Equal (Reprs l T) U
+}
+
+def IsFlatN : Type -> Nat -> Type {
+  \T n => ReprBy T (ByteVec n)
 }
 
 def IsFlat : Type -> Type {
-  \T => (n : Nat) * IsFlatD T n
-}
-
-def FlatType : Type {
-  (T : Type) * IsFlat T
-}
-
-def FlatTypeD : Type {
-  (T : Nat -> Type) * ((n : Nat) -> IsFlatD (T n) n)
+  \T => (n : Nat) * IsFlatN T n
 }
 
 def IsFlatDep : (Nat -> Type) -> Type {
-  \T => ((n : Nat) -> IsFlatD (T n) n)
+  \T => ((n : Nat) -> IsFlatN (T n) n)
 }
 
 data Packet (H : Type) (flat-h : IsFlat H) (len : H -> Nat) (C : Nat -> Type) (flat-c : IsFlatDep C) : Type {
@@ -73,7 +83,7 @@ repr data TcpPacketHeader as ByteVec 20 {
   } as ?h2
 }
 
-def TcpPacket : (C : FlatTypeD) -> Type {
-  Packet (TcpPacketHeader, 20, refl) (\p => word-to-nat (tcp-packet-len p))
+def TcpPacket : (C : Nat -> Type) (flat-c : IsFlatDep C) -> Type {
+  Packet TcpPacketHeader (20, (1, refl)) (\p => word-to-nat (tcp-packet-len p))
 }
 

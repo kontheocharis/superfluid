@@ -186,7 +186,8 @@ isCompound (PCase {}) = True
 isCompound (PApp {}) = True
 isCompound (PRepr {}) = True
 isCompound (PLocated _ t) = isCompound t
-isCompound (PParams t _) = True
+isCompound (PParams t []) = isCompound t
+isCompound (PParams _ _) = True
 isCompound _ = False
 
 prettyLets :: (Monad m) => ([(Name, PTy, PTm)], PTm) -> m String
