@@ -30,18 +30,6 @@ data ByteVec : Nat -> Type {
   bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
 }
 
-def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
-  \p a => {
-    subst [Type] (\X => X) p a
-  }
-}
-
-def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
-  \p a => {
-    subst [Type] (\X => X) (sym p) a
-  }
-}
-
 def Reprs : Nat -> Type -> Type {
   \l T => case l {
     z => T,
@@ -56,8 +44,39 @@ def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
   }
 }
 
+def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
+  \l => case l to (\l => Reprs l T -> T) {
+    z => id,
+    s l' => \r => unreprs l' (unrepr r)
+  }
+}
+
+def subst-type : [A B : Type] -> Equal A B -> A -> B {
+  subst [Type] (\X => X)
+}
+
+def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
+  subst-type
+}
+
+def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
+  \p => subst-type (sym p)
+}
+
 def ReprBy : Type -> Type -> Type {
   \T U => (l : Nat) * Equal (Reprs l T) U
+}
+
+def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
+  \r a => case r {
+    (l, p) => subst-type p (reprs l a)
+  }
+}
+
+def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
+  \r b => case r {
+    (l, p) => unreprs l (subst-type (sym p) b)
+  }
 }
 
 def IsFlatN : Type -> Nat -> Type {
