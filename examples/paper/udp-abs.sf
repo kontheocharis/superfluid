@@ -31,11 +31,6 @@ def tcp-len : TcpHeader -> Word {
   }
 }
 
-data ByteVec : Nat -> Type {
-  bnil : ByteVec z,
-  bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
-}
-
 data IsFlatN (T : Type) (n : Nat) : Type {
   is-flat-n : (IsValid : ByteVec n -> Type) -> ReprBy T ((b : ByteVec n) * IsValid b) -> IsFlatN T n
 }

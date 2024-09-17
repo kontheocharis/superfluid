@@ -67,11 +67,11 @@ prim JsArray : Type -> Type
 
 prim JsBigInt : Type
 
-prim JsBigUint : Type
+prim JsUint : Type
 
 -- Extra conditions : make sure this index is computationally irrelevant
 
-prim JsBoundedUint : JsBigUint -> Type
+prim JsBoundedUint : JsUint -> Type
 
 prim JsNumber : Type
 
@@ -109,42 +109,46 @@ prim js-array-switch-r : [T : Type] -> [E : JsArray T -> Type]
 
 prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
 
-prim js-map : [A B : Type] -> (A * JsNumber -> B) -> JsArray A -> JsArray B
+prim js-length : [T : Type] -> JsArray T -> JsUint
 
-prim js-reduce : [T C : Type] -> (C -> T -> T) -> T -> JsArray T -> C
+prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
 
-prim js-length : [T : Type] -> JsArray T -> JsNumber
+prim js-reduce : [T C : Type] -> (C -> T -> C) -> C -> JsArray T -> C
 
-prim js-index : [T : Type] -> JsArray T -> JsNumber -> JsUnion T JsUndefined
+prim js-index : [T : Type] -> (a : JsArray T) -> JsBoundedUint (js-length a) -> T
+
+prim js-if-bounded : [A : Type] -> JsUint -> (n : JsUint) -> (JsBoundedUint n -> A) -> (() -> A) -> A
+
+prim js-assert-defined : [T : Type] -> JsUnion T JsUndefined -> T
 
 prim js-zero : JsNumber
 
 prim js-one : JsNumber
 
-prim js-big-uint-zero : JsBigUint
+prim js-uint-zero : JsUint
 
-prim js-big-uint-one : JsBigUint
+prim js-uint-one : JsUint
 
 prim js-plus : JsNumber -> JsNumber -> JsNumber
 
-prim js-big-uint-plus : JsBigUint -> JsBigUint -> JsBigUint
+prim js-uint-plus : JsUint -> JsUint -> JsUint
 
-prim js-bounded-uint-as-big : [n : JsBigUint] -> JsBoundedUint n -> JsBigUint
+prim js-forget-bound : [n : JsUint] -> JsBoundedUint n -> JsUint
 
-prim js-zero-or-pos : [A : JsBigUint -> Type]
-  -> (() -> A js-big-uint-zero)
-  -> ((n : JsBigUint) -> A (js-big-uint-plus js-big-uint-one n))
-  -> (i : JsBigUint)
+prim js-zero-or-pos : [A : JsUint -> Type]
+  -> (() -> A js-uint-zero)
+  -> ((n : JsUint) -> A (js-uint-plus js-uint-one n))
+  -> (i : JsUint)
   -> A i
 
-prim js-bounded-uint-zero : [n : JsBigUint] -> JsBoundedUint (js-big-uint-plus js-big-uint-one n)
+prim js-bounded-uint-zero : [n : JsUint] -> JsBoundedUint (js-uint-plus js-uint-one n)
 
-prim js-bounded-uint-inc : [n : JsBigUint] -> JsBoundedUint n -> JsBoundedUint (js-big-uint-plus js-big-uint-one n)
+prim js-bounded-uint-inc : [n : JsUint] -> JsBoundedUint n -> JsBoundedUint (js-uint-plus js-uint-one n)
 
-prim js-bounded-zero-or-pos : [A : (n : JsBigUint) -> JsBoundedUint n -> Type]
-  -> ([n : JsBigUint] -> A (js-big-uint-plus js-big-uint-one n) (js-bounded-uint-zero [n]))
-  -> ([n : JsBigUint] -> (n' : JsBoundedUint n) -> A (js-big-uint-plus js-big-uint-one n) (js-bounded-uint-inc n'))
-  -> [n : JsBigUint]
+prim js-bounded-zero-or-pos : [A : (n : JsUint) -> JsBoundedUint n -> Type]
+  -> ([n : JsUint] -> A (js-uint-plus js-uint-one n) (js-bounded-uint-zero [n]))
+  -> ([n : JsUint] -> (n' : JsBoundedUint n) -> A (js-uint-plus js-uint-one n) (js-bounded-uint-inc n'))
+  -> [n : JsUint]
   -> (i : JsBoundedUint n)
   -> A n i
 
@@ -152,17 +156,17 @@ prim js-minus : JsNumber -> JsNumber -> JsNumber
 
 prim js-times : JsNumber -> JsNumber -> JsNumber
 
-prim js-big-uint-times : JsBigUint -> JsBigUint -> JsBigUint
+prim js-uint-times : JsUint -> JsUint -> JsUint
 
 prim js-div : JsNumber -> JsNumber -> JsNumber
 
 prim js-mod : JsNumber -> JsNumber -> JsNumber
 
-prim js-big-uint-mod : JsBigUint -> JsBigUint -> JsBigUint
+prim js-uint-mod : JsUint -> JsUint -> JsUint
 
 prim js-pow : JsNumber -> JsNumber -> JsNumber
 
-prim js-big-uint-pow : JsBigUint -> JsBigUint -> JsBigUint
+prim js-uint-pow : JsUint -> JsUint -> JsUint
 
 prim js-neg : JsNumber -> JsNumber
 
@@ -220,27 +224,33 @@ prim js-buffer-get : JsBufferMod JsBuffer
 
 prim js-buffer-set : JsBuffer -> JsBufferMod ()
 
-prim js-buffer-run : [A : Type] -> JsBufferMod A -> JsBuffer * A
+prim js-buffer-empty : JsBuffer
 
-prim js-buffer-alloc : (byte-length : JsNumber) -> JsBuffer
+prim js-buffer-run : [A : Type] -> JsBuffer -> JsBufferMod A -> JsBuffer * A
 
-prim js-buffer-byte-length : JsBuffer -> JsNumber
+prim js-buffer-alloc : (byte-length : JsUint) -> JsBuffer
 
-prim js-buffer-copy : (source : JsBuffer, source-start : JsNumber, source-end : JsNumber, start : JsNumber) -> JsBufferMod ()
+prim js-buffer-byte-length : JsBuffer -> JsUint
 
-prim js-buffer-write-uint16-be : (value : JsNumber, offset : JsNumber) -> JsBufferMod ()
+prim js-buffer-copy : (source : JsBuffer, source-start : JsUint, source-end : JsUint, start : JsUint) -> JsBufferMod ()
 
-prim js-buffer-write-uint8 : (value : JsNumber, offset : JsNumber) -> JsBufferMod ()
+prim js-buffer-write-uint16-be : (value : JsUint, offset : JsUint) -> JsBufferMod ()
 
-prim js-buffer-read-uint16-be : (buffer : JsBuffer, offset : JsNumber) -> JsNumber
+prim js-buffer-write-uint8 : (value : JsUint, offset : JsUint) -> JsBufferMod ()
 
-prim js-buffer-read-uint8 : (buffer : JsBuffer, offset : JsNumber) -> JsNumber
+prim js-buffer-read-uint16-be : (buffer : JsBuffer, offset : JsUint) -> JsUint
 
-prim js-buffer-subarray : (buffer : JsBuffer, start : JsNumber, end : JsNumber) -> JsBuffer
+prim js-buffer-read-uint8 : (buffer : JsBuffer, offset : JsUint) -> JsUint
+
+prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> JsBuffer
+
+prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
 
 -- -- General primitives
 
-prim cast : [A : Type] -> [B : Type] -> A -> B
+prim unsafe-cast : [A : Type] -> (B : Type) -> A -> B
+
+prim unsafe-complete : [T : Type] -> (E : T -> Type) -> (t : T) -> [u : T] -> (h : E u) -> E t
 
 -- def from-js : [A : Type] -> JS -> A {
 --   \a => cast a
@@ -501,6 +511,20 @@ def nat-eq : (n : Nat, m : Nat) -> Bool {
   \n m => dec-to-bool (nat-eq-dep n m)
 }
 
+def lte : Nat -> Nat -> Bool {
+  \m n => case m {
+    z => true,
+    s m' => case n {
+      z => false,
+      s n' => lte m' n',
+    }
+  }
+}
+
+def lt : Nat -> Nat -> Bool {
+  \m n => and (not (nat-eq m n)) (lte m n)
+}
+
 def bool-eq : (a : Bool, b : Bool) -> Bool {
   \a b => case a {
     true => case b {
@@ -531,9 +555,9 @@ repr def and as \a b => unrepr (js-and (repr a) (repr b))
 repr def or as \a b => unrepr (js-or (repr a) (repr b))
 repr def not as \a => unrepr (js-not (repr a))
 
-repr data Nat as JsBigUint {
-  z as js-big-uint-zero,
-  s n as js-big-uint-plus js-big-uint-one (repr n),
+repr data Nat as JsUint {
+  z as js-uint-zero,
+  s n as js-uint-plus js-uint-one (repr n),
   case n to E {
     z => b,
     s => r,
@@ -542,10 +566,10 @@ repr data Nat as JsBigUint {
   }
 }
 
-repr def add as \a b => unrepr (js-big-uint-plus (repr a) (repr b))
-repr def mul as \a b => unrepr (js-big-uint-times (repr a) (repr b))
-repr def pow as \a b => unrepr (js-big-uint-pow (repr a) (repr b))
-repr def is-even as \n => unrepr (js-eqq (js-big-uint-mod (repr n) (repr 1)) js-big-uint-zero)
+repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
+repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
+repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
+repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
 repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
 
 repr data Fin i as JsBoundedUint (repr i) {
@@ -560,11 +584,11 @@ repr data Fin i as JsBoundedUint (repr i) {
 }
 
 repr def fin-to-nat as \n => {
-  unrepr (js-bounded-uint-as-big (repr n))
+  unrepr (js-forget-bound (repr n))
 }
 
 repr def fin-is-even as \n => {
-  unrepr (js-eqq (js-big-uint-mod (js-bounded-uint-as-big (repr n)) (repr 2)) js-big-uint-zero)
+  unrepr (js-eqq (js-uint-mod (js-forget-bound (repr n)) (repr 2)) js-uint-zero)
 }
 
 repr def fin-eq as \x y => unrepr (js-eqq (repr x) (repr y))
@@ -577,50 +601,24 @@ repr data List A as JsArray A {
     nil => n,
     cons => c,
   } as {
-    js-array-switch-l [A] [repr E] (\_ => repr n) (repr c) (repr l)
+    js-array-switch-l [A] [repr E] (\_ => repr n) (\a xs => repr (c a (unrepr xs))) (repr l)
   }
 }
 
--- repr def index as {
---   \i l => {
---     js-if (js-lt i (js-length l))
---       (cast (js-index l i))
---       (cast js-null)
---   }
--- }
+repr def length as \l => unrepr (js-length (repr l))
 
--- repr def length as \l => js-length l
--- repr def map as \f xs => js-map (cast f) xs
--- repr def fold as \f i xs => cast (js-reduce (\acc x => cast (f (cast x) (cast acc))) (to-js i) xs)
+repr def index as {
+  \i l => {
+    let l' = repr l;
+    js-if-bounded (repr i) (js-length l')
+      (\b => just (js-index l' b))
+      (\_ => nothing)
+  }
+}
 
+repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
--- -- data ByteVec : Nat -> Type {
--- --   bnil : ByteVec z,
--- --   bcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
--- -- }
-
--- -- repr data ByteVec n as JS {
--- --   bnil as js-buffer-alloc (repr 0),
--- --   bcons x xs as {
--- --     let old-len = js-buffer-byte-length xs;
--- --     let new-len = js-plus old-len (repr 1);
--- --     let b = js-buffer-alloc new-len;
--- --     let b' = js-buffer-write-uint8 x (repr 0) b;
--- --     js-buffer-copy xs (repr 0) old-len (repr 1) b'
--- --   },
--- --   case l {
--- --     bnil => n,
--- --     bcons => c
--- --   } as {
--- --     let n' = n;
--- --     let c' = c (js-index l (repr 0)) (js-buffer-subarray l (repr 1) (js-buffer-byte-length l));
--- --     let _ = ?h1;
-
--- --     js-if (js-eqq (js-buffer-byte-length l) (repr 0))
--- --       (cast n')
--- --       (cast c')
--- --   }
--- -- }
+repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
 
 -- -- repr data Dec A as JS {
 -- --   yes _ as js-true,
@@ -660,6 +658,49 @@ def word-to-nat : Word -> Nat {
 
 def Holds : Bool -> Type {
   \b => Equal b true
+}
+
+
+-- Byte lists and vectors
+
+data ByteList : Type {
+  bnil : ByteList,
+  bcons : Byte -> ByteList -> ByteList
+}
+
+data ByteVec : Nat -> Type {
+  bvnil : ByteVec z,
+  bvcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
+}
+
+repr data ByteList as JsBuffer {
+  bnil as js-buffer-empty,
+  bcons x xs as {
+    let old = repr xs;
+    let old-len = js-buffer-byte-length old;
+    let new-len = js-uint-plus old-len (repr 1);
+    let b = js-buffer-run (js-buffer-alloc new-len) ({
+      js-buffer-bind
+        (js-buffer-copy old (repr 0) old-len (repr 1))
+        (\_ => js-buffer-write-uint8 (js-forget-bound (repr x)) (repr 0))
+    });
+    fst b
+  },
+
+  case b to E {
+    bnil => n,
+    bcons => c
+  } as {
+    let b' = repr b;
+    js-if (js-eqq (js-buffer-byte-length b') (repr 0))
+      (\_ => unsafe-complete (repr E) b' (repr n))
+      (\_ => {
+        let x : Byte = unrepr (js-bound-trust-me [repr 256] (js-buffer-read-uint8 b' (repr 0)));
+        let xs : ByteList = unrepr (js-buffer-subarray b' (repr 1) (js-buffer-byte-length b'));
+        let m = repr (c x xs);
+        unsafe-complete (repr E) b' m
+      })
+  }
 }
 
 
