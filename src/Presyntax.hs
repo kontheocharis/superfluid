@@ -38,13 +38,13 @@ import Common
     arg,
     mode,
   )
+import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as S
 import Data.Set (Set)
 import Data.Typeable (Typeable)
 import Printing (Pretty (..), curlies)
-import Data.Foldable (toList)
-import qualified Data.Sequence as S
 
 type PTy = PTm
 
@@ -91,6 +91,7 @@ data PCtorRep = MkPCtorRep
 
 data PCaseRep = MkPCaseRep
   { srcSubject :: PPat,
+    srcElim :: Maybe PPat,
     srcBranches :: [(Name, PPat)],
     target :: PTm,
     tags :: Set Tag
@@ -285,7 +286,7 @@ instance (Monad m) => Pretty m PTm where
   pretty (PParams t ps) = do
     pt <- singlePretty t
     pps <- mapM pretty ps
-    return $ pt ++ "@[" ++  intercalate ", " pps ++ "]"
+    return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
 
 instance (Monad m) => Pretty m PCtor where
   pretty (MkPCtor n ty ts) = do
@@ -329,12 +330,17 @@ instance (Monad m) => Pretty m PCtorRep where
     return $ pts ++ psrc ++ " as " ++ pt
 
 instance (Monad m) => Pretty m PCaseRep where
-  pretty (MkPCaseRep srcSubject srcBranches target ts) = do
+  pretty (MkPCaseRep srcSubject srcElim srcBranches target ts) = do
     pts <- pretty ts
     psrcSubject <- pretty srcSubject
     psrcBranches <- mapM (\(n, p) -> do pn <- pretty n; pp <- pretty p; return $ pn ++ " => " ++ pp) srcBranches
     pt <- pretty target
-    return $ pts ++ "case " ++ psrcSubject ++ " " ++ curlies (intercalate ",\n" psrcBranches) ++ " as " ++ pt
+    pe <- case srcElim of
+      Nothing -> return ""
+      Just e -> do
+        pe' <- pretty e
+        return $ " to " ++ pe'
+    return $ pts ++ "case " ++ psrcSubject ++ pe ++ " " ++ curlies (intercalate ",\n" psrcBranches) ++ " as " ++ pt
 
 instance (Monad m) => Pretty m PDataRep where
   pretty (MkPDataRep src target cs caseExpr ts) = do

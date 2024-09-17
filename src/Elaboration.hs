@@ -202,7 +202,7 @@ elabCaseRep :: (Elab m) => DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
 elabCaseRep dat info r = do
   srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
   srcBranches <- S.fromList . map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
-  elimTy <- Arg Explicit <$> uniqueName
+  elimTy <- Arg Explicit <$> maybe uniqueName ensurePatIsBind r.srcElim
   tyIndices <-  mapM (traverse (const uniqueName)) info.elimTyArity
   tyParams <- S.replicateM (length info.params) (Arg Explicit <$> uniqueName)
   -- @@Todo: inherit arg names from header

@@ -222,6 +222,7 @@ reprCaseItem :: Parser PCaseRep
 reprCaseItem = do
   symbol "case"
   subject <- singlePat
+  tr <- toRet
   ctors <-
     curlies
       ( commaSep
@@ -234,7 +235,7 @@ reprCaseItem = do
       )
   symbol "as"
   t <- term
-  return $ MkPCaseRep subject ctors t mempty
+  return $ MkPCaseRep subject tr ctors t mempty
 
 -- | Parse a constructor item.
 ctorItem :: Parser PCtor

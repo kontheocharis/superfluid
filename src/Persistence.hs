@@ -1,14 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Persistence (preludePath, preludeContents) where
+module Persistence (preludePath) where
 
-import Data.FileEmbed (embedStringFile, makeRelativeToProject, strToExp)
-import Data.String (IsString)
+import Data.FileEmbed (makeRelativeToProject, strToExp)
 
 -- | The contents of the Prelude file.
 preludePath :: FilePath
-preludePath = $(makeRelativeToProject "src/Resources/prelude.sf" >>= strToExp)
-
--- | The contents of the Prelude file.
-preludeContents :: (IsString a) => a
-preludeContents = $(makeRelativeToProject "src/Resources/prelude.sf" >>= embedStringFile)
+preludePath = $(makeRelativeToProject "bootstrap/prelude.sf" >>= strToExp)
