@@ -279,7 +279,7 @@ instance (Monad m) => Pretty m PTm where
     case n of
       Finite 1 -> return $ "repr " ++ ps
       Finite (-1) -> return $ "unrepr " ++ ps
-      _ -> return $ "repr " ++ show pn ++ " " ++ ps
+      _ -> return $ "repr " ++ pn ++ " " ++ ps
   pretty (PLocated _ t) = pretty t
   pretty PUnit = return "()"
   pretty (PParams t []) = pretty t

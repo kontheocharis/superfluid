@@ -249,19 +249,22 @@ vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
 vRepr _ m (VNeu n@(VCaseApp {})) = do
   return $ VNeu (VRepr m n)
 vRepr l m (VNeu (VReprApp m' v sp)) = do
-  -- | (m > Finite 0 && m' < Finite 0)
+  -- \| (m > Finite 0 && m' < Finite 0)
   --     || (m > Finite 0 && m' > Finite 0)
   --     || (m < Finite 0 && m' < Finite 0) = do
   sp' <- mapSpineM (vRepr l m) sp
   let mm' = m <> m'
   if mm' == mempty
-    then
+    then do
       return $ vAppNeu v sp'
     else
       return $ VNeu (VReprApp mm' v sp')
+vRepr _ m (VNeu n@(VApp (VFlex _) _)) = do
+  return $ VNeu (VRepr m n)
 vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return (VNeu (VReprApp m (VApp h Empty) sp'))
+
 -- vRepr _ m (VNeu n) = do
 --   return $ VNeu (VRepr m n)
 

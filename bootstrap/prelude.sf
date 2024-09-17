@@ -500,40 +500,46 @@ repr def and as \a b => unrepr (js-and (repr a) (repr b))
 repr def or as \a b => unrepr (js-or (repr a) (repr b))
 repr def not as \a => unrepr (js-not (repr a))
 
--- repr data Nat as JsBigUint {
---   z as js-big-uint-zero,
---   s n as js-big-uint-plus js-big-uint-one n,
---   case n to E {
---     z => b,
---     s => r,
---   } as {
---     js-zero-or-pos [E] n (\_ => b) r
---   }
--- }
+repr data Nat as JsBigUint {
+  z as js-big-uint-zero,
+  s n as js-big-uint-plus js-big-uint-one (repr n),
+  case n to E {
+    z => b,
+    s => r,
+  } as {
+    js-zero-or-pos [repr E] (repr n) (\_ => repr b) (repr r)
+  }
+}
 
--- repr def add as \a b => js-big-uint-plus a b
--- repr def mul as \a b => js-big-uint-times a b
--- repr def pow as \a b => js-big-uint-pow a b
--- repr def is-even as \n => js-eqq (js-big-uint-mod n (repr 1)) js-big-uint-zero
--- repr def nat-eq as \a b => js-eqq a b
+repr def add as \a b => unrepr (js-big-uint-plus (repr a) (repr b))
+repr def mul as \a b => unrepr (js-big-uint-times (repr a) (repr b))
+repr def pow as \a b => unrepr (js-big-uint-pow (repr a) (repr b))
+repr def is-even as \n => unrepr (js-eqq (js-big-uint-mod (repr n) (repr 1)) js-big-uint-zero)
+repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
 
--- data Lt : Nat -> Nat -> Type {
---   lt-z : [n : Nat] -> Lt z (s n),
---   lt-s : [n : Nat, m : Nat] -> Lt n m -> Lt (s n) (s m)
--- }
+data Lt : Nat -> Nat -> Type {
+  lt-z : [n : Nat] -> Lt z (s n),
+  lt-s : [n : Nat, m : Nat] -> Lt m n -> Lt (s m) (s n)
+}
 
--- repr data Fin n as (i : Nat) * Lt i (unrepr n) {
---   fz as (0, lt-z),
---   fs n as case n {
---     (i, p) => ?h1
---   },
---   case n {
---     fz => b,
---     fs => r,
---   } as {
---     ?h2
---   }
--- }
+repr data Fin n as (i : Nat) * Lt i n {
+  fz as (0, lt-z),
+  fs n as case (repr n) {
+    (i, p) => (s i, lt-s p)
+  },
+  case n to E {
+    fz => b,
+    fs => r,
+  } as {
+  ?h1
+    -- case (repr n) to (repr E) {
+    --   (i, p) => case p to (\a b p => ?h0) {
+    --     lt-z => repr (b (unrepr (i, lt-z))),
+    --     lt-s p' => repr (r (unrepr (i, p')))
+    --   }
+    -- }
+  }
+}
 
 -- repr def fin-to-nat as \n => {
 --   let n' : Nat = unrepr n;
