@@ -79,9 +79,10 @@ import Evaluation
     unfoldDefs,
     vApp,
     vAppNeu,
+    vCase,
     vRepr,
     vReprTel,
-    ($$), vCase,
+    ($$),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -124,6 +125,7 @@ import Value
     liftPRenN,
     vGetSpine,
     pattern VGlob,
+    pattern VGlobE,
     pattern VRepr,
     pattern VVar,
   )
@@ -824,7 +826,6 @@ caseOf mode s r cs = do
       vs <- evalHere ss
       retTy <- vApp vrr (indexSp S.:|> Arg Explicit vs)
       unifyHere ty retTy
-      pretty (SCase d ss rr scs) >>= traceM
       return (SCase d ss rr scs, ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)
@@ -850,10 +851,10 @@ lit mode l = case mode of
       CharLit c -> return (CharLit c, KnownChar, Empty)
       NatLit n -> return (NatLit n, KnownNat, Empty)
       FinLit f bound -> do
-        (bound', _) <- bound (Check (VGlob (DataGlob (knownData KnownNat)) Empty))
+        (bound', _) <- bound (Check (VGlobE (DataGlob (knownData KnownNat)) Empty))
         vbound' <- evalHere bound'
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
-    return (SLit l', VGlob (DataGlob (knownData ty)) args)
+    return (SLit l', VGlobE (DataGlob (knownData ty)) args)
 
 defItem :: (Tc m) => Name -> Set Tag -> Child m -> Child m -> m ()
 defItem n ts ty tm = do

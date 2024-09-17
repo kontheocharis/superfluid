@@ -95,7 +95,7 @@ import Literals (unfoldLit)
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, STy, sPis)
+import Syntax (BoundState (..), Bounds, SPat (..), STm (..), STy, sAppSpine, sLams, sPis)
 import Value
   ( Closure (..),
     Env,
@@ -240,14 +240,16 @@ vRepr _ m (VLam e v t) = do
   return $ VLam e v t'
 vRepr _ _ VU = return VU
 vRepr _ _ (VLit i) = return $ VLit i
-vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
-  r <- access (getGlobalRepr g)
-  case r of
-    Just r' -> do
-      r'' <- r' $$ pp
-      res <- vApp r'' sp
-      vRepr l m res
-    Nothing -> return $ VNeu (VRepr m n)
+vRepr l m (VNeu n@(VApp (VGlobal g pp) sp))
+  | m > mempty = do
+      r <- access (getGlobalRepr g)
+      case r of
+        Just r' -> do
+          r'' <- r' $$ pp
+          res <- vApp r'' sp
+          vRepr l m res
+        Nothing -> return $ VNeu (VRepr m n)
+  | otherwise = return $ VNeu (VRepr m n)
 vRepr _ m (VNeu n@(VCaseApp {})) = do
   return $ VNeu (VRepr m n)
 vRepr l m (VNeu h@(VReprApp m' v sp))
@@ -267,9 +269,6 @@ vRepr _ m (VNeu n@(VApp (VFlex _) _)) = do
 vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return (VNeu (VReprApp m (VApp h Empty) sp'))
-
--- vRepr _ m (VNeu n) = do
---   return $ VNeu (VRepr m n)
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t

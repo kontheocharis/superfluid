@@ -51,10 +51,6 @@ prim conjure : [A : Type] -> A
 
 -- -- JS primitives
 
--- prim JS : Type
-
--- prim to-js : [A : Type] -> A -> JS
-
 prim JsUnion : Type -> Type -> Type
 
 prim JsNull : Type
@@ -446,6 +442,10 @@ def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P
   }
 }
 
+def subst-type : [A B : Type] -> Equal A B -> A -> B {
+  subst [Type] (\X => X)
+}
+
 def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
   \f e => case e to (\x y _ => Equal (f x) (f y)) {
     refl => refl
@@ -662,9 +662,20 @@ data ByteList : Type {
   bcons : Byte -> ByteList -> ByteList
 }
 
+def byte-list-length : ByteList -> Nat {
+  \l => case l {
+    bnil => z,
+    bcons _ xs => s (byte-list-length xs)
+  }
+}
+
 data ByteVec : Nat -> Type {
   bvnil : ByteVec z,
   bvcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
+}
+
+def byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
+  \[n] b => n
 }
 
 repr data ByteList as JsBuffer {
@@ -697,6 +708,30 @@ repr data ByteList as JsBuffer {
   }
 }
 
+-- The `n` can be computed from the data structure!!
+repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
+  bvnil as (bnil, refl),
+  bvcons x xs as case (repr xs) {
+    (l, p) => (bcons x l, cong s p)
+  },
+
+  case b to E {
+    bvnil => n,
+    bvcons => c
+  } as {
+    let b' = repr b;
+    let res = case b' to (\p => (repr (E (byte-list-length (fst p)))) (fst p, refl)) {
+      (l, p) => case l to (\l => repr (E (byte-list-length l)) (l, refl)) {
+        bnil => repr n,
+        bcons x xs => repr (c [byte-list-length xs] x (unrepr (xs, refl))),
+      }
+    };
+    -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
+    -- @@Todo: do this without cast and trust me
+    unsafe-cast (repr (E (byte-vec-length b) b)) res
+  }
+}
+
 
 -- REPR helpers
 
@@ -719,10 +754,6 @@ def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
     z => id,
     s l' => \r => unreprs l' (unrepr r)
   }
-}
-
-def subst-type : [A B : Type] -> Equal A B -> A -> B {
-  subst [Type] (\X => X)
 }
 
 def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {

@@ -23,6 +23,7 @@ module Value
     pattern VGl,
     pattern VGlob,
     pattern VCase,
+    pattern VGlobE,
   )
 where
 
@@ -131,4 +132,7 @@ pattern VGl :: Glob -> VTm
 pattern VGl g = VNeu (VHead (VGlobal g []))
 
 pattern VGlob :: Glob -> Spine VTm -> VTm
-pattern VGlob g sp = VNeu (VApp (VGlobal g []) sp)
+pattern VGlob g sp <- VNeu (VApp (VGlobal g _) sp)
+
+pattern VGlobE :: Glob -> Spine VTm -> VTm
+pattern VGlobE g sp = VNeu (VApp (VGlobal g []) sp)

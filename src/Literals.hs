@@ -14,7 +14,9 @@ import Value
   ( VHead (..),
     VNeu (..),
     VTm (..),
-    pattern VGl, pattern VGlob,
+    pattern VGl,
+    pattern VGlob,
+    pattern VGlobE,
   )
 
 minusOneNat :: VTm -> VTm
@@ -28,15 +30,15 @@ unfoldLit :: Lit VTm -> VTm
 unfoldLit = \case
   StringLit [] ->
     let inner =
-          VGlob
+          VGlobE
             (CtorGlob (knownCtor KnownNil))
             ( S.fromList
                 [Arg Implicit (VGl (DataGlob (knownData KnownChar)))]
             )
-     in VGlob (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
+     in VGlobE (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
   StringLit (x : xs) ->
     let inner =
-          VGlob
+          VGlobE
             (CtorGlob (knownCtor KnownCons))
             ( S.fromList
                 [ Arg Implicit (VGl (DataGlob (knownData KnownChar))),
@@ -44,10 +46,10 @@ unfoldLit = \case
                   Arg Explicit (VLit (StringLit xs))
                 ]
             )
-     in VGlob (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
+     in VGlobE (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
   CharLit x ->
     let finBound = VLit (NatLit (2 ^ (32 :: Natural)))
-     in VGlob
+     in VGlobE
           (CtorGlob (knownCtor KnownChr))
           ( S.singleton
               ( Arg
@@ -63,11 +65,11 @@ unfoldLit = \case
   NatLit 0 ->
     VGl (CtorGlob (knownCtor KnownZero))
   NatLit n ->
-    VGlob (CtorGlob (knownCtor KnownSucc)) (S.singleton (Arg Explicit (VLit (NatLit (n - 1)))))
+    VGlobE (CtorGlob (knownCtor KnownSucc)) (S.singleton (Arg Explicit (VLit (NatLit (n - 1)))))
   FinLit 0 n -> do
-    VGlob (CtorGlob (knownCtor KnownFZero)) (S.singleton (Arg Implicit n))
+    VGlobE (CtorGlob (knownCtor KnownFZero)) (S.singleton (Arg Implicit n))
   FinLit d n ->
-    VGlob
+    VGlobE
       (CtorGlob (knownCtor KnownFSucc))
       ( S.fromList
           [ Arg Implicit n,
