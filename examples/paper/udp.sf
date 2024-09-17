@@ -11,6 +11,28 @@ def current-time : IO Time {
   ?current-time
 }
 
+def nat-from-digits : [n : Nat] -> (digits : ByteVec n) -> Maybe Nat {
+  ?nat-from-digits
+}
+
+def nat-to-fin-trunc : [n : Nat] -> Nat -> Fin n {
+  ?nat-to-fin-trunc
+}
+
+def trunc-buffer : [n m : Nat] -> ByteVec n -> ByteVec (fin-to-nat (nat-to-fin-trunc [m] n)) {
+  ?trunc-buffer
+}
+
+def string-bytes : String -> (l : Nat) * ByteVec l {
+  ?string-bytes
+}
+
+data Response (T : Type) : Type {
+  ok : T -> Response T,
+  drop : Response T,
+  error : String -> Response T,
+}
+
 data UdpHeader : Type {
   udp-header : (
     src-port : Word,
@@ -30,20 +52,14 @@ data UdpPacket : Type {
   udp-packet : (h : UdpHeader) -> (contents : ByteVec (udp-len h)) -> UdpPacket
 }
 
+def udp-server : (UdpPacket -> IO (Response UdpPacket)) -> IO () {
+  ?udp-server
+}
+
 data FizzBuzz : Type {
   fizz : FizzBuzz,
   buzz : FizzBuzz,
   fizzbuzz : FizzBuzz,
-}
-
-data Response (T : Type) : Type {
-  ok : T -> Response T,
-  drop : Response T,
-  error : String -> Response T,
-}
-
-def udp-server : (UdpPacket -> IO (Response UdpPacket)) -> IO () {
-  ?udp-server
 }
 
 def get-fizzbuzz : Nat -> Maybe FizzBuzz {
@@ -59,29 +75,17 @@ def get-fizzbuzz : Nat -> Maybe FizzBuzz {
   }
 }
 
-def nat-from-digits : [n : Nat] -> (digits : ByteVec n) -> Maybe Nat {
-  ?nat-from-digits
-}
-
 def MY_PORT : Word {
   1234n
-}
-
-def nat-to-fin-trunc : [n : Nat] -> Nat -> Fin n {
-  ?nat-to-fin-trunc
 }
 
 def reply-to : UdpHeader -> (l : Nat) -> ByteVec l -> UdpPacket {
   \h l b => case h {
     udp-header src-port dst-port len checksum => {
-      -- udp-header MY_PORT src-port (nat-to-fin-trunc l) checksum
-      ?reply-to
+      let h' = udp-header MY_PORT src-port (nat-to-fin-trunc l) checksum;
+      udp-packet h' (trunc-buffer b)
     }
   }
-}
-
-def string-bytes : String -> (l : Nat) * ByteVec l {
-  ?string-bytes
 }
 
 def handle-packet : UdpPacket -> IO (Response UdpPacket) {

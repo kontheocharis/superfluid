@@ -49,6 +49,8 @@ prim JS : Type
 
 prim to-js : [A : Type] -> A -> JS
 
+prim JsUnion : Type -> Type -> Type
+
 prim js-null : JS
 
 prim js-undefined : JS
