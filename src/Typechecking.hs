@@ -461,7 +461,6 @@ checkMeta :: (Tc m) => Maybe Name -> VTy -> m (STm, VTy)
 checkMeta n ty = do
   m <- newMeta n
   c <- getCtx
-  pretty ty >>= showMessage
   case n of
     Just _ -> addGoal (Goal c m ty)
     Nothing -> return ()
