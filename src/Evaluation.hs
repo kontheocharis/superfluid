@@ -52,6 +52,7 @@ import Common
     globName,
     inv,
     lvlToIdx,
+    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
@@ -93,7 +94,7 @@ import Literals (unfoldLit)
 import Meta (HasMetas, SolvedMetas, lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams)
+import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams, STy, sPis)
 import Value
   ( Closure (..),
     Env,
@@ -248,17 +249,18 @@ vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
     Nothing -> return $ VNeu (VRepr m n)
 vRepr _ m (VNeu n@(VCaseApp {})) = do
   return $ VNeu (VRepr m n)
-vRepr l m (VNeu (VReprApp m' v sp)) = do
-  -- \| (m > Finite 0 && m' < Finite 0)
-  --     || (m > Finite 0 && m' > Finite 0)
-  --     || (m < Finite 0 && m' < Finite 0) = do
-  sp' <- mapSpineM (vRepr l m) sp
-  let mm' = m <> m'
-  if mm' == mempty
-    then do
-      return $ vAppNeu v sp'
-    else
-      return $ VNeu (VReprApp mm' v sp')
+vRepr l m (VNeu h@(VReprApp m' v sp))
+  | (m > Finite 0 && m' < Finite 0)
+      || (m > Finite 0 && m' > Finite 0)
+      || (m < Finite 0 && m' < Finite 0) = do
+      sp' <- mapSpineM (vRepr l m) sp
+      let mm' = m <> m'
+      if mm' == mempty
+        then do
+          return $ vAppNeu v sp'
+        else
+          return $ VNeu (VReprApp mm' v sp')
+  | otherwise = return $ VNeu (VReprApp m h Empty)
 vRepr _ m (VNeu n@(VApp (VFlex _) _)) = do
   return $ VNeu (VRepr m n)
 vRepr l m (VNeu (VApp h sp)) = do
@@ -458,15 +460,15 @@ isTypeFamily l t = do
     VU -> return True
     _ -> return False
 
-isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m Bool
+isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine ()))
 isCtorTy l d t = do
   t' <- force t >> unfoldDefs t
   case t' of
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
-    (VNeu (VApp (VGlobal (DataGlob d') _) _)) -> return $ d == d'
-    _ -> return False
+    (VNeu (VApp (VGlobal (DataGlob d') _) sp)) | d == d' -> return (Just (mapSpine (const ()) sp))
+    _ -> return Nothing
 
 ifIsData :: (Eval m) => VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
 ifIsData v a b = do

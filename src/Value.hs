@@ -111,6 +111,7 @@ vGetSpine (VNeu (VCaseApp _ _ _ _ sp)) = sp
 vGetSpine (VNeu (VReprApp _ _ sp)) = sp
 vGetSpine _ = Empty
 
+
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty
 

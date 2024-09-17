@@ -47,6 +47,8 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
 
 prim trust-me : [A : Type, x : A, y : A] -> Equal x y
 
+prim conjure : [A : Type] -> A
+
 -- -- JS primitives
 
 -- prim JS : Type
@@ -66,6 +68,10 @@ prim JsArray : Type -> Type
 prim JsBigInt : Type
 
 prim JsBigUint : Type
+
+-- Extra conditions : make sure this index is computationally irrelevant
+
+prim JsBoundedUint : JsBigUint -> Type
 
 prim JsNumber : Type
 
@@ -89,6 +95,18 @@ prim js-array-extend-l : [T : Type] -> T -> JsArray T -> JsArray T
 
 prim js-array-extend-r : [T : Type] -> JsArray T -> T -> JsArray T
 
+prim js-array-switch-l : [T : Type] -> [E : JsArray T -> Type]
+  -> (Unit -> E js-empty-array)
+  -> ((x : T) -> (xs : JsArray T) -> E (js-array-extend-l x xs))
+  -> (l : JsArray T)
+  -> E l
+
+prim js-array-switch-r : [T : Type] -> [E : JsArray T -> Type]
+  -> (Unit -> E js-empty-array)
+  -> ((xs : JsArray T) -> (x : T) -> E (js-array-extend-r xs x))
+  -> (l : JsArray T)
+  -> E l
+
 prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
 
 prim js-map : [A B : Type] -> (A * JsNumber -> B) -> JsArray A -> JsArray B
@@ -111,11 +129,24 @@ prim js-plus : JsNumber -> JsNumber -> JsNumber
 
 prim js-big-uint-plus : JsBigUint -> JsBigUint -> JsBigUint
 
+prim js-bounded-uint-as-big : [n : JsBigUint] -> JsBoundedUint n -> JsBigUint
+
 prim js-zero-or-pos : [A : JsBigUint -> Type]
-  -> (i : JsBigUint)
   -> (() -> A js-big-uint-zero)
   -> ((n : JsBigUint) -> A (js-big-uint-plus js-big-uint-one n))
+  -> (i : JsBigUint)
   -> A i
+
+prim js-bounded-uint-zero : [n : JsBigUint] -> JsBoundedUint (js-big-uint-plus js-big-uint-one n)
+
+prim js-bounded-uint-inc : [n : JsBigUint] -> JsBoundedUint n -> JsBoundedUint (js-big-uint-plus js-big-uint-one n)
+
+prim js-bounded-zero-or-pos : [A : (n : JsBigUint) -> JsBoundedUint n -> Type]
+  -> ([n : JsBigUint] -> A (js-big-uint-plus js-big-uint-one n) (js-bounded-uint-zero [n]))
+  -> ([n : JsBigUint] -> (n' : JsBoundedUint n) -> A (js-big-uint-plus js-big-uint-one n) (js-bounded-uint-inc n'))
+  -> [n : JsBigUint]
+  -> (i : JsBoundedUint n)
+  -> A n i
 
 prim js-minus : JsNumber -> JsNumber -> JsNumber
 
@@ -135,13 +166,13 @@ prim js-big-uint-pow : JsBigUint -> JsBigUint -> JsBigUint
 
 prim js-neg : JsNumber -> JsNumber
 
-prim js-eq : [T : Type] -> T -> T -> JsBool
+prim js-eq : [A B : Type] -> A -> B -> JsBool
 
-prim js-eqq : [T : Type] -> T -> T -> JsBool
+prim js-eqq : [A B : Type] -> A -> B -> JsBool
 
-prim js-neq : [T : Type] -> T -> T -> JsBool
+prim js-neq : [A B : Type] -> A -> B -> JsBool
 
-prim js-neqq : [T : Type] -> T -> T -> JsBool
+prim js-neqq : [A B : Type] -> A -> B -> JsBool
 
 prim js-lt : JsNumber -> JsNumber -> JsBool
 
@@ -507,7 +538,7 @@ repr data Nat as JsBigUint {
     z => b,
     s => r,
   } as {
-    js-zero-or-pos [repr E] (repr n) (\_ => repr b) (repr r)
+    js-zero-or-pos [repr E] (\_ => repr b) (repr r) (repr n)
   }
 }
 
@@ -517,65 +548,38 @@ repr def pow as \a b => unrepr (js-big-uint-pow (repr a) (repr b))
 repr def is-even as \n => unrepr (js-eqq (js-big-uint-mod (repr n) (repr 1)) js-big-uint-zero)
 repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
 
-data Lt : Nat -> Nat -> Type {
-  lt-z : [n : Nat] -> Lt z (s n),
-  lt-s : [n : Nat, m : Nat] -> Lt m n -> Lt (s m) (s n)
-}
-
-repr data Fin n as (i : Nat) * Lt i n {
-  fz as (0, lt-z),
-  fs n as case (repr n) {
-    (i, p) => (s i, lt-s p)
-  },
+repr data Fin i as JsBoundedUint (repr i) {
+  fz as js-bounded-uint-zero,
+  fs n as js-bounded-uint-inc (repr n),
   case n to E {
     fz => b,
     fs => r,
   } as {
-  ?h1
-    -- case (repr n) to (repr E) {
-    --   (i, p) => case p to (\a b p => ?h0) {
-    --     lt-z => repr (b (unrepr (i, lt-z))),
-    --     lt-s p' => repr (r (unrepr (i, p')))
-    --   }
-    -- }
+    js-bounded-zero-or-pos [repr E] (repr b) (repr r) (repr n)
   }
 }
 
--- repr def fin-to-nat as \n => {
---   let n' : Nat = unrepr n;
---   repr n'
--- }
+repr def fin-to-nat as \n => {
+  unrepr (js-bounded-uint-as-big (repr n))
+}
 
--- repr def fin-is-even as \n => js-eqq (js-mod n js-two) js-zero
--- repr def fin-eq as \x y => js-eqq x y
+repr def fin-is-even as \n => {
+  unrepr (js-eqq (js-big-uint-mod (js-bounded-uint-as-big (repr n)) (repr 2)) js-big-uint-zero)
+}
 
--- repr data Maybe A as JS {
---   nothing as js-null,
---   just a as to-js a,
+repr def fin-eq as \x y => unrepr (js-eqq (repr x) (repr y))
 
---   case m {
---     nothing => n,
---     just => j,
---   } as {
---     js-if (js-eqq m js-null)
---       (cast n)
---       (cast (j (cast m)))
---   }
--- }
+repr data List A as JsArray A {
+  nil as js-empty-array,
+  cons x xs as js-array-extend-l x (repr xs),
 
--- repr data List A as JS {
---   nil as js-empty-array,
---   cons x xs as js-array-extend-l (to-js x) xs,
-
---   case l {
---     nil => n,
---     cons => c,
---   } as {
---     js-if (js-eqq (js-length l) js-zero)
---       (cast n)
---       (cast (c (cast (js-index l js-zero)) (js-slice l js-one (js-length l))))
---   }
--- }
+  case l to E {
+    nil => n,
+    cons => c,
+  } as {
+    js-array-switch-l [A] [repr E] (\_ => repr n) (repr c) (repr l)
+  }
+}
 
 -- repr def index as {
 --   \i l => {

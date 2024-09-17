@@ -24,13 +24,14 @@ import Common
     Spine,
     Times (..),
     mapSpine,
-    unName,
+    unName, Tel,
   )
 import Control.Monad (replicateM)
+import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import qualified Data.Sequence as S
 import Debug.Trace (traceM)
-import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
+import Globals (CtorGlobalInfo (..), DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -49,7 +50,7 @@ import Presyntax
     toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (STm (..))
+import Syntax (STm (..), STy)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -82,7 +83,12 @@ import Value (VTm (..), VTy)
 
 -- Presyntax exists below here
 
-data ElabError = PatMustBeBind PTm | PatMustBeHeadWithBinds PTm | ExpectedDataGlobal Name | ExpectedCtorGlobal Name
+data ElabError
+  = PatMustBeBind PTm
+  | PatMustBeHeadWithBinds PTm
+  | ExpectedDataGlobal Name
+  | ExpectedCtorGlobal Name
+  | PatMustBeFullyApplied Int Int
   deriving (Show)
 
 instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
@@ -102,6 +108,8 @@ instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
         PatMustBeBind a' -> do
           e' <- pretty a'
           return $ "Pattern must be a bind, but got: " ++ e'
+        PatMustBeFullyApplied n n' ->
+          return $ "Pattern must be fully applied, but got " ++ show n' ++ " arguments instead of " ++ show n
 
 class (Tc m) => Elab m where
   elabError :: ElabError -> m a
@@ -140,7 +148,7 @@ elab p mode = case (p, mode) of
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
-  (PParams t ts, Infer) -> error "impossible"
+  (PParams _ _, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()
 elabDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
@@ -177,6 +185,10 @@ ensurePatIsBind p = case p of
   PName n -> return n
   _ -> elabError (PatMustBeBind p)
 
+ensurePatIsFullyApplied :: (Elab m) => Int -> Int -> m ()
+ensurePatIsFullyApplied n n' = do
+  when (n' /= n) $ elabError (PatMustBeFullyApplied n n')
+
 elabDataRep :: (Elab m) => PDataRep -> m ()
 elabDataRep r = do
   (h, sp) <- ensurePatIsHeadWithBinds r.src
@@ -185,34 +197,33 @@ elabDataRep r = do
     Just (DataInfo info) -> do
       let target' = pLams sp (PRepr (Finite (-1)) r.target)
       let dat = DataGlobal h
-      reprDataItem dat r.tags (elab target')
-      mapM_ elabCtorRep r.ctors
-      elabCaseRep dat info r.caseExpr
+      te <- reprDataItem dat r.tags (elab target')
+      mapM_ (elabCtorRep te) r.ctors
+      elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
 
-elabCtorRep :: (Elab m) => PCtorRep -> m ()
-elabCtorRep r = do
+elabCtorRep :: (Elab m) => Tel STy -> PCtorRep -> m ()
+elabCtorRep te r = do
   (h, sp) <- ensurePatIsHeadWithBinds r.src
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
       let target' = pLams sp (PRepr (Finite (-1)) r.target)
-      reprCtorItem (CtorGlobal h) r.tags (elab target')
+      reprCtorItem te (CtorGlobal h) r.tags (elab target')
     _ -> elabError (ExpectedCtorGlobal h)
 
-elabCaseRep :: (Elab m) => DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
-elabCaseRep dat info r = do
+elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
+elabCaseRep te dat info r = do
   srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
   srcBranches <- S.fromList . map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
+  ensurePatIsFullyApplied (length info.ctors) (length r.srcBranches)
   elimTy <- Arg Explicit <$> maybe uniqueName ensurePatIsBind r.srcElim
-  tyIndices <- mapM (traverse (const uniqueName)) info.elimTyArity
-  tyParams <- S.replicateM (length info.params) (Arg Explicit <$> uniqueName)
-  -- @@Todo: inherit arg names from header
+  tyIndices <- mapM (traverse (const uniqueName)) info.indexArity
   let target' =
         pLams
-          (tyParams S.>< S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
+          (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
           (PRepr (Finite (-1)) r.target)
-  reprCaseItem dat r.tags (elab target')
+  reprCaseItem te dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
 elabDefRep r = do

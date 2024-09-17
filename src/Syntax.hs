@@ -9,6 +9,7 @@ module Syntax
     sPis,
     sGatherApps,
     sGatherPis,
+    sGatherLams,
     uniqueSLams,
   )
 where
@@ -77,4 +78,9 @@ sPis (Param m n a :<| xs) b = SPi m n a (sPis xs b)
 sGatherPis :: STm -> (Tel STm, STm)
 sGatherPis = \case
   SPi m n a b -> let (xs, b') = sGatherPis b in (Param m n a :<| xs, b')
+  t -> (Empty, t)
+
+sGatherLams :: STm -> (Spine Name, STm)
+sGatherLams = \case
+  SLam m n t -> let (ns, b) = sGatherLams t in (Arg m n :<| ns, b)
   t -> (Empty, t)

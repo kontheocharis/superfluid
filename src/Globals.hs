@@ -56,16 +56,18 @@ import Value (Closure, VTm (..), VTy)
 data CtorGlobalInfo = CtorGlobalInfo
   { ty :: Closure,
     idx :: Int,
-    dataGlobal :: DataGlobal
+    dataGlobal :: DataGlobal,
+    argArity :: Spine ()
   }
 
 data DataGlobalInfo = DataGlobalInfo
   { params :: Tel STy,
+    fullTy :: VTy,
     ty :: Closure,
     ctors :: [CtorGlobal],
     motiveTy :: Maybe Closure,
-    elimTy :: Maybe VTm,
-    elimTyArity :: Spine () -- might not be set yet
+    elimTy :: Maybe Closure,
+    indexArity :: Spine () -- might not be set yet
   }
 
 data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet

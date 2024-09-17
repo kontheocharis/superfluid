@@ -45,9 +45,9 @@ module Typechecking
 where
 
 import Algebra.Lattice (Lattice (..), (/\))
-import Common (Arg (..), Clause, CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (CtorGlob, DataGlob, DefGlob, PrimGlob), Has (..), HasNameSupply (uniqueName), HasProjectFiles, Idx (..), Lit (..), Loc, Lvl (..), MetaVar, Name (Name), Param (..), PiMode (..), PrimGlobal (..), Spine, Tag, Tel, Times (Finite), inv, lvlToIdx, nextLvl, nextLvls, pattern Impossible, pattern Possible)
+import Common (Arg (..), Clause, CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (CtorGlob, DataGlob, DefGlob, PrimGlob), Has (..), HasNameSupply (uniqueName), HasProjectFiles, Idx (..), Lit (..), Loc, Lvl (..), MetaVar, Name (Name), Param (..), PiMode (..), PrimGlobal (..), Spine, Tag, Tel, Times (Finite), inv, lvlToIdx, nextLvl, nextLvls, telWithNames, pattern Impossible, pattern Possible)
 import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless)
+import Control.Monad (replicateM, unless, void)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -109,7 +109,7 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherPis, sPis, uniqueSLams)
+import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherLams, sGatherPis, sPis, uniqueSLams)
 import Value
   ( Closure (body, numVars),
     Env,
@@ -886,7 +886,8 @@ dataItem n ts te ty = do
     unless i (tcError $ InvalidDataFamily vty)
     return ty'
   cty <- closeHere (length te') ty'
-  modify (addItem n (DataInfo (DataGlobalInfo te' cty [] Nothing Nothing Empty)) ts)
+  fty <- evalHere $ sPis te' ty'
+  modify (addItem n (DataInfo (DataGlobalInfo te' fty cty [] Nothing Nothing Empty)) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
@@ -898,7 +899,7 @@ endDataItem dat = do
             d
               { elimTy = Just elimTy,
                 motiveTy = Just motiveTy,
-                elimTyArity = arity
+                indexArity = arity
               }
         )
     )
@@ -907,15 +908,16 @@ ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
   di <- access (getDataGlobal dat)
   idx <- access (\s -> length (getDataGlobal dat s).ctors)
-  ty' <- enterTel di.params $ do
+  (sp, ty') <- enterTel di.params $ do
     ensureNewName n
     (ty', _) <- ty (Check VU)
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
-    unless i (tcError $ InvalidCtorType ty')
-    return ty'
+    case i of
+      Nothing -> tcError $ InvalidCtorType ty'
+      Just sp -> return (sp, ty')
   cty <- closeHere (length di.params) ty'
-  modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat)) ts)
+  modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
@@ -930,39 +932,56 @@ vReprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
 
-vReprTelHere :: (Tc m) => Times -> Tel STm -> m (Tel STm)
-vReprTelHere m te = do
-  l <- accessCtx (\c -> c.lvl)
-  vReprTel l m te
-
-reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m ()
+reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
 reprItem te getGlob addGlob ts r = do
   ty <- getGlob
-  -- rte <- vReprTelHere (Finite 1) te
-  -- @@Todo: inherit arg names from header
-  r' <- enterTel te $ do
-    -- ty' <- vReprHere (Finite 1) ty
-    (r', _) <- r (Check ty)
-    return r'
+  (r', _) <- enterTel te $ do
+    r (Check ty)
   vr <- closeHere (length te) r'
   modify (addGlob vr ts)
+  return r'
 
-reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
-reprDataItem dat = reprItem Empty (access (getDataGlobal dat) >>= \d -> snd <$> globalInfoToTm dat.globalName (DataInfo d)) (addDataRepr dat)
+reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m (Tel STm)
+reprDataItem dat ts c = do
+  di <- access (getDataGlobal dat)
+  tm <-
+    reprItem
+      Empty
+      (return di.fullTy)
+      (addDataRepr dat)
+      ts
+      c
+  let (ls, _) = sGatherLams tm
+  return (telWithNames di.params ls)
 
-reprCtorItem :: (Tc m) => CtorGlobal -> Set Tag -> Child m -> m ()
-reprCtorItem ctor ts c = do
+reprCtorItem :: (Tc m) => Tel STm -> CtorGlobal -> Set Tag -> Child m -> m ()
+reprCtorItem te ctor ts c = do
   ci <- access (getCtorGlobal ctor)
-  di <- access (getDataGlobal ci.dataGlobal)
-  reprItem di.params (access (getCtorGlobal ctor) >>= \d -> snd <$> globalInfoToTm ctor.globalName (CtorInfo d)) (addCtorRepr ctor) ts c
+  _ <-
+    reprItem
+      te
+      (evalInOwnCtxHere ci.ty)
+      (addCtorRepr ctor)
+      ts
+      c
+  return ()
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
-reprDefItem def = reprItem Empty (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def)
+reprDefItem def ts c = do
+  _ <- reprItem Empty (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def) ts c
+  return ()
 
-reprCaseItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m ()
-reprCaseItem dat ts c = do
-  elimTy <- access (getDataGlobal dat) >>= \d -> return $ fromJust d.elimTy
-  reprItem Empty (return elimTy) (addCaseRepr dat) ts c
+reprCaseItem :: (Tc m) => Tel STm -> DataGlobal -> Set Tag -> Child m -> m ()
+reprCaseItem te dat ts c = do
+  di <- access (getDataGlobal dat)
+  _ <-
+    reprItem
+      te
+      (evalInOwnCtxHere (fromJust di.elimTy))
+      (addCaseRepr dat)
+      ts
+      c
+  return ()
 
 quoteHere :: (Tc m) => VTm -> m STm
 quoteHere t = do
@@ -984,7 +1003,7 @@ telWithUniqueNames = do
           Name _ -> return (Param m n a)
     )
 
-buildElimTy :: (Tc m) => DataGlobal -> m (Closure, VTy, Spine ())
+buildElimTy :: (Tc m) => DataGlobal -> m (Closure, Closure, Spine ())
 buildElimTy dat = do
   -- @@Cleanup: this is a fucking mess, ideally should hide all the index acrobatics..
 
@@ -1010,8 +1029,7 @@ buildElimTy dat = do
           ( foldr
               (><)
               Empty
-              [ sTyParams,
-                S.singleton (Param Explicit elimTyName motiveTy),
+              [ S.singleton (Param Explicit elimTyName motiveTy),
                 S.fromList
                   ( zipWith
                       (\i (methodTy, methodName) -> Param Explicit methodName (methodTy i))
@@ -1024,7 +1042,7 @@ buildElimTy dat = do
           )
           (sAppSpine (SVar (Idx (1 + length sTyIndicesBinds + length methodTys))) (spineForTel 1 sTyIndicesBinds S.|> Arg Explicit (SVar (Idx 0))))
 
-  elimTy' <- evalHere elimTy
+  elimTy' <- closeHere (length datInfo.params) elimTy
   motiveTy' <- closeHere (length datInfo.params) motiveTy
   return (motiveTy', elimTy', fmap (\p -> Arg p.mode ()) sTyIndicesBinds)
   where
