@@ -938,11 +938,11 @@ vReprTelHere m te = do
 reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m ()
 reprItem te getGlob addGlob ts r = do
   ty <- getGlob
-  rte <- vReprTelHere (Finite 1) te
+  -- rte <- vReprTelHere (Finite 1) te
   -- @@Todo: inherit arg names from header
-  r' <- enterTel rte $ do
-    ty' <- vReprHere (Finite 1) ty
-    (r', _) <- r (Check ty')
+  r' <- enterTel te $ do
+    -- ty' <- vReprHere (Finite 1) ty
+    (r', _) <- r (Check ty)
     return r'
   vr <- closeHere (length te) r'
   modify (addGlob vr ts)

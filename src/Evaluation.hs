@@ -242,36 +242,28 @@ vRepr l m (VNeu n@(VApp (VGlobal g pp) sp)) = do
   r <- access (getGlobalRepr g)
   case r of
     Just r' -> do
-      rpp <- mapM (vRepr l m) pp
-      r'' <- r' $$ rpp
-      rsp <- mapSpineM (vRepr l m) sp
-      vApp r'' rsp
+      r'' <- r' $$ pp
+      res <- vApp r'' sp
+      vRepr l m res
     Nothing -> return $ VNeu (VRepr m n)
-vRepr l m (VNeu n@(VCaseApp dat v _ cs sp)) = do
-  -- f <- access (getCaseRepr dat)
-  -- case f of
-  --   Just f' -> do
-  --     cssp <- caseToSpine v cs
-  --     cssp' <- mapSpineM (vRepr l m) cssp
-  --     sp' <- mapSpineM (vRepr l m) sp
-  --     -- a <- vApp f' cssp'
-  --     a <- vApp undefined cssp' -- @@Todo
-  --     vApp a sp'
-  --   Nothing -> do
+vRepr _ m (VNeu n@(VCaseApp {})) = do
   return $ VNeu (VRepr m n)
-vRepr l m (VNeu (VReprApp m' v sp))
-  | (m > Finite 0 && m' < Finite 0)
-      || (m > Finite 0 && m' > Finite 0)
-      || (m < Finite 0 && m' < Finite 0) = do
-      sp' <- mapSpineM (vRepr l m) sp
-      let mm' = m <> m'
-      if mm' == mempty
-        then
-          return $ vAppNeu v sp'
-        else
-          return $ VNeu (VReprApp mm' v sp')
-vRepr _ m (VNeu n) = do
-  return $ VNeu (VRepr m n)
+vRepr l m (VNeu (VReprApp m' v sp)) = do
+  -- | (m > Finite 0 && m' < Finite 0)
+  --     || (m > Finite 0 && m' > Finite 0)
+  --     || (m < Finite 0 && m' < Finite 0) = do
+  sp' <- mapSpineM (vRepr l m) sp
+  let mm' = m <> m'
+  if mm' == mempty
+    then
+      return $ vAppNeu v sp'
+    else
+      return $ VNeu (VReprApp mm' v sp')
+vRepr l m (VNeu (VApp h sp)) = do
+  sp' <- mapSpineM (vRepr l m) sp
+  return (VNeu (VReprApp m (VApp h Empty) sp'))
+-- vRepr _ m (VNeu n) = do
+--   return $ VNeu (VRepr m n)
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t

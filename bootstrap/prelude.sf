@@ -492,43 +492,46 @@ repr data Bool as JsBool {
     true => t,
     false => f,
   } as {
-    js-if-dep [E] b (\_ => t) (\_ => f)
+    js-if-dep [repr E] (repr b) (\_ => repr t) (\_ => repr f)
   }
 }
 
-repr def and as \a b => js-and a b
-repr def or as \a b => js-or a b
-repr def not as \a => js-not a
+repr def and as \a b => unrepr (js-and (repr a) (repr b))
+repr def or as \a b => unrepr (js-or (repr a) (repr b))
+repr def not as \a => unrepr (js-not (repr a))
 
-repr data Nat as JsBigUint {
-  z as js-big-uint-zero,
-  s n as js-big-uint-plus js-big-uint-one n,
-  case n to E {
-    z => b,
-    s => r,
-  } as {
-    js-zero-or-pos [E] n (\_ => b) r
-  }
-}
+-- repr data Nat as JsBigUint {
+--   z as js-big-uint-zero,
+--   s n as js-big-uint-plus js-big-uint-one n,
+--   case n to E {
+--     z => b,
+--     s => r,
+--   } as {
+--     js-zero-or-pos [E] n (\_ => b) r
+--   }
+-- }
 
-repr def add as \a b => js-big-uint-plus a b
-repr def mul as \a b => js-big-uint-times a b
-repr def pow as \a b => js-big-uint-pow a b
-repr def is-even as \n => js-eqq (js-big-uint-mod n (unrepr 1)) js-big-uint-zero
-repr def nat-eq as \a b => js-eqq a b
+-- repr def add as \a b => js-big-uint-plus a b
+-- repr def mul as \a b => js-big-uint-times a b
+-- repr def pow as \a b => js-big-uint-pow a b
+-- repr def is-even as \n => js-eqq (js-big-uint-mod n (repr 1)) js-big-uint-zero
+-- repr def nat-eq as \a b => js-eqq a b
 
+-- data Lt : Nat -> Nat -> Type {
+--   lt-z : [n : Nat] -> Lt z (s n),
+--   lt-s : [n : Nat, m : Nat] -> Lt n m -> Lt (s n) (s m)
+-- }
 
-
--- repr data Fin n as JS {
---   fz as js-zero,
---   fs n as js-plus js-one n,
+-- repr data Fin n as (i : Nat) * Lt i (unrepr n) {
+--   fz as (0, lt-z),
+--   fs n as case n {
+--     (i, p) => ?h1
+--   },
 --   case n {
 --     fz => b,
 --     fs => r,
 --   } as {
---     js-if (js-eqq n js-zero)
---       (cast b)
---       (cast (r (js-minus n js-one)))
+--     ?h2
 --   }
 -- }
 

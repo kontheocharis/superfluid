@@ -21,11 +21,14 @@ import Common
     Loc,
     Name,
     PiMode (..),
+    Spine,
+    Times (..),
     mapSpine,
-    unName, Spine,
+    unName,
   )
 import Control.Monad (replicateM)
 import Data.Bifunctor (bimap)
+import qualified Data.Sequence as S
 import Debug.Trace (traceM)
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), elimTyArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
@@ -76,7 +79,6 @@ import Typechecking
     wildPat,
   )
 import Value (VTm (..), VTy)
-import qualified Data.Sequence as S
 
 -- Presyntax exists below here
 
@@ -181,7 +183,7 @@ elabDataRep r = do
   g <- access (lookupGlobal h)
   case g of
     Just (DataInfo info) -> do
-      let target' = pLams sp r.target
+      let target' = pLams sp (PRepr (Finite (-1)) r.target)
       let dat = DataGlobal h
       reprDataItem dat r.tags (elab target')
       mapM_ elabCtorRep r.ctors
@@ -194,7 +196,7 @@ elabCtorRep r = do
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
-      let target' = pLams sp r.target
+      let target' = pLams sp (PRepr (Finite (-1)) r.target)
       reprCtorItem (CtorGlobal h) r.tags (elab target')
     _ -> elabError (ExpectedCtorGlobal h)
 
@@ -203,10 +205,13 @@ elabCaseRep dat info r = do
   srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
   srcBranches <- S.fromList . map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
   elimTy <- Arg Explicit <$> maybe uniqueName ensurePatIsBind r.srcElim
-  tyIndices <-  mapM (traverse (const uniqueName)) info.elimTyArity
+  tyIndices <- mapM (traverse (const uniqueName)) info.elimTyArity
   tyParams <- S.replicateM (length info.params) (Arg Explicit <$> uniqueName)
   -- @@Todo: inherit arg names from header
-  let target' = pLams (tyParams S.>< S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject) r.target
+  let target' =
+        pLams
+          (tyParams S.>< S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
+          (PRepr (Finite (-1)) r.target)
   reprCaseItem dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
