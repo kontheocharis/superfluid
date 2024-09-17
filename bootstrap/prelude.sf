@@ -358,10 +358,6 @@ def not : Bool -> Bool {
   }
 }
 
-def mod : Nat -> (n : Nat) -> Fin n {
-  ?mod
-}
-
 def fin-to-nat : [n : Nat] -> Fin n -> Nat {
   \f => case f {
     fz => z,
@@ -538,6 +534,16 @@ def bool-eq : (a : Bool, b : Bool) -> Bool {
   }
 }
 
+def mod : Nat -> Nat -> Nat {
+  \a n => case n {
+    z => a,
+    s k => case lt a n {
+      true => a,
+      false => mod (sub a (s k)) (s k)
+    },
+  }
+}
+
 -- -- Default representations
 repr data Bool as JsBool {
   true as js-true,
@@ -570,6 +576,7 @@ repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
 repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
 repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
 repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
+repr def mod as \a b => unrepr (js-uint-mod (repr a) (repr b))
 repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
 
 repr data Fin i as JsBoundedUint (repr i) {
@@ -619,19 +626,6 @@ repr def index as {
 repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
 repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
-
--- -- repr data Dec A as JS {
--- --   yes _ as js-true,
--- --   no _ as js-false,
--- --   case d {
--- --     yes => y,
--- --     no => n,
--- --   } as {
--- --     js-if d
--- --       (cast y (cast (refl [x])))
--- --       (cast (n (conjure A)))
--- --   }
--- -- }
 
 -- -- -- More definitions
 

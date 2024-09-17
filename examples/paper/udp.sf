@@ -58,11 +58,11 @@ data FizzBuzz : Type {
 }
 
 def get-fizzbuzz : Nat -> Maybe FizzBuzz {
-  \n => case fin-eq (mod n 15) 0n {
+  \n => case nat-eq (mod n 15) 0 {
     true => just fizzbuzz,
-    false => case fin-eq (mod n 3) 0n {
+    false => case nat-eq (mod n 3) 0 {
       true => just fizz,
-      false => case fin-eq (mod n 5) 0n {
+      false => case nat-eq (mod n 5) 0 {
         true => just buzz,
         false => nothing
       }

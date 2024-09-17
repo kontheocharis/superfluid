@@ -23,6 +23,7 @@ module Evaluation
     unelabSig,
     ensureIsCtor,
     vLams,
+    vCase,
     vReprTel,
     uniqueVLams,
     evalInOwnCtx,
@@ -165,15 +166,15 @@ vMatch _ _ = Nothing
 
 vCase :: (Eval m) => DataGlobal -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
 vCase dat v r cs = do
-  v' <- unfoldDefs v
-  case v' of
+  -- v' <- unfoldDefs v
+  case v of
     VLit l -> vCase dat (unfoldLit l) r cs
     VNeu n ->
       fromMaybe (return $ VNeu (VCaseApp dat n r cs Empty)) $
         firstJust
           ( \clause -> do
               case clause of
-                Possible p t -> case vMatch p.vPat v' of
+                Possible p t -> case vMatch p.vPat v of
                   Just env -> Just $ t $$ env
                   Nothing -> Nothing
                 Impossible _ -> Nothing
