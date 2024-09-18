@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Interface.Cli (runCli)
+import Compiler (runCli)
 
 main :: IO ()
 main = runCli

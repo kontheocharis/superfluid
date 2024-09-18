@@ -7,11 +7,7 @@
     },
     {
       "name": "keyword.control.superfluid",
-      "match": "\\b(case|data|def|repr|as|let|prim|rec|unrepr)\\b"
-    },
-    {
-      "name": "keyword.control.superfluid",
-      "match": "\\b(case|data|def|repr|as|let|prim|rec)\\b"
+      "match": "\\b(case|data|def|repr|as|let|prim|to|unrepr)\\b"
     },
     {
       "name": "keyword.operator.superfluid",
@@ -23,11 +19,15 @@
     },
     {
       "name": "meta.embedded.superfluid",
-      "match": "#\\w+"
+      "match": "#(\\w|-)+"
     },
     {
       "name": "storage.superfluid",
-      "match": "\\b[A-Z]\\w*\\b"
+      "match": "\\b[A-Z](\\w|-)*\\b"
+    },
+    {
+      "name": "variable.other.superfluid",
+      "match": "\\b[a-z](\\w|-)*\\b"
     },
     {
       "name": "string.quoted.double.superfluid",

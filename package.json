@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "prepack": "^0.2.54",
+    "terser": "^5.33.0"
+  }
+}
