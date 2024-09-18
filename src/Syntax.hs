@@ -26,6 +26,7 @@ module Syntax
     Sub (..),
     SCase,
     VCase,
+    mapClosureM,
     subbing,
     liftPRen,
     liftPRenN,
@@ -106,6 +107,11 @@ type VTy = VTm
 type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
+
+mapClosureM :: (Monad m) => (STm -> m STm) -> Closure -> m Closure
+mapClosureM f (Closure n env t) = Closure n env <$> f t
+
+
 
 data Case s t p c = Case
   { dat :: DataGlobal,

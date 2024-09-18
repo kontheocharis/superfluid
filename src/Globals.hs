@@ -19,11 +19,13 @@ module Globals
     getGlobalRepr,
     getCaseRepr,
     getCtorRepr,
+    mapSigContentsM,
     getDefRepr,
     modifyDataItem,
     KnownGlobal (..),
     knownData,
     knownCtor,
+    removeRepresentedItems,
     lookupGlobal,
     hasName,
     emptySig,
@@ -40,6 +42,7 @@ import Common
     DataGlobal (..),
     DefGlobal (..),
     Glob (..),
+    Lvl (..),
     Name (..),
     PrimGlobal (..),
     Spine,
@@ -49,9 +52,8 @@ import Common
   )
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set
-import Syntax (STm (..), STy)
-import Syntax (Closure, VTm (..), VTy)
+import Syntax (Closure, STm (..), STy, VTm (..), VTy)
+import Data.Set (Set)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { ty :: Closure,
@@ -83,6 +85,20 @@ data Sig = Sig
     repr :: Map Name (Closure, Set Tag),
     reprCase :: Map Name (Closure, Set Tag)
   }
+
+mapSigContentsM :: (Monad m) => (GlobalInfo -> m GlobalInfo) -> Sig -> m Sig
+mapSigContentsM f s = do
+  contents' <- traverse f s.contents
+  return $ s {contents = contents'}
+
+removeRepresentedItems :: Sig -> Sig
+removeRepresentedItems s =
+  s
+    { contents = M.filterWithKey (\k _ -> not (M.member k s.repr || M.member k s.reprCase)) s.contents,
+      repr = M.empty,
+      reprCase = M.empty,
+      nameOrder = filter (\n -> not (M.member n s.repr || M.member n s.reprCase)) s.nameOrder
+    }
 
 emptySig :: Sig
 emptySig = Sig M.empty [] M.empty M.empty M.empty

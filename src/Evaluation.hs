@@ -23,6 +23,7 @@ module Evaluation
     vLams,
     vCase,
     vReprTel,
+    reprInfSig,
     uniqueVLams,
     evalInOwnCtx,
     extendEnvByNVars,
@@ -58,7 +59,7 @@ import Common
     pattern Possible,
   )
 import Control.Exception (assert)
-import Control.Monad (foldM)
+import Control.Monad (foldM, (>=>))
 import Control.Monad.State (StateT (..))
 import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
@@ -68,10 +69,15 @@ import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
-  ( Sig (..),
+  ( CtorGlobalInfo (..),
+    DataGlobalInfo (..),
+    DefGlobalInfo (..),
+    GlobalInfo (..),
+    PrimGlobalInfo (..),
+    Sig (..),
     getCaseRepr,
     getGlobalRepr,
-    unfoldDef,
+    unfoldDef, mapSigContentsM, removeRepresentedItems,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
@@ -81,6 +87,7 @@ import Syntax
     Case (..),
     Closure (..),
     Env,
+    SCase,
     SPat (..),
     STm (..),
     VCase,
@@ -90,6 +97,7 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
+    mapClosureM,
     sAppSpine,
     sLams,
     uniqueSLams,
@@ -195,17 +203,52 @@ reprClosure m t = do
   a <- postCompose (SRepr m) t
   preCompose a (SRepr (inv m))
 
-caseToSpine :: (Eval m) => VCase -> m (Spine VTm)
-caseToSpine cls = undefined
-  -- foldM
-  --   ( \acc -> \case
-  --       Possible p t -> do
-  --         t' <- uniqueVLams (map (const Explicit) p.binds) t
-  --         return $ Arg Explicit t' :<| acc
-  --       Impossible _ -> return acc
-  --   )
-  --   (Arg Explicit (VNeu v) :<| Empty)
-  --   cls
+caseToSpine :: (Eval m) => SCase -> m (Spine STm)
+caseToSpine c = do
+  firstPart <-
+    foldM
+      ( \acc -> \case
+          Possible p t -> do
+            t' <- uniqueSLams (map (const Explicit) p.binds) t
+            return $ acc :|> Arg Explicit t'
+          Impossible _ -> return acc
+      )
+      (c.datParams :|> Arg Explicit c.elimTy)
+      c.clauses
+  return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit c.subject)
+
+mapDataGlobalInfoM :: (Eval m) => (STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
+mapDataGlobalInfoM f (DataGlobalInfo params fullTy ty ctors motiveTy elimTy indexArity) = do
+  params' <- traverse (traverse f) params
+  fullTy' <- quote (Lvl 0) fullTy >>= f >>= eval []
+  ty' <- mapClosureM f ty
+  motiveTy' <- traverse (mapClosureM f) motiveTy
+  elimTy' <- traverse (mapClosureM f) elimTy
+  return $ DataGlobalInfo params' fullTy' ty' ctors motiveTy' elimTy' indexArity
+
+mapCtorGlobalInfoM :: (Eval m) => (STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
+mapCtorGlobalInfoM f (CtorGlobalInfo ty idx dataGlobal argArity) = do
+  ty' <- mapClosureM f ty
+  return $ CtorGlobalInfo ty' idx dataGlobal argArity
+
+mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
+mapDefGlobalInfoM f (DefGlobalInfo ty vtm tm) = do
+  ty' <- quote (Lvl 0) ty >>= f >>= eval []
+  vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
+  tm' <- traverse f tm
+  return $ DefGlobalInfo ty' vtm' tm'
+
+mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
+mapPrimGlobalInfoM f (PrimGlobalInfo ty) = do
+  ty' <- quote (Lvl 0) ty >>= f >>= eval []
+  return $ PrimGlobalInfo ty'
+
+mapGlobalInfoM :: (Eval m) => (STm -> m STm) -> GlobalInfo -> m GlobalInfo
+mapGlobalInfoM f i = case i of
+  DataInfo d -> DataInfo <$> mapDataGlobalInfoM f d
+  CtorInfo c -> CtorInfo <$> mapCtorGlobalInfoM f c
+  DefInfo d -> DefInfo <$> mapDefGlobalInfoM f d
+  PrimInfo p -> PrimInfo <$> mapPrimGlobalInfoM f p
 
 vReprTel :: (Eval m) => Lvl -> Times -> Tel STm -> m (Tel STm)
 vReprTel _ _ Empty = return Empty
@@ -256,46 +299,62 @@ vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return (VNeu (VReprApp m (VApp h Empty) sp'))
 
-sReprInf :: (Eval m) => Lvl -> STm -> m STm
-sReprInf l (SPi m x a b) = do
-  a' <- sReprInf l a
-  b' <- sReprInf (nextLvl l) b
+reprInfSig :: (Eval m) => m ()
+reprInfSig = do
+  s <- view
+  let s' = removeRepresentedItems s
+  s'' <- mapSigContentsM (mapGlobalInfoM sReprInf) s'
+  modify (const s'')
+
+sReprInf :: (Eval m) => STm -> m STm
+sReprInf (SPi m x a b) = do
+  a' <- sReprInf a
+  b' <- sReprInf b
   return $ SPi m x a' b'
-sReprInf l (SLam m x t) = do
-  t' <- sReprInf (nextLvl l) t
+sReprInf (SLam m x t) = do
+  t' <- sReprInf t
   return $ SLam m x t'
-sReprInf _ SU = return SU
-sReprInf l (SLit t) = SLit <$> traverse (sReprInf l) t
-sReprInf l (SApp m a b) = do
-  a' <- sReprInf l a
-  b' <- sReprInf l b
+sReprInf SU = return SU
+sReprInf (SLit t) = SLit <$> traverse sReprInf t
+sReprInf (SApp m a b) = do
+  a' <- sReprInf a
+  b' <- sReprInf b
   return $ SApp m a' b'
-sReprInf l (SGlobal g xs) = do
+sReprInf (SGlobal g xs) = do
   r <- access (getGlobalRepr g)
   case r of
     Just r' -> do
-      r'' <- evalInOwnCtx l r' >>= quote (nextLvls l r'.numVars)
-      lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
-      return $ sAppSpine lamr (S.fromList (map (Arg Explicit) xs))
-    Nothing -> return $ SGlobal g xs
-sReprInf l t@(SCase (Case d pp ss si rr scs)) = do
-  r <- access (getCaseRepr d)
+      r'' <- closureToLam r'
+      let res = sAppSpine r'' (S.fromList (map (Arg Explicit) xs))
+      sReprInf res
+    Nothing -> do
+      xs' <- mapM sReprInf xs
+      return $ SGlobal g xs'
+sReprInf (SCase c) = do
+  r <- access (getCaseRepr c.dat)
   case r of
     Just r' -> do
-      r'' <- evalInOwnCtx l r' >>= quote (nextLvls l r'.numVars)
-      lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
-      return $ sAppSpine lamr pp
-    Nothing -> return t -- @@Todo: otherwise recurse!!
-sReprInf l (SRepr _ x) = sReprInf l x
-sReprInf l (SMeta m bs) = do
+      r'' <- closureToLam r'
+      sp <- caseToSpine c
+      let res = sAppSpine r'' sp
+      sReprInf res
+    Nothing -> do
+      datParams' <- mapSpineM sReprInf c.datParams
+      subject' <- sReprInf c.subject
+      subjectIndices' <- mapSpineM sReprInf c.subjectIndices
+      elimTy' <- sReprInf c.elimTy
+      clauses' <- traverse (bitraverse return sReprInf) c.clauses
+      return $ SCase (Case c.dat datParams' subject' subjectIndices' elimTy' clauses')
+sReprInf (SRepr _ x) = sReprInf x
+sReprInf (SMeta m bs) = do
   warnMsg $ "found metavariable while representing program: " ++ show m
   return $ SMeta m bs
-sReprInf l (SLet x ty t y) = do
-  ty' <- sReprInf l ty
-  t' <- sReprInf l t
-  y' <- sReprInf (nextLvl l) y
+sReprInf (SLet x ty t y) = do
+  ty' <- sReprInf ty
+  t' <- sReprInf t
+  y' <- sReprInf y
   return $ SLet x ty' t' y'
-sReprInf _ (SVar i) = return $ SVar i
+sReprInf (SVar i) = return $ SVar i
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t
@@ -308,6 +367,11 @@ extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
 
 evalInOwnCtx :: (Eval m) => Lvl -> Closure -> m VTm
 evalInOwnCtx l cl = cl $$ closureArgs cl.numVars l.unLvl
+
+closureToLam :: (Eval m) => Closure -> m STm
+closureToLam c = do
+  r'' <- evalInOwnCtx (Lvl (length c.env)) c >>= quote (nextLvls (Lvl (length c.env)) c.numVars)
+  uniqueSLams (replicate c.numVars Explicit) r''
 
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do

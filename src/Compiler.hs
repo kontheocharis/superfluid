@@ -25,7 +25,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Elaboration (Elab (..), ElabError, elabProgram)
-import Evaluation (Eval (..))
+import Evaluation (Eval (..), reprInfSig)
 import Globals (Sig, emptySig)
 import Meta (SolvedMetas, emptySolvedMetas)
 import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
@@ -270,10 +270,15 @@ compile args = do
       parsed <- parseFile file
       when flags.verbose $ msg $ "Parsing file " ++ file
       when flags.dump $ pretty parsed >>= msg
-    Args (RepresentFile _) _ -> error "unimplemented"
-    -- represented <- andPotentiallyNormalise flags <$> representFile file
-    -- when flags.verbose $ msg "\nTypechecked and represented program successfully"
-    -- when flags.dump $ msg $ printVal represented
+    Args (RepresentFile file) flags -> do
+      when flags.normalise $ setNormaliseProgram True
+      parseAndCheckPrelude
+      parsed <- parseFile file
+      elabProgram parsed `catchError` (\e -> showGoals >> throwError e)
+      reprInfSig
+      when flags.verbose $ msg "\nTypechecked and represented program successfully"
+      when flags.dump $ unelabSig >>= pretty >>= msg
+      showGoals
     Args (GenerateCode _) _ -> error "unimplemented"
 
 -- code <- generateCode file
