@@ -760,7 +760,7 @@ defItem n ts ty tm = do
   ensureNewName n
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
-  modify (addItem n (DefInfo (DefGlobalInfo vty Nothing Nothing)) ts)
+  modify (addItem n (DefInfo (DefGlobalInfo n vty Nothing Nothing)) ts)
   (tm', _) <- tm (Check vty)
   vtm <- evalHere tm'
   b <- normaliseProgram
@@ -788,7 +788,7 @@ dataItem n ts te ty = do
     return ty'
   cty <- closeHere (length te') ty'
   fty <- evalHere $ sPis te' ty'
-  modify (addItem n (DataInfo (DataGlobalInfo te' fty cty [] Nothing Nothing Empty)) ts)
+  modify (addItem n (DataInfo (DataGlobalInfo n te' fty cty [] Nothing Nothing Empty)) ts)
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
@@ -818,7 +818,7 @@ ctorItem dat n ts ty = do
       Nothing -> tcError $ InvalidCtorType ty'
       Just sp -> return (sp, ty')
   cty <- closeHere (length di.params) ty'
-  modify (addItem n (CtorInfo (CtorGlobalInfo cty idx dat sp)) ts)
+  modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
@@ -826,7 +826,7 @@ primItem n ts ty = do
   ensureNewName n
   (ty', _) <- ty (Check VU)
   vty <- evalHere ty'
-  modify (addItem n (PrimInfo (PrimGlobalInfo vty)) ts)
+  modify (addItem n (PrimInfo (PrimGlobalInfo n vty)) ts)
 
 vReprHere :: (Tc m) => Times -> VTm -> m VTm
 vReprHere m t = do

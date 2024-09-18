@@ -19,7 +19,9 @@ module Globals
     getGlobalRepr,
     getCaseRepr,
     getCtorRepr,
+    knownPrim,
     mapSigContentsM,
+    mapSigContentsM_,
     getDefRepr,
     modifyDataItem,
     KnownGlobal (..),
@@ -52,18 +54,20 @@ import Common
   )
 import Data.Map (Map)
 import qualified Data.Map as M
-import Syntax (Closure, STm (..), STy, VTm (..), VTy)
 import Data.Set (Set)
+import Syntax (Closure, STm (..), STy, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
-  { ty :: Closure,
+  { name :: Name,
+    ty :: Closure,
     idx :: Int,
     dataGlobal :: DataGlobal,
     argArity :: Spine ()
   }
 
 data DataGlobalInfo = DataGlobalInfo
-  { params :: Tel STy,
+  { name :: Name,
+    params :: Tel STy,
     fullTy :: VTy,
     ty :: Closure,
     ctors :: [CtorGlobal],
@@ -72,9 +76,9 @@ data DataGlobalInfo = DataGlobalInfo
     indexArity :: Spine () -- might not be set yet
   }
 
-data DefGlobalInfo = DefGlobalInfo {ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
+data DefGlobalInfo = DefGlobalInfo {name :: Name, ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
 
-newtype PrimGlobalInfo = PrimGlobalInfo {ty :: VTm}
+data PrimGlobalInfo = PrimGlobalInfo {name :: Name, ty :: VTm}
 
 data GlobalInfo = DataInfo DataGlobalInfo | CtorInfo CtorGlobalInfo | DefInfo DefGlobalInfo | PrimInfo PrimGlobalInfo
 
@@ -88,8 +92,18 @@ data Sig = Sig
 
 mapSigContentsM :: (Monad m) => (GlobalInfo -> m GlobalInfo) -> Sig -> m Sig
 mapSigContentsM f s = do
-  contents' <- traverse f s.contents
+  contents' <-
+    M.fromList
+      <$> mapM
+        (\n -> (n,) <$> f (getGlobal n s))
+        s.nameOrder
   return $ s {contents = contents'}
+
+mapSigContentsM_ :: (Monad m) => (GlobalInfo -> m ()) -> Sig -> m ()
+mapSigContentsM_ f s = do
+  mapM_
+    (\n -> f (getGlobal n s))
+    s.nameOrder
 
 removeRepresentedItems :: Sig -> Sig
 removeRepresentedItems s =
@@ -205,6 +219,8 @@ data KnownGlobal a where
   KnownStr :: KnownGlobal CtorGlobal
   KnownUnit :: KnownGlobal DataGlobal
   KnownTt :: KnownGlobal CtorGlobal
+  KnownJsImpossible :: KnownGlobal PrimGlobal
+  KnownJsIndex :: KnownGlobal PrimGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -230,3 +246,7 @@ knownCtor KnownNil = CtorGlobal (Name "nil")
 knownCtor KnownCons = CtorGlobal (Name "cons")
 knownCtor KnownStr = CtorGlobal (Name "str")
 knownCtor KnownTt = CtorGlobal (Name "tt")
+
+knownPrim :: KnownGlobal PrimGlobal -> PrimGlobal
+knownPrim KnownJsImpossible = PrimGlobal (Name "js-impossible")
+knownPrim KnownJsIndex = PrimGlobal (Name "js-index")

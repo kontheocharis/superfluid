@@ -27,6 +27,7 @@ module Evaluation
     uniqueVLams,
     evalInOwnCtx,
     extendEnvByNVars,
+    mapGlobalInfoM,
     close,
   )
 where
@@ -217,31 +218,31 @@ caseToSpine c = do
   return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit c.subject)
 
 mapDataGlobalInfoM :: (Eval m) => (STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
-mapDataGlobalInfoM f (DataGlobalInfo params fullTy ty ctors motiveTy elimTy indexArity) = do
+mapDataGlobalInfoM f (DataGlobalInfo n params fullTy ty ctors motiveTy elimTy indexArity) = do
   params' <- traverse (traverse f) params
   fullTy' <- quote (Lvl 0) fullTy >>= f >>= eval []
   ty' <- mapClosureM f ty
   motiveTy' <- traverse (mapClosureM f) motiveTy
   elimTy' <- traverse (mapClosureM f) elimTy
-  return $ DataGlobalInfo params' fullTy' ty' ctors motiveTy' elimTy' indexArity
+  return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy' indexArity
 
 mapCtorGlobalInfoM :: (Eval m) => (STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
-mapCtorGlobalInfoM f (CtorGlobalInfo ty idx dataGlobal argArity) = do
+mapCtorGlobalInfoM f (CtorGlobalInfo n ty idx dataGlobal argArity) = do
   ty' <- mapClosureM f ty
-  return $ CtorGlobalInfo ty' idx dataGlobal argArity
+  return $ CtorGlobalInfo n ty' idx dataGlobal argArity
 
 mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
-mapDefGlobalInfoM f (DefGlobalInfo ty vtm tm) = do
+mapDefGlobalInfoM f (DefGlobalInfo n ty vtm tm) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
   vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
   b <- normaliseProgram
   tm' <- if b then traverse (quote (Lvl 0)) vtm' else traverse f tm
-  return $ DefGlobalInfo ty' vtm' tm'
+  return $ DefGlobalInfo n ty' vtm' tm'
 
 mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
-mapPrimGlobalInfoM f (PrimGlobalInfo ty) = do
+mapPrimGlobalInfoM f (PrimGlobalInfo n ty) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
-  return $ PrimGlobalInfo ty'
+  return $ PrimGlobalInfo n ty'
 
 mapGlobalInfoM :: (Eval m) => (STm -> m STm) -> GlobalInfo -> m GlobalInfo
 mapGlobalInfoM f i = case i of

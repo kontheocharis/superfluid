@@ -14,6 +14,7 @@ module Syntax
     sGatherPis,
     sGatherLams,
     uniqueSLams,
+    sGatherLets,
     VPat,
     VPatB (..),
     VTy,
@@ -229,3 +230,8 @@ sGatherLams :: STm -> (Spine Name, STm)
 sGatherLams = \case
   SLam m n t -> let (ns, b) = sGatherLams t in (Arg m n :<| ns, b)
   t -> (Empty, t)
+
+sGatherLets :: STm -> ([(Name, STy, STm)], STm)
+sGatherLets = \case
+  SLet n ty t u -> let (binds, ret) = sGatherLets u in ((n, ty, t) : binds, ret)
+  t -> ([], t)
