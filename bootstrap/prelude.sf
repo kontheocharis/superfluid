@@ -47,7 +47,7 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
 
 prim trust-me : [A : Type, x : A, y : A] -> Equal x y
 
-prim conjure : [A : Type] -> A
+prim conjure : (A : Type) -> A
 
 -- -- JS primitives
 
@@ -632,7 +632,7 @@ repr data Equal [A] x y as JsUndefined {
   case e to E {
     refl => r,
   } as {
-    ?h1
+    unsafe-cast ((repr E) _ _ (repr e)) (repr (r [conjure A]))
   }
 }
 
