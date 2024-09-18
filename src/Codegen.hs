@@ -6,7 +6,7 @@ module Codegen (Gen (..), generateProgram, renderJsProg, JsStat) where
 import Common
   ( Arg (Arg),
     Has (..),
-    Idx (unIdx),
+    Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
     Name (Name),
     PiMode (Explicit),
@@ -14,7 +14,7 @@ import Common
     globName,
     mapSpineM,
     pattern Impossible,
-    pattern Possible, HasNameSupply (uniqueName),
+    pattern Possible, HasNameSupply (uniqueName), Glob (PrimGlob),
   )
 import Control.Monad (zipWithM)
 import Data.Foldable (toList)
@@ -29,6 +29,7 @@ import Globals
   )
 import Printing (indentedFst)
 import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
+import Data.Sequence (Seq(..))
 
 newtype JsStat = JsStat String
 
@@ -126,7 +127,8 @@ generateCtorItem c = do
   let total = length c.argArity
   ns <- mapM (const uniqueName) [1 .. total]
   body <- jsLams ns $ do
-    return $ jsArray (intToNat c.idx : map (JsExpr . jsName) ns)
+    ns' <- mapM (jsVar . Idx) (reverse [0 .. total - 1])
+    return $ jsArray (intToNat c.idx : ns')
   addDecl $ jsConst (jsName c.name) body
 
 generateLets :: (Gen m) => [(Name, STm, STm)] -> STm -> m [JsStat]
@@ -148,6 +150,7 @@ generateExpr t@((SApp {})) = do
   a <- generateExpr subject
   args' <- mapSpineM generateExpr args
   return $ jsApp a args'
+generateExpr (SGlobal s@(PrimGlob _) _) = return $ jsGlobal (globName s)
 generateExpr (SGlobal s _) = return $ jsGlobal (globName s)
 generateExpr (SVar v) = jsVar v
 generateExpr (SCase c) = do
@@ -191,7 +194,8 @@ jsReturn :: JsExpr -> JsStat
 jsReturn (JsExpr e) = JsStat $ "return " ++ e ++ ";"
 
 jsApp :: JsExpr -> Spine JsExpr -> JsExpr
-jsApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ", " (map (\(Arg _ (JsExpr a)) -> a) (toList as)) ++ ")"
+jsApp e Empty = e
+jsApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ")(" (map (\(Arg _ (JsExpr a)) -> a) (toList as)) ++ ")"
 
 jsBlockExpr :: [JsStat] -> JsExpr
 jsBlockExpr ss = JsExpr $ "(() => {\n" ++ indentedFst (intercalate "\n" (map (\(JsStat s) -> s) ss)) ++ "\n})()"

@@ -1,0 +1,40 @@
+data FizzBuzz : Type {
+  fizz : FizzBuzz,
+  buzz : FizzBuzz,
+  fizzbuzz : FizzBuzz,
+}
+
+def fizzbuzz-to-string : Maybe FizzBuzz -> String {
+  \case {
+    nothing => "nothing!",
+    just f => case f {
+      fizz => "fizz",
+      buzz => "buzz",
+      fizzbuzz => "fizzbuzz",
+    },
+  }
+}
+
+def get-fizzbuzz : Nat -> Maybe FizzBuzz {
+  \n => case nat-eq (mod n 15) 0 {
+    true => just fizzbuzz,
+    false => case nat-eq (mod n 3) 0 {
+      true => just fizz,
+      false => case nat-eq (mod n 5) 0 {
+        true => just buzz,
+        false => nothing
+      }
+    }
+  }
+}
+
+def repeat : Nat -> (Nat -> IO ()) -> IO () {
+  \n f => case n {
+    z => io-return (),
+    s n' => io-bind (f n) (\_ => repeat n' f)
+  }
+}
+
+def main : IO () {
+  repeat 323 (\n => js-console-log (fizzbuzz-to-string (get-fizzbuzz n)))
+}

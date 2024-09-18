@@ -204,8 +204,6 @@ prim unsafe-io : [A : Type] -> IO A -> A
 
 prim js-console-log : [T : Type] -> T -> IO ()
 
-prim js-prompt : IO JsString
-
 -- -- JS Buffer
 
 prim JsBuffer : Type
