@@ -10,7 +10,7 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Globals (KnownGlobal (..), knownCtor, knownData)
 import Numeric.Natural (Natural)
-import Value
+import Syntax
   ( VHead (..),
     VNeu (..),
     VTm (..),

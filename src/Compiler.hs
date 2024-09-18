@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Compiler (runCli) where
 
@@ -8,6 +9,7 @@ import Common
     HasNameSupply (..),
     HasProjectFiles (getProjectFileContents),
     Loc (..),
+    Logger (..),
     Name (..),
   )
 import Control.Monad (void, when)
@@ -46,7 +48,17 @@ import Presyntax (PProgram)
 import Printing (Pretty (..))
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import Typechecking (Ctx, Goal, InPat (..), Problem, SolveAttempts (..), Tc (addGoal, showMessage, tcError), TcError, emptyCtx, prettyGoal)
+import Typechecking
+  ( Ctx,
+    Goal,
+    InPat (..),
+    Problem,
+    SolveAttempts (..),
+    Tc (addGoal, tcError),
+    TcError,
+    emptyCtx,
+    prettyGoal,
+  )
 import Unelaboration (Unelab, unelabSig)
 
 -- import Resources.Prelude (preludePath, preludeContents)
@@ -118,12 +130,6 @@ runCli = do
             <> header "Superfluid"
         )
 
--- | Log a message.
-msg :: String -> Comp ()
-msg m = do
-  liftIO $ putStrLn m
-  return ()
-
 -- | Log a message to stderr and exit with an error code.
 err :: String -> Comp a
 err m = liftIO $ do
@@ -184,13 +190,16 @@ instance Has Comp (Seq Problem) where
 
 instance Has Comp SolveAttempts where
   view = gets (\c -> c.solveAttempts)
+  modify :: (SolveAttempts -> SolveAttempts) -> Comp ()
   modify f = ST.modify (\s -> s {solveAttempts = f s.solveAttempts})
 
 instance Unelab Comp
 
+instance Logger Comp where
+  msg m = liftIO $ putStrLn m
+
 instance Tc Comp where
   tcError = throwError . TcCompilerError
-  showMessage = msg
 
   addGoal g = ST.modify (\s -> s {goals = s.goals ++ [g]})
 

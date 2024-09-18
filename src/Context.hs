@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 module Context
   ( Ctx (..),
     emptyCtx,
@@ -15,15 +16,17 @@ module Context
   )
 where
 
-import Common (Idx (..), Lvl (..), lvlToIdx, nextLvl, Name)
+import Common (Idx (..), Lvl (..), Name, lvlToIdx, nextLvl)
 import Data.List (intercalate, zipWith4)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Evaluation ()
 import Printing (Pretty (..))
-import Syntax (BoundState (Bound, Defined), Bounds, STm (..))
-import Value
-  ( Env,
+import Syntax
+  ( BoundState (Bound, Defined),
+    Bounds,
+    Env,
+    STm (..),
     VTm (..),
     VTy,
     pattern VVar,

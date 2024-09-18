@@ -54,7 +54,7 @@ import Meta (lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
 import Syntax (BoundState (..), Bounds, SPat (..), STm (..))
-import Value
+import Syntax
   ( Closure (..),
     Sub (..),
     VPatB (..),

@@ -40,7 +40,6 @@ library
       Syntax
       Typechecking
       Unelaboration
-      Value
   other-modules:
       Paths_superfluid
   hs-source-dirs:

@@ -23,6 +23,7 @@ module Common
     nextLvl,
     nextLvls,
     lvlToIdx,
+    Logger (..),
     Arg (..),
     Param (..),
     Spine,
@@ -50,10 +51,10 @@ import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
 import Data.List (intercalate)
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
-import qualified Data.Sequence as S
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -390,3 +391,12 @@ instance (HasProjectFiles m) => Pretty m Loc where
         let highlightedCode = intercalate "\n" ["at " ++ f, numberedLines, underline]
 
         return highlightedCode
+
+class (Monad m) => Logger m where
+  msg :: String -> m ()
+
+  warnMsg :: String -> m ()
+  warnMsg x = msg $ "Warning: " ++ x
+
+  errorMsg :: String -> m ()
+  errorMsg x = msg $ "Error: " ++ x

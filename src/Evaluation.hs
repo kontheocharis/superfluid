@@ -39,6 +39,7 @@ import Common
     Has (..),
     HasNameSupply (..),
     Idx (..),
+    Logger (..),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -68,21 +69,28 @@ import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
   ( Sig (..),
+    getCaseRepr,
     getGlobalRepr,
     unfoldDef,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..), sAppSpine, sLams)
-import Value
-  ( Closure (..),
+import Syntax
+  ( BoundState (..),
+    Bounds,
+    Closure (..),
     Env,
+    SPat (..),
+    STm (..),
     VHead (..),
     VNeu (..),
     VPat,
     VPatB (..),
     VTm (..),
     VTy,
+    sAppSpine,
+    sLams,
+    uniqueSLams,
     pattern VGlob,
     pattern VHead,
     pattern VMeta,
@@ -90,7 +98,7 @@ import Value
     pattern VVar,
   )
 
-class (Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
+class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
   setNormaliseProgram :: Bool -> m ()
 
@@ -140,7 +148,7 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) _) ps)) (VNeu (VApp (VGlob
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => DataGlobal -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
+vCase :: (Eval m) => (DataGlobal, [VTm]) -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
 vCase dat v r cs = do
   -- v' <- unfoldDefs v
   case v of
@@ -185,17 +193,17 @@ reprClosure m t = do
   a <- postCompose (SRepr m) t
   preCompose a (SRepr (inv m))
 
--- caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
--- caseToSpine v cls = do
---   foldM
---     ( \acc -> \case
---         Possible p t -> do
---           t' <- uniqueVLams (map (const Explicit) p.binds) t
---           return $ Arg Explicit t' :<| acc
---         Impossible _ -> return acc
---     )
---     (Arg Explicit (VNeu v) :<| Empty)
---     cls
+caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
+caseToSpine v cls = do
+  foldM
+    ( \acc -> \case
+        Possible p t -> do
+          t' <- uniqueVLams (map (const Explicit) p.binds) t
+          return $ Arg Explicit t' :<| acc
+        Impossible _ -> return acc
+    )
+    (Arg Explicit (VNeu v) :<| Empty)
+    cls
 
 vReprTel :: (Eval m) => Lvl -> Times -> Tel STm -> m (Tel STm)
 vReprTel _ _ Empty = return Empty
@@ -246,6 +254,47 @@ vRepr l m (VNeu (VApp h sp)) = do
   sp' <- mapSpineM (vRepr l m) sp
   return (VNeu (VReprApp m (VApp h Empty) sp'))
 
+sReprInf :: (Eval m) => Lvl -> STm -> m STm
+sReprInf l (SPi m x a b) = do
+  a' <- sReprInf l a
+  b' <- sReprInf (nextLvl l) b
+  return $ SPi m x a' b'
+sReprInf l (SLam m x t) = do
+  t' <- sReprInf (nextLvl l) t
+  return $ SLam m x t'
+sReprInf _ SU = return SU
+sReprInf l (SLit t) = SLit <$> traverse (sReprInf l) t
+sReprInf l (SApp m a b) = do
+  a' <- sReprInf l a
+  b' <- sReprInf l b
+  return $ SApp m a' b'
+sReprInf l (SGlobal g xs) = do
+  r <- access (getGlobalRepr g)
+  case r of
+    Just r' -> do
+      r'' <- evalInOwnCtx l r' >>= quote (nextLvls l r'.numVars)
+      lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
+      return $ sAppSpine lamr (S.fromList (map (Arg Explicit) xs))
+    Nothing -> return $ SGlobal g xs
+sReprInf l t@(SCase (d, pp) ss rr scs) = do
+  r <- access (getCaseRepr d)
+  case r of
+    Just r' -> do
+      r'' <- evalInOwnCtx l r' >>= quote (nextLvls l r'.numVars)
+      lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
+      return $ sAppSpine lamr (S.fromList (map (Arg Explicit) pp))
+    Nothing -> return t -- @@Todo: otherwise recurse!!
+sReprInf l (SRepr _ x) = sReprInf l x
+sReprInf l (SMeta m bs) = do
+  warnMsg $ "found metavariable while representing program: " ++ show m
+  return $ SMeta m bs
+sReprInf l (SLet x ty t y) = do
+  ty' <- sReprInf l ty
+  t' <- sReprInf l t
+  y' <- sReprInf (nextLvl l) y
+  return $ SLet x ty' t' y'
+sReprInf _ (SVar i) = return $ SVar i
+
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t
 
@@ -293,11 +342,12 @@ eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
   vApp t1' (S.singleton (Arg m t2'))
-eval env (SCase dat t r cs) = do
+eval env (SCase (dat, pp) t r cs) = do
   t' <- eval env t
   cs' <- mapM (\p -> do bitraverse (evalPat (extendEnvByNVars (length p.pat.binds) env)) (close (length p.pat.binds) env) p) cs
   r' <- eval env r
-  vCase dat t' r' cs'
+  pp' <- mapM (eval env) pp
+  vCase (dat, pp') t' r' cs'
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
@@ -392,11 +442,12 @@ quoteNeu l vt = case vt of
   (VReprApp m v sp) -> do
     v' <- quoteNeu l v
     quoteSpine l (SRepr m v') sp
-  (VCaseApp dat v r cs sp) -> do
+  (VCaseApp (dat, pp) v r cs sp) -> do
     v' <- quote l (VNeu v)
     cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
     r' <- quote l r
-    quoteSpine l (SCase dat v' r' cs') sp
+    pp' <- mapM (quote l) pp
+    quoteSpine l (SCase (dat, pp') v' r' cs') sp
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do

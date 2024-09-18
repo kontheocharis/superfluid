@@ -51,7 +51,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set
 import Syntax (STm (..), STy)
-import Value (Closure, VTm (..), VTy)
+import Syntax (Closure, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { ty :: Closure,

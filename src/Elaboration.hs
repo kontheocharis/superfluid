@@ -77,7 +77,7 @@ import Typechecking
     univ,
     wildPat,
   )
-import Value (VTm (..), VTy)
+import Syntax (VTm (..), VTy)
 
 -- Presyntax exists below here
 

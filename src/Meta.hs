@@ -18,7 +18,7 @@ import Common (Has (..), MetaVar (..), Name)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Maybe (fromJust)
-import Value (VTm)
+import Syntax (VTm)
 
 newtype SolvedMetas = SolvedMetas {values :: IntMap (Maybe VTm, Maybe Name)}
 

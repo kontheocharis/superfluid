@@ -147,12 +147,13 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherLams, sGatherPis, sPis, uniqueSLams)
-import Unelaboration (Unelab)
-import Value
+import Syntax
   ( Closure (body, numVars),
     Env,
     PRen (..),
+    SPat (..),
+    STm (..),
+    STy,
     Sub,
     VHead (VFlex, VGlobal, VRigid),
     VNeu (VApp, VCaseApp, VReprApp),
@@ -161,12 +162,19 @@ import Value
     VTy,
     isEmptySub,
     liftPRenN,
+    sAppSpine,
+    sGatherApps,
+    sGatherLams,
+    sGatherPis,
+    sPis,
+    uniqueSLams,
     vGetSpine,
     pattern VGlob,
     pattern VGlobE,
     pattern VRepr,
     pattern VVar,
   )
+import Unelaboration (Unelab)
 
 data TcError
   = Mismatch [UnifyError]
@@ -290,7 +298,6 @@ class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx,
   enterCtx = enter
 
   tcError :: TcError -> m a
-  showMessage :: String -> m ()
 
   inPat :: m InPat
   inPat = view
@@ -716,7 +723,8 @@ caseOf mode s r cs = do
       vs <- evalHere ss
       retTy <- vApp vrr (indexSp S.:|> Arg Explicit vs)
       unifyHere ty retTy
-      return (SCase d ss rr scs, ty)
+      sParamSp <- mapM (\a -> quoteHere a.arg) (toList paramSp)
+      return (SCase (d, sParamSp) ss rr scs, ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)
 wildPat mode = do
@@ -1135,11 +1143,12 @@ rename m pren tm = do
     VNeu (VReprApp n h sp) -> do
       t' <- rename m pren (VNeu h)
       renameSp m pren (SRepr n t') sp
-    VNeu (VCaseApp dat v r cs sp) -> do
+    VNeu (VCaseApp (dat, pp) v r cs sp) -> do
       v' <- rename m pren (VNeu v)
       cs' <- mapM (bitraverse (renamePat m pren) (renameClosure m pren)) cs
       r' <- rename m pren r
-      renameSp m pren (SCase dat v' r' cs') sp
+      pp' <- mapM (rename m pren) pp
+      renameSp m pren (SCase (dat, pp') v' r' cs') sp
     VLam i x t -> do
       t' <- renameClosure m pren t
       return $ SLam i x t'
@@ -1268,7 +1277,7 @@ unfoldReprDefAndUnify m g sp rp t' = do
       tr' <- vApp tr rp
       unify tr' t'
 
-unfoldCaseDefAndUnify :: (Tc m) => DataGlobal -> DefGlobal -> Spine VTm -> VTm -> [Clause VPatB Closure] -> Spine VTm -> VTm -> m CanUnify
+unfoldCaseDefAndUnify :: (Tc m) => (DataGlobal, [VTm]) -> DefGlobal -> Spine VTm -> VTm -> [Clause VPatB Closure] -> Spine VTm -> VTm -> m CanUnify
 unfoldCaseDefAndUnify a f sp1 r bs sp t' = do
   gu <- access (unfoldDef f)
   case gu of
@@ -1333,7 +1342,7 @@ unify t1 t2 = do
         else unfoldDefAndUnify f sp t2'
     (VGlob (DefGlob f) sp, t') -> unfoldDefAndUnify f sp t'
     (t, VGlob (DefGlob f') sp') -> unfoldDefAndUnify f' sp' t
-    (VNeu (VCaseApp a s@(VApp (VGlobal (DefGlob f) _) sp1) r bs sp), VNeu (VCaseApp b s'@(VApp (VGlobal (DefGlob _) _) _) r' bs' sp')) | a == b -> do
+    (VNeu (VCaseApp a s@(VApp (VGlobal (DefGlob f) _) sp1) r bs sp), VNeu (VCaseApp b s'@(VApp (VGlobal (DefGlob _) _) _) r' bs' sp')) | fst a == fst b -> do
       ( unify (VNeu s) (VNeu s')
           /\ unifyClauses bs bs'
           /\ unify r r'
@@ -1342,7 +1351,7 @@ unify t1 t2 = do
         \/ unfoldCaseDefAndUnify a f sp1 r bs sp t2
     (VNeu (VCaseApp a (VApp (VGlobal (DefGlob f) _) sp1) r bs sp), _) -> unfoldCaseDefAndUnify a f sp1 r bs sp t2
     (_, VNeu (VCaseApp b (VApp (VGlobal (DefGlob f') _) sp2) r' bs' sp')) -> unfoldCaseDefAndUnify b f' sp2 r' bs' sp' t1
-    (VNeu (VCaseApp a s r bs sp), VNeu (VCaseApp b s' r' bs' sp')) | a == b -> do
+    (VNeu (VCaseApp (a, _) s r bs sp), VNeu (VCaseApp (b, _) s' r' bs' sp')) | a == b -> do
       ( unify (VNeu s) (VNeu s')
           /\ unifyClauses bs bs'
           /\ unify r r'
