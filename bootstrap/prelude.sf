@@ -204,6 +204,7 @@ prim unsafe-io : [A : Type] -> IO A -> A
 
 prim js-console-log : [T : Type] -> T -> IO ()
 
+
 -- -- JS Buffer
 
 prim JsBuffer : Type
@@ -785,5 +786,36 @@ def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
 def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
   \r b => case r {
     (l, p) => unreprs l (subst-type (sym p) b)
+  }
+}
+
+-- HTTP
+
+data HttpRequest : Type {
+  http-request : (
+    method : String,
+    url : String,
+    header : String -> Maybe String,
+    body : String,
+  ) -> HttpRequest
+}
+
+data HttpResponse : Type {
+  http-response : (
+    status : Nat,
+    headers : List (String * String),
+    body : String,
+  ) -> HttpResponse
+}
+
+data HttpServer : Type {
+  http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
+}
+
+def launch-http-server : HttpServer -> IO () {
+  \case {
+    http-server port handler => {
+      ?launch-http-server
+    }
   }
 }

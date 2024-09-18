@@ -1,5 +1,4 @@
 // boot.js
-
 const { Buffer } = require("buffer");
 
 // Type system
