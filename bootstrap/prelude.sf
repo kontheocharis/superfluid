@@ -627,6 +627,15 @@ repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
 repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
 
+repr data Equal [A] x y as JsUndefined {
+  refl as js-undefined,
+  case e to E {
+    refl => r,
+  } as {
+    ?h1
+  }
+}
+
 -- -- -- More definitions
 
 data Char : Type {

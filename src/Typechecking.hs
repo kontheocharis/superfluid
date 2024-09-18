@@ -1012,19 +1012,29 @@ buildElimTy dat = do
   datInfo <- access (getDataGlobal dat)
 
   let sTyParams = datInfo.params
-  let sTy = datInfo.ty.body
+  let sTyParamsV = map (VNeu . VVar . Lvl) $  take (length datInfo.params) [0..]
+
+  let motiveLvl = length datInfo.params
+  let methodTyLvl i = motiveLvl + 1 + i
+  let sTyIndicesLvl = methodTyLvl (length datInfo.ctors)
+
+  mTy <- datInfo.ty $$ sTyParamsV >>= quote (Lvl motiveLvl)
+  sTy <- datInfo.ty $$ sTyParamsV >>= quote (Lvl sTyIndicesLvl)
+  let (mTyIndices, _) = sGatherPis mTy
+  mTyIndicesBinds <- telWithUniqueNames mTyIndices
+
   let (sTyIndices, _) = sGatherPis sTy
   sTyIndicesBinds <- telWithUniqueNames sTyIndices
-  let spToData i j = sAppSpine (SGlobal (DataGlob dat) []) (spineForTel i sTyParams >< spineForTel j sTyIndicesBinds)
+
+  let spToData i j = sAppSpine (SGlobal (DataGlob dat) []) (spineForTel i sTyParams >< spineForTel j mTyIndicesBinds)
 
   motiveSubjName <- uniqueName
   elimTyName <- uniqueName
   subjectTyName <- uniqueName
-
-  let motiveTy = sPis (sTyIndicesBinds :|> Param Explicit motiveSubjName (spToData (length sTyIndicesBinds) 0)) SU
   methodTys <- mapM (ctorMethodTy (length sTyParams)) datInfo.ctors
 
-  let subjSpToData = spToData (length sTyIndicesBinds + length methodTys + 1) 0
+  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
+  let subjSpToData = spToData (length mTyIndicesBinds + length methodTys + 1) 0
 
   let elimTy =
         sPis
