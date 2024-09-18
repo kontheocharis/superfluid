@@ -1018,9 +1018,8 @@ buildElimTy dat = do
   let methodTyLvl i = motiveLvl + 1 + i
   let sTyIndicesLvl = methodTyLvl (length datInfo.ctors)
 
-  mTy <- datInfo.ty $$ sTyParamsV >>= quote (Lvl motiveLvl)
   sTy <- datInfo.ty $$ sTyParamsV >>= quote (Lvl sTyIndicesLvl)
-  let (mTyIndices, _) = sGatherPis mTy
+  let (mTyIndices, _) = sGatherPis datInfo.ty.body
   mTyIndicesBinds <- telWithUniqueNames mTyIndices
 
   let (sTyIndices, _) = sGatherPis sTy
