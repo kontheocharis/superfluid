@@ -78,10 +78,12 @@ import Meta (SolvedMetas, lookupMetaVar)
 import Syntax
   ( BoundState (..),
     Bounds,
+    Case (..),
     Closure (..),
     Env,
     SPat (..),
     STm (..),
+    VCase,
     VHead (..),
     VNeu (..),
     VPat,
@@ -113,7 +115,7 @@ Closure _ env t $$ us = eval (reverse us ++ env) t
 vAppNeu :: VNeu -> Spine VTm -> VTm
 vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
 vAppNeu (VReprApp m h us) u = VNeu (VReprApp m h (us >< u))
-vAppNeu (VCaseApp dat c r cls us) u = VNeu (VCaseApp dat c r cls (us >< u))
+vAppNeu (VCaseApp c us) u = VNeu (VCaseApp c (us >< u))
 
 vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
 vApp a Empty = return a
@@ -148,13 +150,13 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) _) ps)) (VNeu (VApp (VGlob
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vCase :: (Eval m) => (DataGlobal, [VTm]) -> VTm -> VTm -> [Clause VPatB Closure] -> m VTm
-vCase dat v r cs = do
-  -- v' <- unfoldDefs v
-  case v of
-    VLit l -> vCase dat (unfoldLit l) r cs
+vCase :: (Eval m) => Case VTm VTm VPatB Closure -> m VTm
+vCase c@(Case dat xs v i e cs) = do
+  v' <- force v
+  case v' of
+    VLit l -> vCase (Case dat xs (unfoldLit l) i e cs)
     VNeu n ->
-      fromMaybe (return $ VNeu (VCaseApp dat n r cs Empty)) $
+      fromMaybe (return $ VNeu (VCaseApp (c {subject = n}) Empty)) $
         firstJust
           ( \clause -> do
               case clause of
@@ -193,17 +195,17 @@ reprClosure m t = do
   a <- postCompose (SRepr m) t
   preCompose a (SRepr (inv m))
 
-caseToSpine :: (Eval m) => VNeu -> [Clause VPatB Closure] -> m (Spine VTm)
-caseToSpine v cls = do
-  foldM
-    ( \acc -> \case
-        Possible p t -> do
-          t' <- uniqueVLams (map (const Explicit) p.binds) t
-          return $ Arg Explicit t' :<| acc
-        Impossible _ -> return acc
-    )
-    (Arg Explicit (VNeu v) :<| Empty)
-    cls
+caseToSpine :: (Eval m) => VCase -> m (Spine VTm)
+caseToSpine cls = undefined
+  -- foldM
+  --   ( \acc -> \case
+  --       Possible p t -> do
+  --         t' <- uniqueVLams (map (const Explicit) p.binds) t
+  --         return $ Arg Explicit t' :<| acc
+  --       Impossible _ -> return acc
+  --   )
+  --   (Arg Explicit (VNeu v) :<| Empty)
+  --   cls
 
 vReprTel :: (Eval m) => Lvl -> Times -> Tel STm -> m (Tel STm)
 vReprTel _ _ Empty = return Empty
@@ -276,13 +278,13 @@ sReprInf l (SGlobal g xs) = do
       lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
       return $ sAppSpine lamr (S.fromList (map (Arg Explicit) xs))
     Nothing -> return $ SGlobal g xs
-sReprInf l t@(SCase (d, pp) ss rr scs) = do
+sReprInf l t@(SCase (Case d pp ss si rr scs)) = do
   r <- access (getCaseRepr d)
   case r of
     Just r' -> do
       r'' <- evalInOwnCtx l r' >>= quote (nextLvls l r'.numVars)
       lamr <- uniqueSLams (replicate r'.numVars Explicit) r''
-      return $ sAppSpine lamr (S.fromList (map (Arg Explicit) pp))
+      return $ sAppSpine lamr pp
     Nothing -> return t -- @@Todo: otherwise recurse!!
 sReprInf l (SRepr _ x) = sReprInf l x
 sReprInf l (SMeta m bs) = do
@@ -342,12 +344,13 @@ eval env (SApp m t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
   vApp t1' (S.singleton (Arg m t2'))
-eval env (SCase (dat, pp) t r cs) = do
+eval env (SCase (Case dat pp t i r cs)) = do
   t' <- eval env t
   cs' <- mapM (\p -> do bitraverse (evalPat (extendEnvByNVars (length p.pat.binds) env)) (close (length p.pat.binds) env) p) cs
   r' <- eval env r
-  pp' <- mapM (eval env) pp
-  vCase (dat, pp') t' r' cs'
+  i' <- mapSpineM (eval env) i
+  pp' <- mapSpineM (eval env) pp
+  vCase (Case dat pp' t' i' r' cs')
 eval _ SU = return VU
 eval l (SLit i) = VLit <$> traverse (eval l) i
 eval env (SMeta m bds) = do
@@ -442,12 +445,13 @@ quoteNeu l vt = case vt of
   (VReprApp m v sp) -> do
     v' <- quoteNeu l v
     quoteSpine l (SRepr m v') sp
-  (VCaseApp (dat, pp) v r cs sp) -> do
+  (VCaseApp (Case dat pp v i r cs) sp) -> do
     v' <- quote l (VNeu v)
     cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
     r' <- quote l r
-    pp' <- mapM (quote l) pp
-    quoteSpine l (SCase (dat, pp') v' r' cs') sp
+    pp' <- mapSpineM (quote l) pp
+    i' <- mapSpineM (quote l) i
+    quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do

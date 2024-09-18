@@ -9,6 +9,7 @@ module Syntax
     sAppSpine,
     sLams,
     sPis,
+    Case (..),
     sGatherApps,
     sGatherPis,
     sGatherLams,
@@ -23,6 +24,8 @@ module Syntax
     VTm (..),
     PRen (..),
     Sub (..),
+    SCase,
+    VCase,
     subbing,
     liftPRen,
     liftPRenN,
@@ -104,12 +107,26 @@ type Env v = [v]
 
 data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
 
+data Case s t p c = Case
+  { dat :: DataGlobal,
+    datParams :: Spine t,
+    subject :: s,
+    subjectIndices :: Spine t,
+    elimTy :: t,
+    clauses :: [Clause p c]
+  }
+  deriving (Show)
+
+type VCase = Case VNeu VTm VPatB Closure
+
+type SCase = Case STm STm SPat STm
+
 -- The spine in global is just for constructor params!
 data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob [VTm] deriving (Show)
 
 data VNeu
   = VApp VHead (Spine VTm)
-  | VCaseApp (DataGlobal, [VTm]) VNeu VTm [Clause VPatB Closure] (Spine VTm)
+  | VCaseApp VCase (Spine VTm)
   | VReprApp Times VNeu (Spine VTm)
   deriving (Show)
 
@@ -123,15 +140,15 @@ data VTm
 
 vGetSpine :: VTm -> Spine VTm
 vGetSpine (VNeu (VApp _ sp)) = sp
-vGetSpine (VNeu (VCaseApp _ _ _ _ sp)) = sp
+vGetSpine (VNeu (VCaseApp _ sp)) = sp
 vGetSpine (VNeu (VReprApp _ _ sp)) = sp
 vGetSpine _ = Empty
 
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = VApp (VRigid l) Empty
 
-pattern VCase :: (DataGlobal, [VTm]) -> VNeu -> VTm -> [Clause VPatB Closure] -> VNeu
-pattern VCase dat m r cls = VCaseApp dat m r cls Empty
+pattern VCase :: Case VNeu VTm VPatB Closure -> VNeu
+pattern VCase c = VCaseApp c Empty
 
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = VApp (VFlex m) Empty
@@ -165,7 +182,7 @@ data STm
   | SLet Name STy STm STm
   | SMeta MetaVar Bounds
   | SApp PiMode STm STm
-  | SCase (DataGlobal, [STm]) STm STm [Clause SPat STm]
+  | SCase SCase
   | SU
   | SGlobal Glob [STm]
   | SVar Idx

@@ -53,7 +53,7 @@ import Globals
 import Meta (lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..))
+import Syntax (BoundState (..), Bounds, SPat (..), STm (..), Case (..))
 import Syntax
   ( Closure (..),
     Sub (..),
@@ -122,7 +122,7 @@ unelab ns = \case
       Just i' -> return $ PName i'
       Nothing -> return $ PName (Name $ "?" ++ show v.unIdx)
   (SApp m t u) -> PApp m <$> unelab ns t <*> unelab ns u
-  (SCase _ t r cs) ->
+  (SCase (Case _ _ t _ r cs)) ->
     PCase
       <$> unelab ns t
       <*> (Just <$> unelab ns r)
