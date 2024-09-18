@@ -812,11 +812,12 @@ ctorItem dat n ts ty = do
   (sp, ty') <- enterTel di.params $ do
     ensureNewName n
     (ty', _) <- ty (Check VU)
+    let sp = fmap (\p -> Arg p.mode ()) $ fst (sGatherPis ty')
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
     case i of
       Nothing -> tcError $ InvalidCtorType ty'
-      Just sp -> return (sp, ty')
+      Just _ -> return (sp, ty')
   cty <- closeHere (length di.params) ty'
   modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))

@@ -84,20 +84,20 @@ var id = (A0) => (a1) => a1;
 var if_then_else = (A0) => (b1) => (t2) => (f3) => (js_if_dep)((x784) => A0, b1, (_4) => (t2)(tt), (_4) => (f3)(tt));
 var debug_print = (A0) => (B1) => (a2) => (b3) => (unsafe_io)(B1, (io_bind)(Unit, B1, (js_console_log)(A0, a2), (_4) => (io_return)(B1, b3)));
 var Maybe = (x17180) => null;
-var nothing = (x17190) => [0, x1719];
-var just = (x17200) => [1, x1720];
-var Either = (x17210) => (x17221) => null;
-var left = (x17230) => (x17241) => [0, x1723, x1724];
-var right = (x17250) => (x17261) => [1, x1725, x1726];
+var nothing = [0];
+var just = (x17190) => [1, x1719];
+var Either = (x17200) => (x17211) => null;
+var left = (x17220) => [0, x1722];
+var right = (x17230) => [1, x1723];
 var Empty = null;
 var VOID = (A0) => (m1) => (() => {
   switch ((m1)[0]) {
     
   }
 })();
-var Dec = (x17270) => null;
-var yes = (x17280) => [0, x1728];
-var no = (x17290) => [1, x1729];
+var Dec = (x17240) => null;
+var yes = (x17250) => [0, x1725];
+var no = (x17260) => [1, x1726];
 var sub = (m0) => (n1) => (js_zero_or_pos)((x1772) => JsUint, (_2) => m0, (x16862) => (js_zero_or_pos)((x1803) => JsUint, (_3) => js_uint_zero, (x16873) => (sub)(x16873, x16862), m0), n1);
 var upgrade = (n0) => (k1) => (js_zero_or_pos)((m2) => null, (_2) => (id)((JsBoundedUint)(n0)), (x16882) => (x3) => (js_bounded_uint_inc)((js_uint_plus)(x16882, n0), (upgrade)(n0, x16882, x3)), k1);
 var type = (A0) => (_1) => A0;
@@ -126,10 +126,10 @@ var lte = (m0) => (n1) => (js_zero_or_pos)((x8332) => JsBool, (_2) => js_true, (
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(JsUint, JsUint, m0, n1)), (lte)(m0, n1));
 var bool_eq = (a0) => (b1) => (js_if_dep)((x8402) => JsBool, a0, (_2) => (js_if_dep)((x8413) => JsBool, b1, (_3) => js_true, (_3) => js_false), (_2) => (js_if_dep)((x8423) => JsBool, b1, (_3) => js_false, (_3) => js_true));
 var Char = null;
-var char_from_num = [0];
+var char_from_num = (x17270) => [0, x1727];
 var STRING = null;
 var snil = [0];
-var scons = [1];
+var scons = (x17280) => (x17291) => [1, x1728, x1729];
 var Word = (JsBoundedUint)(65536);
 var Byte = (JsBoundedUint)(256);
 var word_to_nat = (n0) => (js_forget_bound)(65536, n0);
@@ -153,25 +153,25 @@ var reprs_subst_p_ = (A0) => (B1) => (r2) => (b3) => (() => {
   }
 })();
 var Time = null;
-var millis = [0];
+var millis = (x17300) => [0, x1730];
 var current_time = null;
 var nat_from_digits = (n0) => (null)(n0);
 var nat_to_fin_trunc = (n0) => (null)(n0);
 var trunc_buffer = (n0) => (m1) => (null)(m1, n0);
 var string_bytes = null;
-var Response = (x17300) => null;
-var ok = (x17310) => [0, x1731];
-var drop = (x17320) => [1, x1732];
+var Response = (x17310) => null;
+var ok = (x17320) => [0, x1732];
+var drop = [1];
 var error = (x17330) => [2, x1733];
 var UdpHeader = null;
-var udp_header = [0];
+var udp_header = (x17340) => (x17351) => (x17362) => (x17373) => [0, x1734, x1735, x1736, x1737];
 var udp_len = (x15110) => (() => {
   switch ((x15110)[0]) {
     case 0: return ((src_port1) => (dst_port2) => (len3) => (checksum4) => (js_forget_bound)(65536, len3))((x15110)[1], (x15110)[2], (x15110)[3], (x15110)[4]);
   }
 })();
 var UdpPacket = null;
-var udp_packet = [0];
+var udp_packet = (x17380) => (x17391) => [0, x1738, x1739];
 var udp_server = null;
 var FizzBuzz = null;
 var fizz = [0];
