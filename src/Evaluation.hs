@@ -90,7 +90,6 @@ import Syntax
     SCase,
     SPat (..),
     STm (..),
-    VCase,
     VHead (..),
     VNeu (..),
     VPat,
@@ -235,7 +234,8 @@ mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalI
 mapDefGlobalInfoM f (DefGlobalInfo ty vtm tm) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
   vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
-  tm' <- traverse f tm
+  b <- normaliseProgram
+  tm' <- if b then traverse (quote (Lvl 0)) vtm' else traverse f tm
   return $ DefGlobalInfo ty' vtm' tm'
 
 mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
