@@ -22,16 +22,15 @@ import Common
     Name,
     PiMode (..),
     Spine,
+    Tel,
     Times (..),
     mapSpine,
-    unName, Tel,
+    unName,
   )
-import Control.Monad (replicateM)
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import qualified Data.Sequence as S
-import Debug.Trace (traceM)
-import Globals (CtorGlobalInfo (..), DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
+import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -62,7 +61,6 @@ import Typechecking
     defItem,
     endDataItem,
     ensureAllProblemsSolved,
-    enterTel,
     insertLam,
     lam,
     letIn,

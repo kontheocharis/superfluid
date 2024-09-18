@@ -37,7 +37,6 @@ import Common
     Name,
     PiMode,
     Spine,
-    Tel,
     Times,
     unLvl,
   )

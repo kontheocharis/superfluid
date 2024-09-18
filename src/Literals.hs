@@ -15,7 +15,6 @@ import Value
     VNeu (..),
     VTm (..),
     pattern VGl,
-    pattern VGlob,
     pattern VGlobE,
   )
 

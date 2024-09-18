@@ -1,4 +1,4 @@
-{-# LANGUAGE InstanceSigs #-}
+{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module Presyntax
   ( PTy,
@@ -29,19 +29,16 @@ import Common
     Lit,
     Loc,
     Name (..),
-    Param,
     PiMode (..),
     Spine,
     Tag (..),
     Tel,
     Times (..),
     arg,
-    mode,
   )
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Sequence (Seq (..))
-import qualified Data.Sequence as S
 import Data.Set (Set)
 import Data.Typeable (Typeable)
 import Printing (Pretty (..), curlies)

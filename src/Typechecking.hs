@@ -1,9 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Typechecking
   ( Tc (..),
@@ -45,23 +47,60 @@ module Typechecking
 where
 
 import Algebra.Lattice (Lattice (..), (/\))
-import Common (Arg (..), Clause, CtorGlobal (..), DataGlobal (..), DefGlobal (DefGlobal), Glob (CtorGlob, DataGlob, DefGlob, PrimGlob), Has (..), HasNameSupply (uniqueName), HasProjectFiles, Idx (..), Lit (..), Loc, Lvl (..), MetaVar, Name (Name), Param (..), PiMode (..), PrimGlobal (..), Spine, Tag, Tel, Times (Finite), inv, lvlToIdx, nextLvl, nextLvls, telWithNames, pattern Impossible, pattern Possible)
+import Common
+  ( Arg (..),
+    Clause,
+    CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (DefGlobal),
+    Glob (CtorGlob, DataGlob, DefGlob, PrimGlob),
+    Has (..),
+    HasNameSupply (uniqueName),
+    HasProjectFiles,
+    Idx (..),
+    Lit (..),
+    Loc,
+    Lvl (..),
+    MetaVar,
+    Name (Name),
+    Param (..),
+    PiMode (..),
+    PrimGlobal (..),
+    Spine,
+    Tag,
+    Tel,
+    Times (..),
+    inv,
+    lvlToIdx,
+    nextLvl,
+    nextLvls,
+    telWithNames,
+    pattern Impossible,
+    pattern Possible,
+  )
+import Context
+  ( Ctx (..),
+    Goal (Goal),
+    bind,
+    define,
+    emptyCtx,
+    insertedBind,
+    lookupName,
+    typelessBinds,
+  )
 import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless, void)
+import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
-import Data.List (intercalate, zipWith4)
-import Data.Map (Map)
-import qualified Data.Map as M
+import Data.List (intercalate)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
-import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -78,10 +117,8 @@ import Evaluation
     resolve,
     unfoldDefs,
     vApp,
-    vAppNeu,
     vCase,
     vRepr,
-    vReprTel,
     ($$),
   )
 import Globals
@@ -110,7 +147,8 @@ import Globals
 import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Syntax (BoundState (Bound, Defined), Bounds, SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherLams, sGatherPis, sPis, uniqueSLams)
+import Syntax (SPat (..), STm (..), STy, sAppSpine, sGatherApps, sGatherLams, sGatherPis, sPis, uniqueSLams)
+import Unelaboration (Unelab)
 import Value
   ( Closure (body, numVars),
     Env,
@@ -233,7 +271,7 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m SolveAttempts) => Tc m where
+class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m SolveAttempts) => Tc m where
   addGoal :: Goal -> m ()
 
   getCtx :: m Ctx
@@ -276,78 +314,9 @@ class (Eval m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m Sol
     NotInPat -> b
     _ -> a
 
-data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
-
-data Ctx = Ctx
-  { env :: Env VTm,
-    lvl :: Lvl,
-    types :: [CtxTy],
-    bounds :: Bounds,
-    nameList :: [Name],
-    names :: Map Name Lvl
-  }
-  deriving (Show)
-
 data Mode = Check VTy | Infer
 
 type Child m = (Mode -> m (STm, VTy))
-
-instance (Tc m) => Has m (Env VTm) where
-  view = accessCtx (\c -> c.env)
-  modify f = modifyCtx (\c -> c {env = f c.env})
-
-instance (Tc m) => Has m [Name] where
-  view = accessCtx (\c -> c.nameList)
-  modify f = modifyCtx (\c -> c {nameList = f c.nameList})
-
-instance (Tc m) => Has m Lvl where
-  view = accessCtx (\c -> c.lvl)
-  modify f = modifyCtx (\c -> c {lvl = f c.lvl})
-
-instance (Monad m, Pretty m VTm) => Pretty m CtxTy where
-  pretty (CtxTy t) = pretty t
-  pretty TyUnneeded = return "_"
-
-instance (Eval m, Has m [Name]) => Pretty m Ctx where
-  pretty c =
-    intercalate "\n"
-      <$> mapM
-        ( \(n, ty, tm) -> do
-            n' <- pretty n
-            ty' <- pretty ty
-            tm' <- case tm of
-              Just t -> (" = " ++) <$> pretty t
-              Nothing -> return ""
-            return $ n' ++ " : " ++ ty' ++ tm'
-        )
-        (reverse con)
-    where
-      con :: [(Name, CtxTy, Maybe VTm)]
-      con =
-        zipWith4
-          ( \i n t e ->
-              ( n,
-                t,
-                case e of
-                  VNeu (VVar x) | x == Lvl i -> Nothing
-                  _ -> Just e
-              )
-          )
-          [c.lvl.unLvl - 1, c.lvl.unLvl - 2 .. 0]
-          c.nameList
-          c.types
-          c.env
-
-emptyCtx :: Ctx
-emptyCtx =
-  Ctx
-    { env = [],
-      lvl = Lvl 0,
-      types = [],
-      bounds = [],
-      nameList = [],
-      names = M.empty
-    }
 
 ensureAllProblemsSolved :: (Tc m) => m ()
 ensureAllProblemsSolved = do
@@ -360,96 +329,17 @@ ensureAllProblemsSolved = do
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
 
-data CtxEntry = CtxEntry
-  { name :: Name,
-    ty :: CtxTy,
-    tm :: VTm,
-    lvl :: Lvl,
-    bound :: BoundState
-  }
-
-bind :: Name -> VTy -> Ctx -> Ctx
-bind x ty ctx =
-  addCtxEntry
-    ( CtxEntry
-        { name = x,
-          ty = CtxTy ty,
-          tm = VNeu (VVar ctx.lvl),
-          lvl = ctx.lvl,
-          bound = Bound
-        }
-    )
-    ctx
-
 enterTel :: (Tc m) => Tel STy -> m a -> m a
 enterTel Empty f = f
 enterTel (t :<| ts) f = do
   t' <- evalHere t.ty
   enterCtx (bind t.name t') (enterTel ts f)
 
-insertedBind :: Name -> VTy -> Ctx -> Ctx
-insertedBind = bind
-
-define :: Name -> VTm -> VTy -> Ctx -> Ctx
-define x t ty ctx =
-  addCtxEntry
-    ( CtxEntry
-        { tm = t,
-          ty = CtxTy ty,
-          bound = Defined,
-          lvl = ctx.lvl,
-          name = x
-        }
-    )
-    ctx
-
-typelessBind :: Name -> Ctx -> Ctx
-typelessBind x ctx =
-  addCtxEntry
-    ( CtxEntry
-        { tm = VNeu (VVar ctx.lvl),
-          ty = TyUnneeded,
-          lvl = ctx.lvl,
-          bound = Bound,
-          name = x
-        }
-    )
-    ctx
-
-addCtxEntry :: CtxEntry -> Ctx -> Ctx
-addCtxEntry e ctx =
-  ctx
-    { env = e.tm : ctx.env,
-      lvl = nextLvl e.lvl,
-      types = e.ty : ctx.types,
-      bounds = e.bound : ctx.bounds,
-      names = M.insert e.name e.lvl ctx.names,
-      nameList = e.name : ctx.nameList
-    }
-
-typelessBinds :: [Name] -> Ctx -> Ctx
-typelessBinds ns ctx = foldr typelessBind ctx (reverse ns)
-
-ensureNeeded :: CtxTy -> VTm
-ensureNeeded (CtxTy t) = t
-ensureNeeded TyUnneeded = error "Type is unneeded"
-
-lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
-lookupName n ctx = case M.lookup n ctx.names of
-  Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ensureNeeded (ctx.types !! idx.unIdx))
-  Nothing -> Nothing
-
 inferMeta :: (Tc m) => Maybe Name -> m (STm, VTy)
 inferMeta n = do
   ty <- newMeta Nothing
   vty <- evalHere ty
   checkMeta n vty
-
-data Goal = Goal
-  { ctx :: Ctx,
-    tm :: STm,
-    ty :: VTy
-  }
 
 prettyGoal :: (Tc m) => Goal -> m String
 prettyGoal (Goal c n ty) = enterCtx (const c) $ do
@@ -1007,12 +897,11 @@ telWithUniqueNames = do
 
 buildElimTy :: (Tc m) => DataGlobal -> m (Closure, Closure, Spine ())
 buildElimTy dat = do
-  -- @@Cleanup: this is a fucking mess, ideally should hide all the index acrobatics..
-
+  -- @@Cleanup: this is a mess, ideally should hide all the index acrobatics..
   datInfo <- access (getDataGlobal dat)
 
   let sTyParams = datInfo.params
-  let sTyParamsV = map (VNeu . VVar . Lvl) $  take (length datInfo.params) [0..]
+  let sTyParamsV = map (VNeu . VVar . Lvl) $ take (length datInfo.params) [0 ..]
 
   let motiveLvl = length datInfo.params
   let methodTyLvl i = motiveLvl + 1 + i
@@ -1156,6 +1045,18 @@ instance (Tc m) => Pretty m UnifyError where
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
   pretty (ErrorInCtx ns e) = enterCtx (const $ typelessBinds ns emptyCtx) $ pretty e
 
+instance (Tc m) => Has m (Env VTm) where
+  view = accessCtx (\c -> c.env)
+  modify f = modifyCtx (\c -> c {env = f c.env})
+
+instance (Tc m) => Has m [Name] where
+  view = accessCtx (\c -> c.nameList)
+  modify f = modifyCtx (\c -> c {nameList = f c.nameList})
+
+instance (Tc m) => Has m Lvl where
+  view = accessCtx (\c -> c.lvl)
+  modify f = modifyCtx (\c -> c {lvl = f c.lvl})
+
 instance (Eval m) => Lattice (m CanUnify) where
   a \/ b = do
     a' <- a
@@ -1192,9 +1093,6 @@ enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
   ns <- uniqueNames c.numVars
   enterCtx (typelessBinds ns) m
-
-enterTypelessPatBinds :: (Tc m) => VPatB -> m a -> m a
-enterTypelessPatBinds p = enterCtx (typelessBinds p.binds)
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
@@ -1264,14 +1162,6 @@ unifyClauses :: (Tc m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m 
 unifyClauses [] [] = return Yes
 unifyClauses (c : cs) (c' : cs') = unifyClause c c' /\ unifyClauses cs cs'
 unifyClauses a b = return $ No [DifferentClauses a b]
-
--- unifyPat :: (Tc m) => VPatB -> VPatB -> m CanUnify
--- unifyPat pt@(VPatB p binds) (VPatB p' binds') = do
---   let n = length binds
---   let n' = length binds'
---   if n == n'
---     then enterTypelessPatBinds pt $ unify p p'
---     else return $ No []
 
 unifyClause :: (Tc m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
 unifyClause (Possible _ t) (Possible _ t') = unifyClosure t t'

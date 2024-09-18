@@ -627,6 +627,7 @@ repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
 repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
 
+-- This is wildly inconsistent, make it a JS primitive!
 repr data Equal [A] x y as JsUndefined {
   refl as js-undefined,
   case e to E {

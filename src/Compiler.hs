@@ -12,6 +12,7 @@ import Common
   )
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Extra (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State (MonadState (..), StateT (..))
 import Control.Monad.State.Class (gets)
@@ -22,7 +23,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Elaboration (Elab (..), ElabError, elabProgram)
-import Evaluation (Eval (..), unelabSig)
+import Evaluation (Eval (..))
 import Globals (Sig, emptySig)
 import Meta (SolvedMetas, emptySolvedMetas)
 import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
@@ -46,7 +47,7 @@ import Printing (Pretty (..))
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Typechecking (Ctx, Goal, InPat (..), Problem, SolveAttempts (..), Tc (addGoal, showMessage, tcError), TcError, emptyCtx, prettyGoal)
-import Control.Monad.Extra (unless)
+import Unelaboration (Unelab, unelabSig)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -185,6 +186,8 @@ instance Has Comp SolveAttempts where
   view = gets (\c -> c.solveAttempts)
   modify f = ST.modify (\s -> s {solveAttempts = f s.solveAttempts})
 
+instance Unelab Comp
+
 instance Tc Comp where
   tcError = throwError . TcCompilerError
   showMessage = msg
@@ -266,7 +269,6 @@ compile args = do
 
 -- code <- generateCode file
 -- when flags.verbose $ msg "Generated code successfully"
-
 -- when flags.dump $ msg $ renderJsProg code
 
 parseAndCheckPrelude :: Comp ()
@@ -306,26 +308,3 @@ parseFile file = do
 -- emitFile file contents = do
 --   liftIO $ writeFile file contents
 --   msg $ "Wrote file " ++ file
-
--- -- | Handle a parsing result.
--- handleParse :: (String -> Comp a) -> Either String a -> Comp a
--- handleParse er res = do
---   case res of
---     Left e -> er $ "Failed to parse: " ++ e
---     Right p -> return p
-
--- -- | Handle a checking result.
--- handleTc :: (String -> InputT IO (a, Ctx)) -> Comp a -> InputT IO (a, Ctx)
--- handleTc er a = do
---   case runTc a of
---     Left e -> do
---       er $ "Typechecking error: " ++ show e
---     Right (p, s) -> return (p, s)
-
--- -- | Handle a generation result.
--- -- handleGen :: (String -> InputT IO a) -> Gen a -> InputT IO a
--- -- handleGen er a = do
--- --   case runGen a of
--- --     Left e -> do
--- --       er $ "Code generation error: " ++ show e
--- --     Right p -> return p

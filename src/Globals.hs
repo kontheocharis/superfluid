@@ -36,16 +36,16 @@ module Globals
 where
 
 import Common
-  ( Arg,
-    CtorGlobal (CtorGlobal),
-    DataGlobal (DataGlobal),
-    DefGlobal (DefGlobal),
+  ( CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (..),
     Glob (..),
     Name (..),
     PrimGlobal (..),
+    Spine,
     Tag,
     Tel,
-    globalName, Spine,
+    globalName,
   )
 import Data.Map (Map)
 import qualified Data.Map as M
