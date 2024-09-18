@@ -4,6 +4,7 @@
 
 module Compiler (runCli) where
 
+import Codegen (Gen (..), JsStat, generateProgram, renderJsProg)
 import Common
   ( Has (..),
     HasNameSupply (..),
@@ -43,7 +44,7 @@ import Options.Applicative.Builder
 import Options.Applicative.Common (Parser)
 import Options.Applicative.Extra (helper)
 import Parsing (ParseError, parseProgram)
-import Persistence (preludePath)
+import Persistence (bootPath, preludePath)
 import Presyntax (PProgram)
 import Printing (Pretty (..))
 import System.Exit (exitFailure)
@@ -94,6 +95,12 @@ data Args = Args
     flags :: Flags
   }
   deriving (Show)
+
+argsFile :: Args -> String
+argsFile (Args (CheckFile f) _) = f
+argsFile (Args (ParseFile f) _) = f
+argsFile (Args (RepresentFile f) _) = f
+argsFile (Args (GenerateCode f) _) = f
 
 -- | Parse the command-line flags.
 parseFlags :: Parser Flags
@@ -148,7 +155,8 @@ data Compiler = Compiler
     lastNameIdx :: Int,
     reduceUnfoldDefs :: Bool,
     solveAttempts :: SolveAttempts,
-    problems :: Seq Problem
+    problems :: Seq Problem,
+    codegenStatements :: [JsStat]
   }
 
 data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError | ElabCompilerError ElabError
@@ -223,6 +231,13 @@ instance HasProjectFiles Comp where
     fs <- gets (\c -> c.files)
     return $ M.lookup f fs
 
+instance Has Comp [JsStat] where
+  view = gets (\c -> c.codegenStatements)
+  modify f = ST.modify (\s -> s {codegenStatements = f s.codegenStatements})
+
+instance Gen Comp where
+  readBootFile = liftIO $ readFile bootPath
+
 emptyCompiler :: Compiler
 emptyCompiler =
   Compiler
@@ -236,6 +251,7 @@ emptyCompiler =
       lastNameIdx = 0,
       reduceUnfoldDefs = False,
       goals = [],
+      codegenStatements = [],
       problems = mempty,
       solveAttempts = SolveAttempts 1
     }
@@ -253,44 +269,47 @@ showGoals = do
     msg "\n-- Goals --\n"
     mapM_ (\g -> prettyGoal g >>= msg) gs
 
+-- | Common logic for compilation tasks
+parseAnd :: Args -> (PProgram -> Comp ()) -> Comp ()
+parseAnd args task = do
+  ST.modify (\s -> s {solveAttempts = SolveAttempts args.flags.attempts})
+  when args.flags.normalise $ setNormaliseProgram True
+  parseAndCheckPrelude
+  parsed <- parseFile (argsFile args)
+  task parsed
+  when args.flags.verbose $ msg "\nTask completed successfully"
+
 -- | Run the compiler.
 compile :: Args -> Comp ()
-compile args = do
-  ST.modify (\s -> s {solveAttempts = SolveAttempts args.flags.attempts})
-  case args of
-    Args (CheckFile file) flags -> do
-      when flags.normalise $ setNormaliseProgram True
-      parseAndCheckPrelude
-      parsed <- parseFile file
-      elabProgram parsed `catchError` (\e -> showGoals >> throwError e)
-      when flags.verbose $ msg "\nTypechecked program successfully"
-      when flags.dump $ unelabSig >>= pretty >>= msg
-      showGoals
-    Args (ParseFile file) flags -> do
-      parsed <- parseFile file
-      when flags.verbose $ msg $ "Parsing file " ++ file
-      when flags.dump $ pretty parsed >>= msg
-    Args (RepresentFile file) flags -> do
-      when flags.normalise $ setNormaliseProgram True
-      parseAndCheckPrelude
-      parsed <- parseFile file
-      elabProgram parsed `catchError` (\e -> showGoals >> throwError e)
+compile args = case args of
+  Args (ParseFile file) flags -> do
+    parsed <- parseFile file
+    when flags.verbose $ msg $ "Parsing file " ++ file
+    when flags.dump $ pretty parsed >>= msg
+  Args (CheckFile _) _ -> do
+    parseAnd args elabProgram `catchError` (\e -> showGoals >> throwError e)
+    when args.flags.dump $ unelabSig >>= pretty >>= msg
+    showGoals
+  Args (RepresentFile _) _ ->
+    parseAnd args $ \parsed -> do
+      elabProgram parsed
       reprInfSig
-      when flags.verbose $ msg "\nTypechecked and represented program successfully"
-      when flags.dump $ unelabSig >>= pretty >>= msg
-      showGoals
-    Args (GenerateCode _) _ -> error "unimplemented"
+      when args.flags.dump $ unelabSig >>= pretty >>= msg
+  Args (GenerateCode file) flags ->
+    parseAnd args $ \parsed -> do
+      elabProgram parsed
+      reprInfSig
+      code <- generateProgram
+      emitFile (file ++ ".js") (renderJsProg code)
+      when flags.verbose $ msg "Generated code successfully"
+      when flags.dump $ msg $ renderJsProg code
 
--- code <- generateCode file
--- when flags.verbose $ msg "Generated code successfully"
--- when flags.dump $ msg $ renderJsProg code
-
+-- Other functions remain the same
 parseAndCheckPrelude :: Comp ()
 parseAndCheckPrelude = do
   parsed <- parseFile preludePath
   elabProgram parsed
 
--- | Parse a file with the given name and add it to the program
 parseFile :: String -> Comp PProgram
 parseFile file = do
   contents <- liftIO $ readFile file
@@ -299,26 +318,7 @@ parseFile file = do
     Left e -> throwError $ ParseCompilerError e
     Right p -> return p
 
--- -- | Parse, check and represent a file.
--- representFile :: String -> InputT IO Program
--- representFile file = do
---   (parsed, _, st) <- parseFile' file
---   (checked, st') <- handleTc err (put st >> checkProgram parsed)
---   (represented, _) <- handleTc err (put st' >> representProgram checked)
---   return represented
-
--- -- | Parse, check and represent a file.
--- -- generateCode :: String -> InputT IO JsProg
--- -- generateCode file = do
--- --   (parsed, prelude, st) <- parseFile' file
--- --   (checked, st') <- handleTc err (put st >> checkProgram parsed)
--- --   (represented, _) <- handleTc err (put st' >> normaliseProgram <$> representProgram (prelude <> checked))
--- --   generated <- handleGen err (generateProgram represented)
--- --   emitFile (file ++ ".js") (renderJsProg generated)
--- --   return generated
-
--- -- | Emit a file.
--- emitFile :: String -> String -> InputT IO ()
--- emitFile file contents = do
---   liftIO $ writeFile file contents
---   msg $ "Wrote file " ++ file
+emitFile :: String -> String -> Comp ()
+emitFile file contents = do
+  liftIO $ writeFile file contents
+  msg $ "Wrote file " ++ file
