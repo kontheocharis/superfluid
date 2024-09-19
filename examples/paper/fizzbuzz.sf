@@ -36,5 +36,5 @@ def repeat : Nat -> (Nat -> IO ()) -> IO () {
 }
 
 def main : IO () {
-  repeat 323 (\n => js-console-log (fizzbuzz-to-string (get-fizzbuzz n)))
+  repeat 10000 (\n => js-console-log (fizzbuzz-to-string (get-fizzbuzz n)))
 }

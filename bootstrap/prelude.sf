@@ -204,6 +204,7 @@ prim unsafe-io : [A : Type] -> IO A -> A
 
 prim js-console-log : [T : Type] -> T -> IO ()
 
+prim js-exit : [A : Type] -> JsNumber -> IO A
 
 -- -- JS Buffer
 
@@ -239,6 +240,8 @@ prim js-buffer-read-uint8 : (buffer : JsBuffer, offset : JsUint) -> JsUint
 
 prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> JsBuffer
 
+prim js-buffer-eq : JsBuffer -> JsBuffer -> JsBool
+
 prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
 
 -- -- General primitives
@@ -258,6 +261,13 @@ def debug-print : [A B : Type] -> A -> B -> B {
 data Maybe (A : Type) : Type {
   nothing : Maybe A,
   just : A -> Maybe A
+}
+
+def is-just : [A : Type] -> Maybe A -> Bool {
+  \case {
+    nothing => false,
+    just _ => true,
+  }
 }
 
 data Either (L : Type) (R : Type) : Type {
@@ -639,12 +649,33 @@ repr data Equal [A] x y as JsUndefined {
 -- -- -- More definitions
 
 data Char : Type {
-  char-from-num : Fin 32 -> Char,
+  utf32-code : Fin (pow 2 32) -> Char,
+}
+
+def char-eq : Char -> Char -> Bool {
+  \c1 c2 => case c1 {
+    utf32-code f1 => case c2 {
+      utf32-code f2 => fin-eq f1 f2,
+    },
+  }
 }
 
 data String : Type {
   snil : String,
   scons : Char -> String -> String,
+}
+
+def string-eq : String -> String -> Bool {
+  \s1 s2 => case s1 {
+    snil => case s2 {
+      snil => true,
+      scons _ _ => false,
+    },
+    scons c1 s1' => case s2 {
+      snil => false,
+      scons c2 s2' => and (char-eq c1 c2) (string-eq s1' s2'),
+    },
+  }
 }
 
 def Word : Type {
@@ -655,6 +686,27 @@ def Byte : Type {
   Fin 256
 }
 
+data ASCII : Type {
+  ascii-code : Fin 256 -> ASCII,
+}
+
+repr data ASCII as Byte {
+  ascii-code x as x,
+  case a {
+    ascii-code => c
+  } as {
+    repr (c (repr a))
+  }
+}
+
+def ascii-eq : ASCII -> ASCII -> Bool {
+  \a1 a2 => case a1 {
+    ascii-code f1 => case a2 {
+      ascii-code f2 => fin-eq f1 f2,
+    },
+  }
+}
+
 def word-to-nat : Word -> Nat {
   fin-to-nat
 }
@@ -663,6 +715,12 @@ def Holds : Bool -> Type {
   \b => Equal b true
 }
 
+def determine : (x : Bool) -> Maybe (Holds x) {
+  \x => case x to (\x => Maybe (Equal x true)) {
+    true => just refl,
+    false => nothing,
+  }
+}
 
 -- Byte lists and vectors
 
@@ -685,6 +743,28 @@ data ByteVec : Nat -> Type {
 
 def byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
   \[n] b => n
+}
+
+def byte-vec-eq : [n m : Nat] -> ByteVec n -> ByteVec m -> Bool {
+  \[n] a b => case a {
+    bvnil => case b {
+      bvnil => true,
+      bvcons _ _ => false
+    },
+    bvcons x xs => case b {
+      bvnil => false,
+      bvcons y ys => and (fin-eq x y) (byte-vec-eq xs ys)
+    }
+  }
+}
+
+def byte-vec-lookup : [n : Nat, T : Type] -> ByteVec n -> List (ByteVec n * (() -> T)) -> (() -> T) -> T {
+  \s l d => case l {
+    nil => d (),
+    cons x xs => case x {
+      (k, v) => if-then-else (byte-vec-eq s k) (\_ => v ()) (\_ => byte-vec-lookup s xs d)
+    }
+  }
 }
 
 repr data ByteList as JsBuffer {
@@ -741,6 +821,19 @@ repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
   }
 }
 
+repr def byte-list-length as \l => {
+  unrepr (js-buffer-byte-length (repr l))
+}
+
+repr def byte-vec-eq as \b b' => {
+  unrepr (js-buffer-eq (repr (fst (repr b))) (repr (fst (repr b'))))
+}
+
+-- Panic
+
+def panic : [A : Type] -> String -> A {
+  \a => unsafe-io (io-bind (js-console-log a) (\_ => js-exit js-one))
+}
 
 -- REPR helpers
 
@@ -791,31 +884,31 @@ def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
 
 -- HTTP
 
-data HttpRequest : Type {
-  http-request : (
-    method : String,
-    url : String,
-    header : String -> Maybe String,
-    body : String,
-  ) -> HttpRequest
-}
+-- data HttpRequest : Type {
+--   http-request : (
+--     method : String,
+--     url : String,
+--     header : String -> Maybe String,
+--     body : String,
+--   ) -> HttpRequest
+-- }
 
-data HttpResponse : Type {
-  http-response : (
-    status : Nat,
-    headers : List (String * String),
-    body : String,
-  ) -> HttpResponse
-}
+-- data HttpResponse : Type {
+--   http-response : (
+--     status : Nat,
+--     headers : List (String * String),
+--     body : String,
+--   ) -> HttpResponse
+-- }
 
-data HttpServer : Type {
-  http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
-}
+-- data HttpServer : Type {
+--   http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
+-- }
 
-def launch-http-server : HttpServer -> IO () {
-  \case {
-    http-server port handler => {
-      ?launch-http-server
-    }
-  }
-}
+-- def launch-http-server : HttpServer -> IO () {
+--   \case {
+--     http-server port handler => {
+--       ?launch-http-server
+--     }
+--   }
+-- }

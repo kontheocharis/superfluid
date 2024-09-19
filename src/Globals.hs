@@ -76,11 +76,23 @@ data DataGlobalInfo = DataGlobalInfo
     indexArity :: Spine () -- might not be set yet
   }
 
-data DefGlobalInfo = DefGlobalInfo {name :: Name, ty :: VTy, vtm :: Maybe VTm, tm :: Maybe STm} -- might not be set yet
+data DefGlobalInfo = DefGlobalInfo
+  { name :: Name,
+    ty :: VTy,
+    vtm :: Maybe VTm,
+    tm :: Maybe STm -- might not be set yet
+  }
 
-data PrimGlobalInfo = PrimGlobalInfo {name :: Name, ty :: VTm}
+data PrimGlobalInfo = PrimGlobalInfo
+  { name :: Name,
+    ty :: VTm
+  }
 
-data GlobalInfo = DataInfo DataGlobalInfo | CtorInfo CtorGlobalInfo | DefInfo DefGlobalInfo | PrimInfo PrimGlobalInfo
+data GlobalInfo
+  = DataInfo DataGlobalInfo
+  | CtorInfo CtorGlobalInfo
+  | DefInfo DefGlobalInfo
+  | PrimInfo PrimGlobalInfo
 
 data Sig = Sig
   { contents :: Map Name GlobalInfo,
@@ -108,7 +120,10 @@ mapSigContentsM_ f s = do
 removeRepresentedItems :: Sig -> Sig
 removeRepresentedItems s =
   s
-    { contents = M.filterWithKey (\k _ -> not (M.member k s.repr || M.member k s.reprCase)) s.contents,
+    { contents =
+        M.filterWithKey
+          (\k _ -> not (M.member k s.repr || M.member k s.reprCase))
+          s.contents,
       repr = M.empty,
       reprCase = M.empty,
       nameOrder = filter (\n -> not (M.member n s.repr || M.member n s.reprCase)) s.nameOrder

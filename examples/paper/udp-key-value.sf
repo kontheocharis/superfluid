@@ -1,0 +1,128 @@
+def is-valid-key : ByteList -> Bool {
+  \case {
+    bnil => false,
+    bcons f xs => and (fin-eq f 75n) (nat-eq (byte-list-length xs) 15) -- first byte must be 75, 16 bytes total
+  }
+}
+
+data Key : Type {
+  key : (b : ByteList) -> Holds (is-valid-key b) -> Key
+}
+
+def parse-key : ByteList -> Maybe Key {
+  \k => case determine (is-valid-key k) {
+    nothing => nothing,
+    just p => just (key k p),
+  }
+}
+
+data Value : Type {
+  value : ByteList -> Value
+}
+
+data Op : Type {
+  get : Op,
+  insert : Op,
+  modify : Op,
+  delete : Op,
+}
+
+def bytes-for-get : ByteVec 3 {
+  bvcons 71n (bvcons 69n (bvcons 84n bvnil))
+}
+
+def bytes-for-insert : ByteVec 3 {
+  bvcons 105n (bvcons 110n (bvcons 115n bvnil))
+}
+
+def bytes-for-modify : ByteVec 3 {
+  bvcons 109n (bvcons 111n (bvcons 100n bvnil))
+}
+
+def bytes-for-delete : ByteVec 3 {
+  bvcons 100n (bvcons 101n (bvcons 108n bvnil))
+}
+
+def parse-op : ByteVec 3 -> Maybe Op {
+  \b => {
+    byte-vec-lookup b
+        (cons (bytes-for-get, \_ => just get)
+          (cons (bytes-for-insert, \_ => just insert)
+          (cons (bytes-for-modify, \_ => just modify)
+          (cons (bytes-for-delete, \_ => just delete) nil))))
+        (\_ => nothing)
+  }
+}
+
+data Sig : Type {
+  sig : (Input : Type) -> (Output : Type) -> Sig
+}
+
+def op-sig : Op -> Sig {
+  \case {
+    get => sig Key Value,
+    insert => sig Value Key,
+    modify => sig (Key * Value) (),
+    delete => sig Key (),
+  }
+}
+
+def OpInput : Op -> Type {
+  \o => case op-sig o {
+    sig Input _ => Input
+  }
+}
+
+def OpOutput : Op -> Type {
+  \o => case op-sig o {
+    sig _ Output => Output
+  }
+}
+
+data Req : Type {
+  req : (op : Op, input : OpInput op) -> Req
+}
+
+data Res : Type {
+  res : (op : Op, output : OpOutput op) -> Res
+}
+
+repr data Key as (b : ByteList) * Holds (is-valid-key b) {
+  key b p as (b, p),
+
+  case s to E {
+    key => k
+  } as {
+    case (repr s) to (repr E) {
+      (b, p) => repr (k b p)
+    }
+  }
+}
+
+repr data Op as (b : ByteVec 3) * Holds (is-just (parse-op b)) {
+  get as (bytes-for-get, trust-me),
+  insert as (bytes-for-insert, trust-me),
+  modify as (bytes-for-modify, trust-me),
+  delete as (bytes-for-delete, trust-me),
+
+  case op to E {
+    get => g,
+    insert => i,
+    modify => m,
+    delete => d,
+  } as {
+    let op' = repr op;
+    case op' {
+      (b, p) => byte-vec-lookup b
+        (cons (bytes-for-get, \_ => unsafe-complete (repr E) op' (repr g))
+          (cons (bytes-for-insert, \_ => unsafe-complete (repr E) op' (repr i))
+          (cons (bytes-for-modify, \_ => unsafe-complete (repr E) op' (repr m))
+          (cons (bytes-for-delete, \_ => unsafe-complete (repr E) op' (repr d)) nil))))
+        (panic "impossible")
+    }
+  }
+}
+
+-- repr data Req as (b : ByteList) * Holds (is-valid-req b) {
+
+-- }
