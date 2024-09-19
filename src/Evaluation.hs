@@ -48,8 +48,10 @@ import Common
     Param (..),
     PiMode (..),
     Spine,
+    Tag (..),
     Tel,
     Times (..),
+    globName,
     inv,
     lvlToIdx,
     mapSpine,
@@ -77,8 +79,12 @@ import Globals
     PrimGlobalInfo (..),
     Sig (..),
     getCaseRepr,
+    getGlobal,
     getGlobalRepr,
-    unfoldDef, mapSigContentsM, removeRepresentedItems,
+    getGlobalTags,
+    mapSigContentsM,
+    removeRepresentedItems,
+    unfoldDef,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
@@ -422,8 +428,18 @@ eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
 eval env (SGlobal g pp) = do
-  pp' <- mapM (eval env) pp
-  return $ VNeu (VHead (VGlobal g pp'))
+  ts <- access (getGlobalTags (globName g))
+  case (UnfoldTag `elem` ts, g) of
+    (True, DefGlob d) -> do
+      g' <- access (unfoldDef d)
+      case g' of
+        Just t -> return t
+        _ -> do
+          pp' <- mapM (eval env) pp
+          return $ VNeu (VHead (VGlobal g pp'))
+    _ -> do
+      pp' <- mapM (eval env) pp
+      return $ VNeu (VHead (VGlobal g pp'))
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr m t) = do
   t' <- eval env t

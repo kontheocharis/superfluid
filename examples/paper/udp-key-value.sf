@@ -123,11 +123,19 @@ repr data Op as (b : ByteVec 3) * Holds (is-just (parse-op b)) {
   }
 }
 
-
-def concat-two : List Nat -> List Nat {
-  \l => [1, 2, 3, ..l,]
+data Vec (T : Type) : Nat -> Type {
+  vec-nil : Vec T 0,
+  vec-cons : [n : Nat] -> (x : T) -> (xs : Vec T n) -> Vec T (s n),
 }
 
--- repr data Req as (b : ByteList) * Holds (is-valid-req b) {
+#unfold
+def vec : [T : Type] -> (l : List T) -> Vec T (length l) {
+  \l => case l to (\l => Vec T (length l)) {
+    [] => vec-nil,
+    [x, .. xs] => vec-cons x (vec xs),
+  }
+}
 
--- }
+def foo : Nat -> Vec Nat 4 {
+  \x => vec [1, 2, x, 4]
+}
