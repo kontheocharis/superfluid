@@ -146,6 +146,10 @@ elab p mode = case (p, mode) of
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
+  (PList ts, md) -> do
+    let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) (pKnownCtor KnownNil []) ts
+    elab ts' md
+  (PCons t ts, md) -> elab (pKnownCtor KnownCons [t, ts]) md
   (PParams _ _, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()

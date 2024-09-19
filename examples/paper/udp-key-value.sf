@@ -45,12 +45,12 @@ def bytes-for-delete : ByteVec 3 {
 
 def parse-op : ByteVec 3 -> Maybe Op {
   \b => {
-    byte-vec-lookup b
-        (cons (bytes-for-get, \_ => just get)
-          (cons (bytes-for-insert, \_ => just insert)
-          (cons (bytes-for-modify, \_ => just modify)
-          (cons (bytes-for-delete, \_ => just delete) nil))))
-        (\_ => nothing)
+    byte-vec-lookup b [
+      (bytes-for-get, \_ => just get),
+      (bytes-for-insert, \_ => just insert),
+      (bytes-for-modify, \_ => just modify),
+      (bytes-for-delete, \_ => just delete),
+    ] (\_ => nothing)
   }
 }
 
@@ -113,12 +113,12 @@ repr data Op as (b : ByteVec 3) * Holds (is-just (parse-op b)) {
   } as {
     let op' = repr op;
     case op' {
-      (b, p) => byte-vec-lookup b
-        (cons (bytes-for-get, \_ => unsafe-complete (repr E) op' (repr g))
-          (cons (bytes-for-insert, \_ => unsafe-complete (repr E) op' (repr i))
-          (cons (bytes-for-modify, \_ => unsafe-complete (repr E) op' (repr m))
-          (cons (bytes-for-delete, \_ => unsafe-complete (repr E) op' (repr d)) nil))))
-        (panic "impossible")
+      (b, p) => byte-vec-lookup b [
+          (bytes-for-get, \_ => unsafe-complete (repr E) op' (repr g)),
+          (bytes-for-insert, \_ => unsafe-complete (repr E) op' (repr i)),
+          (bytes-for-modify, \_ => unsafe-complete (repr E) op' (repr m)),
+          (bytes-for-delete, \_ => unsafe-complete (repr E) op' (repr d)),
+        ] (panic "impossible")
     }
   }
 }

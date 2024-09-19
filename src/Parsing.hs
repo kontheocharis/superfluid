@@ -8,30 +8,32 @@ import Common
     Lit (CharLit, FinLit, NatLit, StringLit),
     Loc (Loc),
     Name (..),
+    Param (..),
     PiMode (Explicit, Implicit),
     Pos (Pos),
     Tag,
-    Times (Finite), Param (..), Tel,
+    Tel,
+    Times (Finite),
   )
 import Data.Char (isDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, singleton)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
+import Data.Sequence (Seq (..))
+import qualified Data.Sequence as SE
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.String
 import Data.Text (Text)
 import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
 import Printing (Pretty (..))
-import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
+import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, sepBy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
 import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
-import qualified Data.Sequence as SE
-import Data.Sequence (Seq(..))
 
 -- | Parser state, used for generating fresh variables.
 data ParserState = ParserState {}
@@ -307,11 +309,33 @@ dataSig = do
 term :: Parser PTm
 term = choice [caseExpr, lets, piTOrSigmaT, lam, app]
 
+-- | Parse a list
+list :: Parser PTm
+list = locatedTerm $ do
+  try $ symbol "["
+  end <- optionMaybe (symbol "]")
+  case end of
+    Just _ -> return $ PList []
+    Nothing -> do
+      x <- term
+      comma
+      consIndicator <- optionMaybe (symbol "..")
+      case consIndicator of
+        Just _ -> do
+          xs <- term
+          optional comma
+          _ <- symbol "]"
+          return $ PCons x xs
+        Nothing -> do
+          xs <- sepEndBy term comma
+          _ <- symbol "]"
+          return $ PList (x : xs)
+
 -- | Parse a single term.
 --
 -- This is a term which never requires parentheses to disambiguate.
 singleTerm :: Parser PTm
-singleTerm = choice [literal, varOrHoleOrU, repTerm, unrepTerm, pairOrParens]
+singleTerm = choice [list, literal, varOrHoleOrU, repTerm, unrepTerm, pairOrParens]
 
 literal :: Parser PTm
 literal = locatedTerm $ do
@@ -371,7 +395,7 @@ tel =
     namelessTyping :: Parser (NonEmpty (Param PTy, Loc))
     namelessTyping =
       located
-        (\(n, t) l -> singleton (Param Explicit n t,  l))
+        (\(n, t) l -> singleton (Param Explicit n t, l))
         ( do
             t <- app
             return (Name "_", t)

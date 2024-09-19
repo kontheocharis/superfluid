@@ -177,8 +177,8 @@ const trust_me = (A) => (x) => (y) => null;
 
 var Unit = null;
 var tt = [0];
-var Sigma = (x15690) => (x15701) => null;
-var pair = (x15710) => (x15721) => [0, x15710, x15721];
+var Sigma = (x18770) => (x18781) => null;
+var pair = (x18790) => (x18801) => [0, x18790, x18801];
 var dup = (A0) => (a1) => (pair)(a1)(a1);
 var fst = (A0) => (B1) => (p2) => (() => {
   switch ((p2)[0]) {
@@ -193,62 +193,100 @@ var snd = (_0) => (B1) => (p2) => (() => {
 var id = (A0) => (a1) => a1;
 var if_then_else = (A0) => (b1) => (t2) => (f3) => (js_if_dep)((x784) => A0)(b1)((_4) => (t2)(tt))((_4) => (f3)(tt));
 var debug_print = (A0) => (B1) => (a2) => (b3) => (unsafe_io)(B1)((io_bind)(Unit)(B1)((js_console_log)(A0)(a2))((_4) => (io_return)(B1)(b3)));
-var Maybe = (x15730) => null;
+var Maybe = (x18810) => null;
 var nothing = [0];
-var just = (x15740) => [1, x15740];
-var Either = (x15750) => (x15761) => null;
-var left = (x15770) => [0, x15770];
-var right = (x15780) => [1, x15780];
+var just = (x18820) => [1, x18820];
+var is_just = (A0) => (x1351) => (() => {
+  switch ((x1351)[0]) {
+    case 0: return js_false;
+    case 1: return ((x1392) => js_true)((x1351)[1]);
+  }
+})();
+var Either = (x18830) => (x18841) => null;
+var left = (x18850) => [0, x18850];
+var right = (x18860) => [1, x18860];
 var Empty = null;
 var VOID = (A0) => (m1) => (() => {
   switch ((m1)[0]) {
     
   }
 })();
-var Dec = (x15790) => null;
-var yes = (x15800) => [0, x15800];
-var no = (x15810) => [1, x15810];
-var sub = (m0) => (n1) => (js_zero_or_pos)((x1772) => JsUint)((_2) => m0)((x15402) => (js_zero_or_pos)((x1803) => JsUint)((_3) => js_uint_zero)((x15413) => (sub)(x15413)(x15402))(m0))(n1);
-var upgrade = (n0) => (k1) => (js_zero_or_pos)((m2) => null)((_2) => (id)((JsBoundedUint)(n0)))((x15422) => (x3) => (js_bounded_uint_inc)((js_uint_plus)(x15422)(n0))((upgrade)(n0)(x15422)(x3)))(k1);
+var Dec = (x18870) => null;
+var yes = (x18880) => [0, x18880];
+var no = (x18890) => [1, x18890];
+var sub = (m0) => (n1) => (js_zero_or_pos)((x1842) => JsUint)((_2) => m0)((x18442) => (js_zero_or_pos)((x1873) => JsUint)((_3) => js_uint_zero)((x18453) => (sub)(x18453)(x18442))(m0))(n1);
+var upgrade = (n0) => (k1) => (js_zero_or_pos)((m2) => null)((_2) => (id)((JsBoundedUint)(n0)))((x18462) => (x3) => (js_bounded_uint_inc)((js_uint_plus)(x18462)(n0))((upgrade)(n0)(x18462)(x3)))(k1);
 var type = (A0) => (_1) => A0;
-var find = (A0) => (p1) => (xs2) => (js_array_switch_l)(A0)((x4093) => (Maybe)(A0))((_3) => nothing)((a3) => (xs4) => (js_if_dep)((x4265) => (Maybe)(A0))((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(A0)(p1)(a3)))(xs2);
+var find = (A0) => (p1) => (xs2) => (js_array_switch_l)(A0)((x4163) => (Maybe)(A0))((_3) => nothing)((a3) => (xs4) => (js_if_dep)((x4335) => (Maybe)(A0))((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(A0)(p1)(a3)))(xs2);
 var subst = (A0) => (x1) => (y2) => (P3) => (e4) => (unsafe_cast)(null)(null)((id)((P3)((conjure)(A0))));
 var subst_type = (A0) => (B1) => (subst)(null)(A0)(B1)((X2) => X2);
 var cong = (A0) => (B1) => (x2) => (y3) => (f4) => (e5) => (unsafe_cast)(JsUndefined)(JsUndefined)(js_undefined);
 var sym = (A0) => (x1) => (y2) => (e3) => (unsafe_cast)(JsUndefined)(JsUndefined)(js_undefined);
-var z_neq_s = (n0) => (p1) => (subst)(JsUint)(js_uint_zero)((js_uint_plus)(js_uint_one)(n0))((n2) => (js_zero_or_pos)((x6433) => null)((_3) => Unit)((x15543) => Empty)(n2))(p1)(tt);
+var z_neq_s = (n0) => (p1) => (subst)(JsUint)(js_uint_zero)((js_uint_plus)(js_uint_one)(n0))((n2) => (js_zero_or_pos)((x6503) => null)((_3) => Unit)((x18583) => Empty)(n2))(p1)(tt);
 var co_sym = (A0) => (x1) => (y2) => (m3) => (p4) => (m3)((sym)(A0)(y2)(x1)(p4));
 var s_inj = (n0) => (m1) => (e2) => (subst)(JsUint)((js_uint_plus)(js_uint_one)(n0))((js_uint_plus)(js_uint_one)(m1))((x3) => JsUndefined)(e2)(js_undefined);
 var s_co_cong = (x0) => (y1) => (m2) => (p3) => (m2)((s_inj)(x0)(y1)(p3));
-var nat_eq_dep = (n0) => (m1) => (js_zero_or_pos)((n2) => (Dec)(JsUndefined))((_2) => (js_zero_or_pos)((m3) => (Dec)(JsUndefined))((_3) => (yes)(js_undefined))((x15583) => (no)((z_neq_s)(x15583)))(m1))((x15572) => (js_zero_or_pos)((m3) => (Dec)(JsUndefined))((_3) => (no)((co_sym)(JsUint)(js_uint_zero)((js_uint_plus)(js_uint_one)(x15572))((z_neq_s)(x15572))))((x15603) => (() => {
-  switch (((nat_eq_dep)(x15572)(x15603))[0]) {
-    case 0: return ((e4) => (yes)((cong)(JsUint)(JsUint)(x15572)(x15603)((n5) => (js_uint_plus)(js_uint_one)(n5))(e4)))(((nat_eq_dep)(x15572)(x15603))[1]);
-    case 1: return ((f4) => (no)((s_co_cong)(x15572)(x15603)(f4)))(((nat_eq_dep)(x15572)(x15603))[1]);
+var nat_eq_dep = (n0) => (m1) => (js_zero_or_pos)((n2) => (Dec)(JsUndefined))((_2) => (js_zero_or_pos)((m3) => (Dec)(JsUndefined))((_3) => (yes)(js_undefined))((x18623) => (no)((z_neq_s)(x18623)))(m1))((x18612) => (js_zero_or_pos)((m3) => (Dec)(JsUndefined))((_3) => (no)((co_sym)(JsUint)(js_uint_zero)((js_uint_plus)(js_uint_one)(x18612))((z_neq_s)(x18612))))((x18643) => (() => {
+  switch (((nat_eq_dep)(x18612)(x18643))[0]) {
+    case 0: return ((e4) => (yes)((cong)(JsUint)(JsUint)(x18612)(x18643)((n5) => (js_uint_plus)(js_uint_one)(n5))(e4)))(((nat_eq_dep)(x18612)(x18643))[1]);
+    case 1: return ((f4) => (no)((s_co_cong)(x18612)(x18643)(f4)))(((nat_eq_dep)(x18612)(x18643))[1]);
   }
 })())(m1))(n0);
-var dec_to_bool = (A0) => (x8231) => (() => {
-  switch ((x8231)[0]) {
-    case 0: return ((x8252) => js_true)((x8231)[1]);
-    case 1: return ((x8282) => js_false)((x8231)[1]);
+var dec_to_bool = (A0) => (x8301) => (() => {
+  switch ((x8301)[0]) {
+    case 0: return ((x8322) => js_true)((x8301)[1]);
+    case 1: return ((x8352) => js_false)((x8301)[1]);
   }
 })();
-var lte = (m0) => (n1) => (js_zero_or_pos)((x8332) => JsBool)((_2) => js_true)((x15612) => (js_zero_or_pos)((x8363) => JsBool)((_3) => js_false)((x15623) => (lte)(x15612)(x15623))(n1))(m0);
+var lte = (m0) => (n1) => (js_zero_or_pos)((x8402) => JsBool)((_2) => js_true)((x18652) => (js_zero_or_pos)((x8433) => JsBool)((_3) => js_false)((x18663) => (lte)(x18652)(x18663))(n1))(m0);
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(JsUint)(JsUint)(m0)(n1)))((lte)(m0)(n1));
-var bool_eq = (a0) => (b1) => (js_if_dep)((x8402) => JsBool)(a0)((_2) => (js_if_dep)((x8413) => JsBool)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)((x8423) => JsBool)(b1)((_3) => js_false)((_3) => js_true));
+var bool_eq = (a0) => (b1) => (js_if_dep)((x8472) => JsBool)(a0)((_2) => (js_if_dep)((x8483) => JsBool)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)((x8493) => JsBool)(b1)((_3) => js_false)((_3) => js_true));
 var Char = null;
-var char_from_num = (x15820) => [0, x15820];
+var utf32_code = (x18900) => [0, x18900];
+var char_eq = (c10) => (c21) => (() => {
+  switch ((c10)[0]) {
+    case 0: return ((f12) => (() => {
+      switch ((c21)[0]) {
+        case 0: return ((f23) => (js_eqq)((JsBoundedUint)((js_uint_pow)(2)(32)))((JsBoundedUint)((js_uint_pow)(2)(32)))(f12)(f23))((c21)[1]);
+      }
+    })())((c10)[1]);
+  }
+})();
 var STRING = null;
 var snil = [0];
-var scons = (x15830) => (x15841) => [1, x15830, x15841];
+var scons = (x18910) => (x18921) => [1, x18910, x18921];
+var string_eq = (s10) => (s21) => (() => {
+  switch ((s10)[0]) {
+    case 0: return (() => {
+      switch ((s21)[0]) {
+        case 0: return js_true;
+        case 1: return ((x10182) => (x10193) => js_false)((s21)[1])((s21)[2]);
+      }
+    })();
+    case 1: return ((c12) => (s1_p_3) => (() => {
+      switch ((s21)[0]) {
+        case 0: return js_false;
+        case 1: return ((c24) => (s2_p_5) => (js_and)((char_eq)(c12)(c24))((string_eq)(s1_p_3)(s2_p_5)))((s21)[1])((s21)[2]);
+      }
+    })())((s10)[1])((s10)[2]);
+  }
+})();
 var Word = (JsBoundedUint)(65536);
 var Byte = (JsBoundedUint)(256);
+var ascii_eq = (a10) => (a21) => (js_eqq)((JsBoundedUint)(256))((JsBoundedUint)(256))(a10)(a21);
 var word_to_nat = (n0) => (js_forget_bound)(65536)(n0);
 var Holds = (b0) => JsUndefined;
-var byte_list_length = (l0) => (js_if)(JsUint)((js_eqq)(JsUint)(JsUint)((js_buffer_byte_length)(l0))(0))((_1) => (unsafe_complete)(JsBuffer)((x10032) => JsUint)(l0)(js_buffer_empty)(js_uint_zero))((_1) => (unsafe_complete)(JsBuffer)((x10032) => JsUint)(l0)((fst)(JsBuffer)((x10382) => Unit)((js_buffer_run)(Unit)((js_buffer_alloc)((js_uint_plus)((js_buffer_byte_length)((js_buffer_subarray)(l0)(1)((js_buffer_byte_length)(l0))))(1)))((js_buffer_bind)(Unit)(Unit)((js_buffer_copy)((js_buffer_subarray)(l0)(1)((js_buffer_byte_length)(l0)))(0)((js_buffer_byte_length)((js_buffer_subarray)(l0)(1)((js_buffer_byte_length)(l0))))(1))((_2) => (js_buffer_write_uint8)((js_forget_bound)(256)((js_bound_trust_me)(256)((js_buffer_read_uint8)(l0)(0))))(0)))))((js_uint_plus)(js_uint_one)((byte_list_length)((js_bound_trust_me)(256)((js_buffer_read_uint8)(l0)(0))))));
+var determine = (x0) => (js_if_dep)((x1) => (Maybe)(JsUndefined))(x0)((_1) => (just)(js_undefined))((_1) => nothing);
 var byte_vec_length = (n0) => (b1) => n0;
-var Reprs = (l0) => (T1) => (js_zero_or_pos)((x13482) => null)((_2) => T1)((x15652) => (Reprs)(x15652)(T1))(l0);
-var reprs = (T0) => (l1) => (t2) => (js_zero_or_pos)((l3) => (Reprs)(l3)(T0))((_3) => t2)((x15663) => (reprs)(T0)(x15663)(t2))(l1);
-var unreprs = (T0) => (l1) => (js_zero_or_pos)((l2) => null)((_2) => (id)((Reprs)(js_uint_zero)(T0)))((x15672) => (r3) => (unreprs)(T0)(x15672)(r3))(l1);
+var byte_vec_lookup = (n0) => (T1) => (s2) => (l3) => (d4) => (js_array_switch_l)((Sigma)((Sigma)(JsBuffer)((l5) => JsUndefined))((_5) => null))((x12025) => T1)((_5) => (d4)(tt))((a5) => (xs6) => (() => {
+  switch ((xs6)[0]) {
+    case 0: return ((k7) => (v8) => (if_then_else)(T1)((js_buffer_eq)((fst)(JsBuffer)((x16479) => JsUndefined)(s2))((fst)(JsBuffer)((x16579) => JsUndefined)(k7)))((_9) => (v8)(tt))((_9) => (byte_vec_lookup)(n0)(T1)(s2)(a5)(d4)))((xs6)[1])((xs6)[2]);
+  }
+})())(l3);
+var panic = (A0) => (a1) => (unsafe_io)(A0)((io_bind)(Unit)(A0)((js_console_log)(STRING)(a1))((_2) => (js_exit)(A0)(js_one)));
+var Reprs = (l0) => (T1) => (js_zero_or_pos)((x16692) => null)((_2) => T1)((x18732) => (Reprs)(x18732)(T1))(l0);
+var reprs = (T0) => (l1) => (t2) => (js_zero_or_pos)((l3) => (Reprs)(l3)(T0))((_3) => t2)((x18743) => (reprs)(T0)(x18743)(t2))(l1);
+var unreprs = (T0) => (l1) => (js_zero_or_pos)((l2) => null)((_2) => (id)((Reprs)(js_uint_zero)(T0)))((x18752) => (r3) => (unreprs)(T0)(x18752)(r3))(l1);
 var repr_subst = (A0) => (B1) => (subst_type)(A0)(B1);
 var repr_subst_p_ = (A0) => (B1) => (p2) => (subst_type)(B1)(A0)((sym)(null)(A0)(B1)(p2));
 var ReprBy = (T0) => (U1) => (Sigma)(JsUint)((l2) => JsUndefined);
@@ -262,23 +300,12 @@ var reprs_subst_p_ = (A0) => (B1) => (r2) => (b3) => (() => {
     case 0: return ((l4) => (p5) => (unreprs)(A0)(l4)((subst_type)(B1)((Reprs)(l4)(A0))((sym)(null)((Reprs)(l4)(A0))(B1)(p5))(b3)))((r2)[1])((r2)[2]);
   }
 })();
-var HttpRequest = null;
-var http_request = (x15850) => (x15861) => (x15872) => (x15883) => [0, x15850, x15861, x15872, x15883];
-var HttpResponse = null;
-var http_response = (x15890) => (x15901) => (x15912) => [0, x15890, x15901, x15912];
-var HttpServer = null;
-var http_server = (x15920) => (x15931) => [0, x15920, x15931];
-var launch_http_server = (x15030) => (() => {
-  switch ((x15030)[0]) {
-    case 0: return ((port1) => (handler2) => (null)(handler2)(port1)(x15030))((x15030)[1])((x15030)[2]);
-  }
-})();
 var FizzBuzz = null;
 var fizz = [0];
 var buzz = [1];
 var fizzbuzz = [2];
-var fizzbuzz_to_string = (x15140) => (() => {
-  switch ((x15140)[0]) {
+var fizzbuzz_to_string = (x18180) => (() => {
+  switch ((x18180)[0]) {
     case 0: return "nothing!";
     case 1: return ((f1) => (() => {
       switch ((f1)[0]) {
@@ -286,10 +313,10 @@ var fizzbuzz_to_string = (x15140) => (() => {
         case 1: return "buzz";
         case 2: return "fizzbuzz";
       }
-    })())((x15140)[1]);
+    })())((x18180)[1]);
   }
 })();
-var get_fizzbuzz = (n0) => (js_if_dep)((x15201) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(15))(0))((_1) => (just)(fizzbuzz))((_1) => (js_if_dep)((x15222) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(3))(0))((_2) => (just)(fizz))((_2) => (js_if_dep)((x15243) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(5))(0))((_3) => (just)(buzz))((_3) => nothing)));
-var repeat = (n0) => (f1) => (js_zero_or_pos)((x15272) => (IO)(Unit))((_2) => (io_return)(Unit)(tt))((x15682) => (io_bind)(Unit)(Unit)((f1)(n0))((_3) => (repeat)(x15682)(f1)))(n0);
+var get_fizzbuzz = (n0) => (js_if_dep)((x18241) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(15))(0))((_1) => (just)(fizzbuzz))((_1) => (js_if_dep)((x18262) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(3))(0))((_2) => (just)(fizz))((_2) => (js_if_dep)((x18283) => (Maybe)(FizzBuzz))((js_eqq)(JsUint)(JsUint)((js_uint_mod)(n0)(5))(0))((_3) => (just)(buzz))((_3) => nothing)));
+var repeat = (n0) => (f1) => (js_zero_or_pos)((x18312) => (IO)(Unit))((_2) => (io_return)(Unit)(tt))((x18762) => (io_bind)(Unit)(Unit)((f1)(n0))((_3) => (repeat)(x18762)(f1)))(n0);
 var main = (repeat)(10000)((n0) => (js_console_log)(STRING)((fizzbuzz_to_string)((get_fizzbuzz)(n0))));
 (main)()

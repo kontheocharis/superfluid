@@ -402,8 +402,8 @@ def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
 
 def length : [A : Type] -> List A -> Nat {
   \xs => case xs {
-    nil => z,
-    cons _ xs' => s (length xs'),
+    [] => z,
+    [_, ..xs'] => s (length xs'),
   }
 }
 
@@ -413,15 +413,15 @@ def type : [A : Type] -> A -> Type {
 
 def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
   \f xs => case xs {
-    nil => nil,
-    cons x xs' => cons (f x) (map f xs')
+    [] => [],
+    [x, ..xs'] => [f x, .. map f xs']
   }
 }
 
 def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   \p xs => case xs {
-    nil => nothing,
-    cons x xs' => case p x {
+    [] => nothing,
+    [x, ..xs'] => case p x {
       true => just x,
       false => find p xs'
     }
@@ -430,15 +430,15 @@ def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
 
 def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
   \f acc xs => case xs {
-    nil => acc,
-    cons x xs' => f x (fold f acc xs')
+    [] => acc,
+    [x, ..xs'] => f x (fold f acc xs')
   }
 }
 
 def index : [A : Type] -> Nat -> List A -> Maybe A {
   \n xs => case xs {
-    nil => nothing,
-    cons x xs' => case n {
+    [] => nothing,
+    [x, ..xs'] => case n {
       z => just x,
       s n' => index n' xs'
     }
