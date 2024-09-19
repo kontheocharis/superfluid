@@ -123,6 +123,11 @@ repr data Op as (b : ByteVec 3) * Holds (is-just (parse-op b)) {
   }
 }
 
+
+def concat-two : List Nat -> List Nat {
+  \l => [1, 2, 3, ..l,]
+}
+
 -- repr data Req as (b : ByteList) * Holds (is-valid-req b) {
 
 -- }

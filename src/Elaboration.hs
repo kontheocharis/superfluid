@@ -49,7 +49,7 @@ import Presyntax
     toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (STm (..), STy)
+import Syntax (STm (..), STy, VTm (..), VTy)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -77,7 +77,6 @@ import Typechecking
     univ,
     wildPat,
   )
-import Syntax (VTm (..), VTy)
 
 -- Presyntax exists below here
 
@@ -146,10 +145,12 @@ elab p mode = case (p, mode) of
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
-  (PList ts, md) -> do
-    let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) (pKnownCtor KnownNil []) ts
+  (PList ts rest, md) -> do
+    let end = case rest of
+          Just t -> t
+          Nothing -> pKnownCtor KnownNil []
+    let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) end ts
     elab ts' md
-  (PCons t ts, md) -> elab (pKnownCtor KnownCons [t, ts]) md
   (PParams _ _, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()

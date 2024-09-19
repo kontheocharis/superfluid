@@ -26,9 +26,48 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.String
 import Data.Text (Text)
-import Presyntax (PCaseRep (..), PCtor (MkPCtor), PCtorRep (MkPCtorRep), PData (MkPData), PDataRep (MkPDataRep), PDef (..), PDefRep (MkPDefRep), PItem (..), PPat, PPrim (MkPPrim), PProgram (..), PTm (..), PTy, pApp, tagged)
+import Presyntax
+  ( PCaseRep (..),
+    PCtor (MkPCtor),
+    PCtorRep (MkPCtorRep),
+    PData (MkPData),
+    PDataRep (MkPDataRep),
+    PDef (..),
+    PDefRep (MkPDefRep),
+    PItem (..),
+    PPat,
+    PPrim (MkPPrim),
+    PProgram (..),
+    PTm (..),
+    PTy,
+    pApp,
+    tagged,
+  )
 import Printing (Pretty (..))
-import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, sepBy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
+import Text.Parsec
+  ( Parsec,
+    between,
+    char,
+    choice,
+    eof,
+    errorPos,
+    getPosition,
+    many,
+    many1,
+    noneOf,
+    notFollowedBy,
+    optionMaybe,
+    optional,
+    runParser,
+    satisfy,
+    skipMany,
+    skipMany1,
+    sourceColumn,
+    sourceLine,
+    sourceName,
+    string,
+    (<|>),
+  )
 import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
@@ -315,21 +354,29 @@ list = locatedTerm $ do
   try $ symbol "["
   end <- optionMaybe (symbol "]")
   case end of
-    Just _ -> return $ PList []
-    Nothing -> do
-      x <- term
-      comma
+    Just _ -> return $ PList [] Nothing
+    Nothing -> els []
+  where
+    els xs = do
       consIndicator <- optionMaybe (symbol "..")
       case consIndicator of
         Just _ -> do
-          xs <- term
+          xs' <- term
           optional comma
-          _ <- symbol "]"
-          return $ PCons x xs
+          symbol "]"
+          return $ PList xs (Just xs')
         Nothing -> do
-          xs <- sepEndBy term comma
-          _ <- symbol "]"
-          return $ PList (x : xs)
+          end <- optionMaybe $ symbol "]"
+          case end of
+            Just _ -> return $ PList xs Nothing
+            Nothing -> do
+              x <- term
+              endComma <- optionMaybe comma
+              case endComma of
+                Just _ -> els (xs ++ [x])
+                Nothing -> do
+                  symbol "]"
+                  return $ PList (xs ++ [x]) Nothing
 
 -- | Parse a single term.
 --

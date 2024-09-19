@@ -135,8 +135,7 @@ data PTm
   | PLam PiMode Name PTm
   | PLet Name PTy PTm PTm
   | PPair PTm PTm
-  | PList [PTm]
-  | PCons PTm PTm
+  | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
   | PCase PTm (Maybe PTm) [Clause PPat PTm]
   | PLambdaCase (Maybe PTm) [Clause PPat PTm]
@@ -286,13 +285,14 @@ instance (Monad m) => Pretty m PTm where
     pt <- singlePretty t
     pps <- mapM pretty ps
     return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
-  pretty (PList ts) = do
+  pretty (PList ts rest) = do
     pts <- mapM pretty ts
-    return $ "[" ++ intercalate ", " pts ++ "]"
-  pretty (PCons t1 t2) = do
-    pt1 <- pretty t1
-    pt2 <- pretty t2
-    return $ "[" ++ pt1 ++ ", .." ++ pt2 ++ "]"
+    rest' <- case rest of
+      Nothing -> return ""
+      Just r -> do
+        pr <- pretty r
+        return $ ", .." ++ pr
+    return $ "[" ++ intercalate ", " pts ++ rest' ++ "]"
 
 instance (Monad m) => Pretty m PCtor where
   pretty (MkPCtor n ty ts) = do
