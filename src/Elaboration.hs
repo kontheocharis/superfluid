@@ -26,6 +26,7 @@ import Common
     Times (..),
     mapSpine,
     unName,
+    pattern Possible,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
@@ -40,6 +41,7 @@ import Presyntax
     PDef (..),
     PDefRep (..),
     PItem (..),
+    PPat,
     PPrim (..),
     PProgram (..),
     PTm (..),
@@ -117,6 +119,11 @@ pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit) ts)
 pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
 pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
 
+patAsVar :: PPat -> Either Name PPat
+patAsVar (PName n) = Left n
+patAsVar (PLocated _ t) = patAsVar t
+patAsVar p = Right p
+
 elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
 elab p mode = case (p, mode) of
   -- Check/both modes:
@@ -128,7 +135,12 @@ elab p mode = case (p, mode) of
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
   (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit x b]) md
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
-  (PLet x a t u, md) -> letIn md x (elab a) (elab t) (elab u)
+  (PLet x a t u, md) -> do
+    case patAsVar x of
+      Left x' -> letIn md x' (elab a) (elab t) (elab u)
+      Right p' -> do
+        n <- uniqueName
+        letIn md n (elab a) (elab t) (\md' -> caseOf md' (const $ name n) Nothing [Possible (elab p') (elab u)])
   (PRepr m t, md) -> repr md m (elab t)
   (PHole n, md) -> meta md (Just n)
   (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)

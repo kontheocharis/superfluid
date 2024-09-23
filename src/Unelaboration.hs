@@ -112,7 +112,7 @@ unelab :: (Unelab m) => [Name] -> STm -> m PTm
 unelab ns = \case
   (SPi m x a b) -> PPi m x <$> unelab ns a <*> unelab (x : ns) b
   (SLam m x t) -> PLam m x <$> unelab (x : ns) t
-  (SLet x ty t u) -> PLet x <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+  (SLet x ty t u) -> PLet (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
   (SMeta m bs) -> do
     (t, ts) <- unelabMeta ns m bs
     return $ pApp t ts

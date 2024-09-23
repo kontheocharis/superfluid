@@ -492,7 +492,7 @@ lets :: Parser PTm
 lets = curlies $ do
   bindings <- many . located (,) $ do
     reserved "let"
-    v <- var
+    v <- singlePat
     ty <- optionMaybe $ do
       colon
       term

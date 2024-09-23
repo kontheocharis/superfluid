@@ -22,8 +22,9 @@ def dup : [A : Type] -> A -> A * A {
 }
 
 def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
-  \p => case p {
-    (a, b) => a
+  \p => {
+    let (a, b) = p;
+    a
   }
 }
 
@@ -761,8 +762,9 @@ def byte-vec-eq : [n m : Nat] -> ByteVec n -> ByteVec m -> Bool {
 def byte-vec-lookup : [n : Nat, T : Type] -> ByteVec n -> List (ByteVec n * (() -> T)) -> (() -> T) -> T {
   \s l d => case l {
     nil => d (),
-    cons x xs => case x {
-      (k, v) => if-then-else (byte-vec-eq s k) (\_ => v ()) (\_ => byte-vec-lookup s xs d)
+    cons x xs => {
+      let (k, v) = x;
+      if-then-else (byte-vec-eq s k) (\_ => v ()) (\_ => byte-vec-lookup s xs d)
     }
   }
 }
@@ -800,8 +802,9 @@ repr data ByteList as JsBuffer {
 -- The `n` can be computed from the data structure!!
 repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
   bvnil as (bnil, refl),
-  bvcons x xs as case (repr xs) {
-    (l, p) => (bcons x l, cong s p)
+  bvcons x xs as {
+    let (l, p) = repr xs;
+    (bcons x l, cong s p)
   },
 
   case b to E {
@@ -871,14 +874,16 @@ def ReprBy : Type -> Type -> Type {
 }
 
 def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
-  \r a => case r {
-    (l, p) => subst-type p (reprs l a)
+  \r a => {
+    let (l, p) = r;
+    subst-type p (reprs l a)
   }
 }
 
 def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
-  \r b => case r {
-    (l, p) => unreprs l (subst-type (sym p) b)
+  \r b => {
+    let (l, p) = r;
+    unreprs l (subst-type (sym p) b)
   }
 }
 

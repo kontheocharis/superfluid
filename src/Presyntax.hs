@@ -133,7 +133,7 @@ data PTm
   = PPi PiMode Name PTy PTy
   | PSigma Name PTy PTy
   | PLam PiMode Name PTm
-  | PLet Name PTy PTm PTm
+  | PLet PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
@@ -171,7 +171,7 @@ pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
 pGatherApps (PLocated _ t) = pGatherApps t
 pGatherApps t = (t, Empty)
 
-pLetToList :: PTm -> ([(Name, PTy, PTm)], PTm)
+pLetToList :: PTm -> ([(PPat, PTy, PTm)], PTm)
 pLetToList (PLet n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((n, ty, t1) : binds, ret)
 pLetToList (PLocated _ t) = pLetToList t
 pLetToList t = ([], t)
@@ -189,12 +189,12 @@ isCompound (PParams t []) = isCompound t
 isCompound (PParams _ _) = True
 isCompound _ = False
 
-prettyLets :: (Monad m) => ([(Name, PTy, PTm)], PTm) -> m String
+prettyLets :: (Monad m) => ([(PPat, PTy, PTm)], PTm) -> m String
 prettyLets (binds, ret) = do
   pbinds <-
     mapM
       ( \(v, ty, t) -> do
-          pv <- pretty v
+          pv <- singlePretty v
           pty <- pretty ty
           pt <- pretty t
           return $ "let " ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
