@@ -7,9 +7,11 @@ data AmicablePair : Nat -> Nat -> Type {
 
 def nat-fold-range : [A : Type] -> Nat -> Nat -> (Nat -> A -> A) -> A -> A {
   \start end f acc => {
-    if nat-lt start end
-      then nat-fold-range (nat-add start 1) end f (f start acc)
-      else acc
+    if nat-lt start end {
+      nat-fold-range (nat-add start 1) end f (f start acc)
+    } else {
+      acc
+    }
   }
 }
 

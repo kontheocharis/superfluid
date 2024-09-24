@@ -93,13 +93,13 @@ type Parser a = Parsec Text ParserState a
 -- Some helper functions for the parser:
 
 parens :: Parser a -> Parser a
-parens = between (symbol "(") (symbol ")")
+parens = between (reservedOp "(") (reservedOp ")")
 
 curlies :: Parser a -> Parser a
-curlies = between (symbol "{") (symbol "}")
+curlies = between (reservedOp "{") (reservedOp "}")
 
 square :: Parser a -> Parser a
-square = between (symbol "[") (symbol "]")
+square = between (reservedOp "[") (reservedOp "]")
 
 commaSep :: Parser a -> Parser [a]
 commaSep p = p `sepEndBy` comma
@@ -150,23 +150,24 @@ identifier = try $ do
     then fail $ "Identifier " ++ name ++ " is reserved"
     else return $ Name name
 
-symbol :: String -> Parser ()
-symbol s = try $ do
+reserved :: String -> Parser ()
+reserved s = try $ do
+  name <- anyIdentifier
+  if name == s
+    then return ()
+    else fail $ "Expected symbol " ++ s ++ " but got " ++ name
+
+reservedOp :: String -> Parser ()
+reservedOp s = do
   _ <- string s
   anyWhite
   return ()
 
-reserved :: String -> Parser ()
-reserved = symbol
-
-reservedOp :: String -> Parser ()
-reservedOp = symbol
-
 comma :: Parser ()
-comma = symbol ","
+comma = reservedOp ","
 
 colon :: Parser ()
-colon = try $ symbol ":" >> notFollowedBy (char '=')
+colon = try $ reservedOp ":" >> notFollowedBy (char '=')
 
 -- | Get the current location in the source file.
 getPos :: Parser Pos
@@ -236,34 +237,34 @@ whiteWrap p = do
 
 reprDataItem :: Parser PDataRep
 reprDataItem = do
-  try (symbol "repr" >> symbol "data")
+  try (reserved "repr" >> reserved "data")
   src <- pat
-  symbol "as"
+  reserved "as"
   target <- term
   curlies $ do
-    ctors <- commaSep (notFollowedBy (symbol "case") >> reprCtorItem)
+    ctors <- commaSep (notFollowedBy (reserved "case") >> reprCtorItem)
     cse <- reprCaseItem
     optional comma
     return $ MkPDataRep src target ctors cse mempty
 
 reprDeclItem :: Parser PDefRep
 reprDeclItem = do
-  try (symbol "repr" >> symbol "def")
+  try (reserved "repr" >> reserved "def")
   src <- pat
-  reservedOp "as"
+  reserved "as"
   target <- term
   return $ MkPDefRep src target mempty
 
 reprCtorItem :: Parser PCtorRep
 reprCtorItem = do
   src <- pat
-  reservedOp "as"
+  reserved "as"
   target <- term
   return $ MkPCtorRep src target mempty
 
 reprCaseItem :: Parser PCaseRep
 reprCaseItem = do
-  symbol "case"
+  reserved "case"
   subject <- singlePat
   tr <- toRet
   ctors <-
@@ -276,7 +277,7 @@ reprCaseItem = do
               return (name, bind)
           )
       )
-  symbol "as"
+  reserved "as"
   t <- term
   return $ MkPCaseRep subject tr ctors t mempty
 
@@ -291,7 +292,7 @@ ctorItem = do
 -- | Parse a data item.
 dataItem :: Parser PData
 dataItem = do
-  symbol "data"
+  reserved "data"
   (name, te, ty) <- dataSig
   ctors <- curlies (commaSep ctorItem)
   return $
@@ -305,7 +306,7 @@ dataItem = do
 -- | Parse a primitive item
 primItem :: Parser PPrim
 primItem = do
-  symbol "prim"
+  reserved "prim"
   (name, ty) <- defSig
   case ty of
     Nothing -> fail "Primitive items must have a type signature"
@@ -326,7 +327,7 @@ tags = do
 -- | Parse a declaration.
 defItem :: Parser PDef
 defItem = do
-  symbol "def"
+  reserved "def"
   (name, ty) <- defSig
   t <- lets
   return $ MkPDef name (fromMaybe PWild ty) t mempty
@@ -353,22 +354,22 @@ term = choice [caseExpr, ifExpr, lets, piTOrSigmaT, lam, app]
 -- | Parse a list
 list :: Parser PTm
 list = locatedTerm $ do
-  try $ symbol "["
-  end <- optionMaybe (symbol "]")
+  try $ reservedOp   "["
+  end <- optionMaybe (reservedOp   "]")
   case end of
     Just _ -> return $ PList [] Nothing
     Nothing -> els []
   where
     els xs = do
-      consIndicator <- optionMaybe (symbol "..")
+      consIndicator <- optionMaybe (reservedOp   "..")
       case consIndicator of
         Just _ -> do
           xs' <- term
           optional comma
-          symbol "]"
+          reservedOp "]"
           return $ PList xs (Just xs')
         Nothing -> do
-          end <- optionMaybe $ symbol "]"
+          end <- optionMaybe $ reservedOp "]"
           case end of
             Just _ -> return $ PList xs Nothing
             Nothing -> do
@@ -377,7 +378,7 @@ list = locatedTerm $ do
               case endComma of
                 Just _ -> els (xs ++ [x])
                 Nothing -> do
-                  symbol "]"
+                  reservedOp "]"
                   return $ PList (xs ++ [x]) Nothing
 
 -- | Parse a single term.
@@ -388,15 +389,15 @@ singleTerm = choice [list, literal, varOrHoleOrU, repTerm, unrepTerm, pairOrPare
 
 literal :: Parser PTm
 literal = locatedTerm $ do
-  ( try (symbol "\'") >> do
+  ( try (reservedOp "\'") >> do
       c <- parseChar
-      _ <- symbol "\'"
+      _ <- reservedOp "\'"
       anyWhite
       return $ PLit (CharLit c)
     )
-    <|> ( try (symbol "\"") >> do
+    <|> ( try (reservedOp "\"") >> do
             s <- many parseStringChar
-            _ <- symbol "\""
+            _ <- reservedOp "\""
             anyWhite
             return $ PLit (StringLit s)
         )
@@ -580,5 +581,5 @@ caseClause :: Parser (Clause PPat PTm)
 caseClause = do
   p <- pat
   reservedOp "=>"
-  t' <- (try (symbol "impossible") >> return Nothing) <|> Just <$> term
+  t' <- (try (reserved "impossible") >> return Nothing) <|> Just <$> term
   return $ Clause p t'
