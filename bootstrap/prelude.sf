@@ -22,10 +22,7 @@ def dup : [A : Type] -> A -> A * A {
 }
 
 def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
-  \p => {
-    let (a, b) = p;
-    a
-  }
+  \(a, _) => a
 }
 
 def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
