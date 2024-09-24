@@ -79,7 +79,6 @@ import Globals
     PrimGlobalInfo (..),
     Sig (..),
     getCaseRepr,
-    getGlobal,
     getGlobalRepr,
     getGlobalTags,
     mapSigContentsM,

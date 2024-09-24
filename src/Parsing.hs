@@ -521,7 +521,7 @@ lam = do
   reservedOp "\\"
   v <-
     Left <$> try (reserved "case")
-      <|> Right <$> many1 (((Implicit,) <$> try (square (located (,) var))) <|> ((Explicit,) <$> located (,) var))
+      <|> Right <$> many1 (((Implicit,) <$> try (square (located (,) pat))) <|> ((Explicit,) <$> located (,) singlePat))
   case v of
     Left () -> do
       clauses <- curlies (commaSep caseClause)

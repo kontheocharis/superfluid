@@ -132,7 +132,7 @@ newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 data PTm
   = PPi PiMode Name PTy PTy
   | PSigma Name PTy PTy
-  | PLam PiMode Name PTm
+  | PLam PiMode PPat PTm
   | PLet PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
@@ -158,14 +158,14 @@ toPSpine :: PTm -> (PTm, Spine PTm)
 toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
 toPSpine t = (t, Empty)
 
-pLamsToList :: PTm -> ([Arg Name], PTm)
+pLamsToList :: PTm -> ([Arg PPat], PTm)
 pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m n : ns, b)
 pLamsToList (PLocated _ t) = pLamsToList t
 pLamsToList t = ([], t)
 
 pLams :: Spine Name -> PTm -> PTm
 pLams Empty b = b
-pLams (Arg m n :<| xs) b = PLam m n (pLams xs b)
+pLams (Arg m n :<| xs) b = PLam m (PName n) (pLams xs b)
 
 pGatherApps :: PTm -> (PTm, Spine PTm)
 pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
@@ -214,7 +214,7 @@ instance (Monad m) => Pretty m PTm where
     pt2 <- pretty t2
     return $ pt1 ++ " -> " ++ pt2
   pretty (PPi Explicit v t1 t2) = do
-    pv <- pretty v
+    pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
     return $ "(" ++ pv ++ " : " ++ pt1 ++ ") -> " ++ pt2
@@ -230,11 +230,11 @@ instance (Monad m) => Pretty m PTm where
     return $ "[[" ++ pv ++ " : " ++ pt1 ++ "]] -> " ++ pt2
   pretty l@(PLam {}) = do
     let (vs, b) = pLamsToList l
-    pvs <- mapM pretty vs
+    pvs <- mapM singlePretty vs
     pb <- pretty b
     return $ "\\" ++ intercalate " " pvs ++ " => " ++ pb
   pretty (PSigma v t1 t2) = do
-    pv <- pretty v
+    pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
     return $ "(" ++ pv ++ " : " ++ pt1 ++ ") * " ++ pt2

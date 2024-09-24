@@ -19,7 +19,7 @@ import Common
     HasNameSupply (uniqueName),
     HasProjectFiles,
     Loc,
-    Name,
+    Name (..),
     PiMode (..),
     Spine,
     Tel,
@@ -79,6 +79,7 @@ import Typechecking
     univ,
     wildPat,
   )
+import Debug.Trace (traceM)
 
 -- Presyntax exists below here
 
@@ -121,6 +122,7 @@ pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
 
 patAsVar :: PPat -> Either Name PPat
 patAsVar (PName n) = Left n
+patAsVar PWild = Left (Name "_")
 patAsVar (PLocated _ t) = patAsVar t
 patAsVar p = Right p
 
@@ -128,25 +130,30 @@ elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
 elab p mode = case (p, mode) of
   -- Check/both modes:
   (PLocated l t, md) -> enterLoc l (elab t md)
-  (PLam m x t, md) -> lam md m x (elab t)
+  (PLam m x t, md) -> do
+    case patAsVar x of
+      Left x' -> lam md m x' (elab t)
+      Right p' -> do
+        n <- uniqueName
+        lam md m n (elab (PCase (PName n) Nothing [Possible p' t]))
   -- Lambda insertion
   (t, Check (VPi Implicit x' a b)) -> insertLam x' a b (elab t)
   (PUnit, Check ty@VU) -> elab (pKnownData KnownUnit []) (Check ty)
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
-  (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit x b]) md
+  (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
   (PLet x a t u, md) -> do
     case patAsVar x of
       Left x' -> letIn md x' (elab a) (elab t) (elab u)
       Right p' -> do
         n <- uniqueName
-        letIn md n (elab a) (elab t) (\md' -> caseOf md' (const $ name n) Nothing [Possible (elab p') (elab u)])
+        letIn md n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
   (PRepr m t, md) -> repr md m (elab t)
   (PHole n, md) -> meta md (Just n)
   (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
   (PLambdaCase r cs, md) -> do
     n <- uniqueName
-    elab (PLam Explicit n (PCase (PName n) r cs)) md
+    elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
   (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
   (PLit l, md) -> lit md (fmap elab l)
   (te, Check ty) -> checkByInfer (elab te Infer) ty

@@ -44,7 +44,6 @@ import Common
     DataGlobal (..),
     DefGlobal (..),
     Glob (..),
-    Lvl (..),
     Name (..),
     PrimGlobal (..),
     Spine,
