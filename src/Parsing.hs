@@ -70,7 +70,7 @@ import Text.Parsec
   )
 import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
-import Text.Parsec.Combinator (sepEndBy, sepEndBy1)
+import Text.Parsec.Combinator (endBy1, sepEndBy, sepEndBy1)
 import Text.Parsec.Prim (try)
 import Text.Parsec.Text ()
 
@@ -127,6 +127,8 @@ reservedIdents =
     "let",
     "prim",
     "rec",
+    "if",
+    "else",
     "-inf",
     "inf",
     "unrepr",
@@ -346,7 +348,7 @@ dataSig = do
 -- | Parse a term.
 -- Some are grouped to prevent lots of backtracking.
 term :: Parser PTm
-term = choice [caseExpr, lets, piTOrSigmaT, lam, app]
+term = choice [caseExpr, ifExpr, lets, piTOrSigmaT, lam, app]
 
 -- | Parse a list
 list :: Parser PTm
@@ -559,6 +561,20 @@ caseExpr = locatedTerm $ do
   r <- toRet
   clauses <- curlies (commaSep caseClause)
   return $ PCase t r clauses
+
+ifExpr :: Parser PTm
+ifExpr = locatedTerm $ do
+  ifs <-
+    endBy1
+      ( do
+          try $ reserved "if"
+          cond <- term
+          t <- curlies term
+          return (cond, t)
+      )
+      (try $ reserved "else")
+  elseBranch <- curlies term
+  return $ foldr (\(cond, t) acc -> PIf cond t acc) elseBranch ifs
 
 caseClause :: Parser (Clause PPat PTm)
 caseClause = do

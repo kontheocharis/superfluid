@@ -138,6 +138,7 @@ data PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
   | PCase PTm (Maybe PTm) [Clause PPat PTm]
+  | PIf PTm PTm PTm
   | PLambdaCase (Maybe PTm) [Clause PPat PTm]
   | PU
   | PName Name
@@ -293,6 +294,11 @@ instance (Monad m) => Pretty m PTm where
         pr <- pretty r
         return $ ", .." ++ pr
     return $ "[" ++ intercalate ", " pts ++ rest' ++ "]"
+  pretty (PIf c t e) = do
+    pc <- singlePretty c
+    pt <- singlePretty t
+    pe <- singlePretty e
+    return $ "if " ++ pc ++ " " ++ curlies pt ++ " else " ++ curlies pe
 
 instance (Monad m) => Pretty m PCtor where
   pretty (MkPCtor n ty ts) = do

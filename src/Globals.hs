@@ -223,6 +223,7 @@ data KnownGlobal a where
   KnownZero :: KnownGlobal CtorGlobal
   KnownSucc :: KnownGlobal CtorGlobal
   KnownFin :: KnownGlobal DataGlobal
+  KnownBool :: KnownGlobal DataGlobal
   KnownFZero :: KnownGlobal CtorGlobal
   KnownFSucc :: KnownGlobal CtorGlobal
   KnownChar :: KnownGlobal DataGlobal
@@ -234,6 +235,8 @@ data KnownGlobal a where
   KnownStr :: KnownGlobal CtorGlobal
   KnownUnit :: KnownGlobal DataGlobal
   KnownTt :: KnownGlobal CtorGlobal
+  KnownTrue :: KnownGlobal CtorGlobal
+  KnownFalse :: KnownGlobal CtorGlobal
   KnownJsImpossible :: KnownGlobal PrimGlobal
   KnownJsIndex :: KnownGlobal PrimGlobal
 
@@ -249,6 +252,8 @@ knownData KnownChar = DataGlobal (Name "Char")
 knownData KnownList = DataGlobal (Name "List")
 knownData KnownString = DataGlobal (Name "String")
 knownData KnownUnit = DataGlobal (Name "Unit")
+knownData KnownBool = DataGlobal (Name "Bool")
+
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -261,6 +266,8 @@ knownCtor KnownNil = CtorGlobal (Name "nil")
 knownCtor KnownCons = CtorGlobal (Name "cons")
 knownCtor KnownStr = CtorGlobal (Name "str")
 knownCtor KnownTt = CtorGlobal (Name "tt")
+knownCtor KnownTrue = CtorGlobal (Name "true")
+knownCtor KnownFalse = CtorGlobal (Name "false")
 
 knownPrim :: KnownGlobal PrimGlobal -> PrimGlobal
 knownPrim KnownJsImpossible = PrimGlobal (Name "js-impossible")

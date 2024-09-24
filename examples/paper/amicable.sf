@@ -1,0 +1,64 @@
+data AmicablePair : Nat -> Nat -> Type {
+  amicable : (a : Nat, b : Nat) ->
+    Equal (proper-divisors-sum a) b ->
+    Equal (proper-divisors-sum b) a ->
+    AmicablePair a b
+}
+
+def nat-fold-range : [A : Type] -> Nat -> Nat -> (Nat -> A -> A) -> A -> A {
+  \start end f acc => {
+    if nat-lt start end
+      then nat-fold-range (nat-add start 1) end f (f start acc)
+      else acc
+  }
+}
+
+def sum-of-divisors : Nat -> Nat {
+  \n => nat-fold-range 1 n (\i acc =>
+    if-then-else (nat-eq (nat-mod n i) 0)
+      (nat-add acc i)
+      acc
+  ) 0
+}
+
+def proper-divisors-sum : Nat -> Nat {
+  \n => nat-sub (sum-of-divisors n) n
+}
+
+-- Decision procedure for AmicablePair
+def is-amicable-pair : (a : Nat) -> (b : Nat) -> Dec (AmicablePair a b) {
+  \a b =>
+    let sum-a = proper-divisors-sum a in
+    let sum-b = proper-divisors-sum b in
+    case (dec-eq sum-a b, dec-eq sum-b a) {
+      (yes p1, yes p2) => yes (mk-amicable-pair a b p1 p2),
+      _ => no (\h => case h {
+        mk-amicable-pair _ _ p1 p2 =>
+          case (dec-eq sum-a b, dec-eq sum-b a) {
+            (no np1, _) => np1 p1,
+            (_, no np2) => np2 p2,
+            _ => absurd  -- This case should be impossible
+          }
+      })
+    }
+}
+
+def check-amicable-pair : (a : Nat) -> (b : Nat) -> String {
+  \a b =>
+    case is-amicable-pair a b {
+      yes _ => "The numbers form an amicable pair",
+      no _ => "The numbers do not form an amicable pair"
+    }
+}
+
+-- Example usage
+def main : IO () {
+  \_ => {
+    print-string "Enter the first number: ";
+    let a <- read-nat;
+    print-string "Enter the second number: ";
+    let b <- read-nat;
+    result <- check-amicable-pair a b;
+    print-string result
+  }
+}

@@ -112,14 +112,13 @@ repr data Op as (b : ByteVec 3) * Holds (is-just (parse-op b)) {
     delete => d,
   } as {
     let op' = repr op;
-    case op' {
-      (b, p) => byte-vec-lookup b [
-          (bytes-for-get, \_ => unsafe-complete (repr E) op' (repr g)),
-          (bytes-for-insert, \_ => unsafe-complete (repr E) op' (repr i)),
-          (bytes-for-modify, \_ => unsafe-complete (repr E) op' (repr m)),
-          (bytes-for-delete, \_ => unsafe-complete (repr E) op' (repr d)),
-        ] (panic "impossible")
-    }
+    let (b, p) = op';
+    byte-vec-lookup b [
+      (bytes-for-get, \_ => unsafe-complete (repr E) op' (repr g)),
+      (bytes-for-insert, \_ => unsafe-complete (repr E) op' (repr i)),
+      (bytes-for-modify, \_ => unsafe-complete (repr E) op' (repr m)),
+      (bytes-for-delete, \_ => unsafe-complete (repr E) op' (repr d)),
+    ] (panic "impossible")
   }
 }
 

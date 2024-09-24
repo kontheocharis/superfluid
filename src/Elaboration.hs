@@ -163,6 +163,14 @@ elab p mode = case (p, mode) of
           Nothing -> pKnownCtor KnownNil []
     let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) end ts
     elab ts' md
+  (PIf cond a b, md) -> do
+    caseOf
+      md
+      (elab cond)
+      Nothing
+      [ Possible (elab (pKnownCtor KnownTrue [])) (elab a),
+        Possible (elab (pKnownCtor KnownFalse [])) (elab b)
+      ]
   (PParams _ _, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()
