@@ -325,10 +325,6 @@ data Mode = Check VTy | Infer
 
 type Child m = (Mode -> m (STm, VTy))
 
-type Check m = (VTy -> m STm)
-
-type Infer m = m (STm, VTy)
-
 ensureAllProblemsSolved :: (Tc m) => m ()
 ensureAllProblemsSolved = do
   solveRemainingProblems
