@@ -70,6 +70,7 @@ const js_uint_times = (a) => (b) => a * b;
 const js_div = (a) => (b) => a / b;
 const js_mod = (a) => (b) => a % b;
 const js_uint_mod = (a) => (b) => a % b;
+const js_uint_div = (a) => (b) => Math.floor(a / b);
 const js_pow = (a) => (b) => Math.pow(a, b);
 const js_uint_pow = (a) => (b) => Math.pow(a, b);
 const js_neg = (a) => -a;

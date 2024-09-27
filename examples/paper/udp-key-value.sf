@@ -68,14 +68,16 @@ def op-sig : Op -> Sig {
 }
 
 def OpInput : Op -> Type {
-  \o => case op-sig o {
-    sig Input _ => Input
+  \op => {
+    let (sig I O) = op-sig op;
+    I
   }
 }
 
 def OpOutput : Op -> Type {
-  \o => case op-sig o {
-    sig _ Output => Output
+  \op => {
+    let (sig I O) = op-sig op;
+    O
   }
 }
 

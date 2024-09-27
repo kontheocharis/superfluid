@@ -158,6 +158,8 @@ prim js-mod : JsNumber -> JsNumber -> JsNumber
 
 prim js-uint-mod : JsUint -> JsUint -> JsUint
 
+prim js-uint-div : JsUint -> JsUint -> JsUint
+
 prim js-pow : JsNumber -> JsNumber -> JsNumber
 
 prim js-uint-pow : JsUint -> JsUint -> JsUint
@@ -551,6 +553,13 @@ def mod : Nat -> Nat -> Nat {
   }
 }
 
+def div : Nat -> Nat -> Nat {
+  \a n => case lt a n {
+    true => z,
+    false => s (div (sub a n) n),
+  }
+}
+
 -- -- Default representations
 repr data Bool as JsBool {
   true as js-true,
@@ -584,6 +593,7 @@ repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
 repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
 repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
 repr def mod as \a b => unrepr (js-uint-mod (repr a) (repr b))
+repr def div as \a b => unrepr (js-uint-div (repr a) (repr b))
 repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
 
 repr data Fin i as JsBoundedUint (repr i) {

@@ -74,7 +74,6 @@ data DataGlobalInfo = DataGlobalInfo
     elimTy :: Maybe Closure,
     indexArity :: Spine () -- might not be set yet
   }
-
 data DefGlobalInfo = DefGlobalInfo
   { name :: Name,
     ty :: VTy,

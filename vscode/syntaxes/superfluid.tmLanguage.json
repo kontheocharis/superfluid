@@ -1,4 +1,5 @@
 {
+  "name": "superfluid",
   "scopeName": "source.superfluid",
   "patterns": [
     {

@@ -76,7 +76,7 @@ import Common
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible, mapSpineM, mapSpine,
+    pattern Possible, mapSpineM, mapSpine, Logger (msg),
   )
 import Context
   ( Ctx (..),
@@ -1325,6 +1325,9 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
+  -- pt1 <- pretty t1'
+  -- pt2 <- pretty t2'
+  -- msg $ "unify: " ++ pt1 ++ " =? " ++ pt2
   case (t1', t2') of
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
     (t, VLam m' _ c') -> etaConvert t m' c'

@@ -1,37 +1,51 @@
-
-
-data Vec : Type -> Nat -> Type {
-  vnil : [A : Type] -> Vec A z,
-  vcons : [A : Type] -> [n : Nat] -> A -> Vec A n -> Vec A (s n)
+data Vec (T : Type) : Nat -> Type {
+  vec-nil : Vec T z,
+  vec-cons : [n : Nat] -> T -> Vec T n -> Vec T (s n)
 }
 
-data ListWithLength : Type -> Nat -> Type {
-  mk-list-with-length : [A : Type] -> [n : Nat] -> (l : List A) -> Equal n (length l) -> ListWithLength A n
+def vec-length : [T : Type, n : Nat] -> Vec T n -> Nat {
+  \[_] [n] _ => n
 }
 
-def proj-len : [A : Type] -> [n : Nat] -> ListWithLength A n -> Nat {
-  \[_] [n] l => n
-}
+repr data Vec T n as (l : List T) * Equal (length l) n {
+  vec-nil as (nil, refl),
+  vec-cons x xs as {
+    let (xs', p) = repr xs;
+    (cons x xs', cong s p)
+  },
 
-def proj-list : [A : Type] -> [n : Nat] -> ListWithLength A n -> List A {
-  \l => case l {
-    mk-list-with-length l' _ => l'
+  case b to E {
+    vec-nil => ni,
+    vec-cons => co
+  } as {
+    let b' = repr b;
+    let n = vec-length b;
+    let E' = \n => repr (E n);
+    let len-eq : Equal (length (fst b')) n = trust-me;
+
+    case (repr b) to (\pr => E' n pr) {
+      (l, p) => (case l to (\l => (p : Equal (length l) n) -> E' n (l, p)) {
+        nil => \p => {
+          let p1 : Equal (vec-length b) z = trust-me;
+          subst [Nat] (\n => (repr E) (repr n) _) p1 ni
+        },
+        cons x xs => \p => ?co
+      }) p
+    }
   }
 }
 
-def proj-eq : [A : Type] -> [n : Nat] -> (xs : ListWithLength A n) -> Equal (proj-len xs) (length (proj-list xs)) {
-  ?proj-eq
+def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
+  \case {
+    vec-nil => nil,
+    vec-cons x xs => cons x (vec-to-list xs),
+  }
 }
 
-def proj-list-len : [A : Type] -> [n : Nat] -> (l : ListWithLength A n) -> Equal n (length (proj-list l)) {
-  ?h1
-}
+repr def vec-to-list as \v => fst (repr v)
 
-repr data Vec A n as ListWithLength (unrepr A) (unrepr n) {
-  vnil as mk-list-with-length nil refl,
-  vcons x xs as mk-list-with-length (cons (unrepr x) (proj-list xs)) (cong s (proj-eq xs)),
-  case xs {
-    vnil => n,
-    vcons => c
-  } as ?h4
-}
+-- (repr E) (repr (vec-length [T] [x1928] b)) ((pair@[List T, \x2084 => Equal [Nat] (length [T] x2084) (vec-length [T] [x1928] b)]) (nil@[T]) p)
+-- (repr E) js-uint-zero ((pair@[List T, \x1850 => Equal [Nat] (length [T] x1850) z]) (nil@[T]) ((refl@[Nat]) [length [T] (nil@[T])]))
+
+-- ((pair@[List T, \x2124 => Equal [Nat] (length [T] x2124) (length [T] (nil@[T]))]) (nil@[T]) p)
+-- ((pair@[List T, \x1850 => Equal [Nat] (length [T] x1850) z]) (nil@[T]) ((refl@[Nat]) [length [T] (nil@[T])]))
