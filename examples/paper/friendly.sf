@@ -33,7 +33,7 @@ def is-friendly-pair : (a : Nat, b : Nat) -> Dec (FriendlyPair a b) {
     case nat-eq-dep sum-a b {
       yes p1 => case nat-eq-dep sum-b a {
         yes p2 => yes (friendly a b p1 p2),
-        no p2 => {
+      no p2 => {
           let contr : FriendlyPair a b -> Empty = \f => case f {
             friendly a' b' p q => p2 q,
           };

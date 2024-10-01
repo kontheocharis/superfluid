@@ -20,6 +20,7 @@ module Globals
     getCaseRepr,
     getCtorRepr,
     knownPrim,
+    knownDef,
     mapSigContentsM,
     mapSigContentsM_,
     getDefRepr,
@@ -237,6 +238,7 @@ data KnownGlobal a where
   KnownFalse :: KnownGlobal CtorGlobal
   KnownJsImpossible :: KnownGlobal PrimGlobal
   KnownJsIndex :: KnownGlobal PrimGlobal
+  KnownSub :: KnownGlobal DefGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -270,3 +272,6 @@ knownCtor KnownFalse = CtorGlobal (Name "false")
 knownPrim :: KnownGlobal PrimGlobal -> PrimGlobal
 knownPrim KnownJsImpossible = PrimGlobal (Name "js-impossible")
 knownPrim KnownJsIndex = PrimGlobal (Name "js-index")
+
+knownDef :: KnownGlobal DefGlobal -> DefGlobal
+knownDef KnownSub = DefGlobal (Name "sub")

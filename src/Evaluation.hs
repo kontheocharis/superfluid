@@ -53,8 +53,6 @@ import Common
     Times (..),
     globName,
     inv,
-    lvlToIdx,
-    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
@@ -67,8 +65,6 @@ import Control.Monad.State (StateT (..))
 import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
-import Data.List.Extra (firstJust)
-import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
@@ -85,7 +81,6 @@ import Globals
     removeRepresentedItems,
     unfoldDef,
   )
-import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
 import Syntax
   ( BoundState (..),
@@ -96,22 +91,25 @@ import Syntax
     SCase,
     SPat (..),
     STm (..),
-    VHead (..),
+    VLazy,
+    VLazyHead (..),
     VNeu (..),
+    VNorm (..),
     VPat,
     VPatB (..),
     VTm (..),
     VTy,
+    WTm (WNeu, WNorm),
     mapClosureM,
     sAppSpine,
     sLams,
     uniqueSLams,
-    pattern VGlob,
+    weakAsValue,
     pattern VHead,
     pattern VMeta,
-    pattern VRepr,
     pattern VVar,
   )
+import Literals (unfoldLit)
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -125,18 +123,20 @@ infixl 8 $$
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (reverse us ++ env) t
 
-vAppNeu :: VNeu -> Spine VTm -> VTm
-vAppNeu (VApp h us) u = VNeu (VApp h (us >< u))
-vAppNeu (VReprApp m h us) u = VNeu (VReprApp m h (us >< u))
-vAppNeu (VCaseApp c us) u = VNeu (VCaseApp c (us >< u))
+vAppNeu :: VNeu -> Spine VTm -> VNeu
+vAppNeu (a, sp) sp' = (a, sp >< sp')
+
+vAppLazy :: VLazy -> Spine VTm -> VLazy
+vAppLazy (a, sp) u = (a, sp >< u)
 
 vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
 vApp a Empty = return a
-vApp (VLam _ _ c) (Arg _ u :<| us) = do
+vApp (VNorm (VLam _ _ c)) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
-vApp (VNeu n) u = return $ vAppNeu n u
-vApp a b = error $ "impossible " ++ show a ++ " AND " ++ show b
+vApp (VNeu n) u = return . VNeu $ vAppNeu n u
+vApp (VLazy n) u = return . VLazy $ vAppLazy n u
+vApp a b = error $ "impossible application: " ++ show a ++ " applied to " ++ show b
 
 uniqueVLams :: (Eval m) => [PiMode] -> Closure -> m VTm
 uniqueVLams ms t = do
@@ -148,11 +148,11 @@ vLams Empty t = do
   t $$ []
 vLams (Arg m x :<| sp) t = do
   let inner = sLams sp t.body
-  return $ VLam m x (Closure (t.numVars + 1) t.env inner)
+  return $ VNorm (VLam m x (Closure (t.numVars + 1) t.env inner))
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
-vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) _) ps)) (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c')) _) xs))
+vMatch (VNorm (VCtor ((CtorGlobal c, _), ps))) (VNorm (VCtor ((CtorGlobal c', _), xs)))
   | c == c' && length ps == length xs =
       foldM
         ( \acc (Arg _ p, Arg _ x) -> do
@@ -163,23 +163,69 @@ vMatch (VNeu (VApp (VGlobal (CtorGlob (CtorGlobal c)) _) ps)) (VNeu (VApp (VGlob
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
+vWhnf :: Lvl -> VTm -> m (Maybe WTm)
+vWhnf l (VNorm n) = return . Just $ WNorm n
+vWhnf l (VNeu n) = return . Just $ WNeu n
+vWhnf l (VLazy n) = vUnfoldLazy l n
+
+vUnfoldLazy :: Lvl -> VLazy -> m (Maybe WTm)
+vUnfoldLazy l (n, sp) = do
+  n' <- vUnfoldLazyHead l n
+  case n' of
+    Just m -> do
+      res <- vApp (weakAsValue m) sp
+      vWhnf l res
+    Nothing -> return Nothing
+
+-- Returns: Just t if t is a weak head normal form, Nothing otherwise.
+vUnfoldLazyHead :: Lvl -> VLazyHead -> m (Maybe WTm)
+vUnfoldLazyHead l = \case
+  VDef d -> do
+    d' <- access (unfoldDef d)
+    case d' of
+      Just t -> vWhnf l t
+      _ -> return Nothing
+  VLit n -> return $ Just (WNorm (unfoldLit n))
+  VLazyCase c -> do
+    s <- vUnfoldLazy l c.subject
+    case s of
+      Just s' -> do
+        c' <- vCase (c {subject = weakAsValue s'})
+        vWhnf l c'
+      Nothing -> return Nothing
+  VReprLazyCase i c -> do
+    s <- vUnfoldLazy l c.subject
+    case s of
+      Just s' -> do
+        c' <- vCase (c {subject = weakAsValue s'})
+        c'' <- vRepr l (Finite i) c'
+        vWhnf l c''
+      Nothing -> return Nothing
+  VReprBlockedCase i c -> undefined
+
+  VReprDef i d -> undefined
+  VReprCtor i c -> undefined
+  VReprData i d -> undefined
+
 vCase :: (Eval m) => Case VTm VTm VPatB Closure -> m VTm
 vCase c@(Case dat xs v i e cs) = do
   v' <- force v
-  case v' of
-    VLit l -> vCase (Case dat xs (unfoldLit l) i e cs)
-    VNeu n ->
-      fromMaybe (return $ VNeu (VCaseApp (c {subject = n}) Empty)) $
-        firstJust
-          ( \clause -> do
-              case clause of
-                Possible p t -> case vMatch p.vPat v of
-                  Just env -> Just $ t $$ env
-                  Nothing -> Nothing
-                Impossible _ -> Nothing
-          )
-          cs
-    _ -> error "impossible"
+  undefined
+
+-- case v' of
+--   VLit l -> vCase (Case dat xs (unfoldLit l) i e cs)
+--   VNeu n ->
+--     fromMaybe (return $ VNeu (VCaseApp (c {subject = n}) Empty)) $
+--       firstJust
+--         ( \clause -> do
+--             case clause of
+--               Possible p t -> case vMatch p.vPat v of
+--                 Just env -> Just $ t $$ env
+--                 Nothing -> Nothing
+--               Impossible _ -> Nothing
+--         )
+--         cs
+--   _ -> error "impossible"
 
 postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
 postCompose f (Closure n env t) = return $ Closure n env (f t)
@@ -274,36 +320,37 @@ vRepr _ m (VLam e v t) = do
   t' <- reprClosure m t
   return $ VLam e v t'
 vRepr _ _ VU = return VU
-vRepr _ _ (VLit i) = return $ VLit i
-vRepr l m (VNeu n@(VApp (VGlobal g pp) sp))
-  | m > mempty = do
-      r <- access (getGlobalRepr g)
-      case r of
-        Just r' -> do
-          r'' <- r' $$ pp
-          res <- vApp r'' sp
-          vRepr l m res
-        Nothing -> return $ VNeu (VRepr m n)
-  | otherwise = return $ VNeu (VRepr m n)
-vRepr _ m (VNeu n@(VCaseApp {})) = do
-  return $ VNeu (VRepr m n)
-vRepr l m (VNeu h@(VReprApp m' v sp))
-  | (m > Finite 0 && m' < Finite 0)
-      || (m > Finite 0 && m' > Finite 0)
-      || (m < Finite 0 && m' < Finite 0) = do
-      sp' <- mapSpineM (vRepr l m) sp
-      let mm' = m <> m'
-      if mm' == mempty
-        then do
-          return $ vAppNeu v sp'
-        else
-          return $ VNeu (VReprApp mm' v sp')
-  | otherwise = return $ VNeu (VReprApp m h Empty)
-vRepr _ m (VNeu n@(VApp (VFlex _) _)) = do
-  return $ VNeu (VRepr m n)
-vRepr l m (VNeu (VApp h sp)) = do
-  sp' <- mapSpineM (vRepr l m) sp
-  return (VNeu (VReprApp m (VApp h Empty) sp'))
+
+-- vRepr _ _ (VLit i) = return $ VLit i
+-- vRepr l m (VNeu n@(VApp (VGlobal g pp) sp))
+--   | m > mempty = do
+--       r <- access (getGlobalRepr g)
+--       case r of
+--         Just r' -> do
+--           r'' <- r' $$ pp
+--           res <- vApp r'' sp
+--           vRepr l m res
+--         Nothing -> return $ VNeu (VRepr m n)
+--   | otherwise = return $ VNeu (VRepr m n)
+-- vRepr _ m (VNeu n@(VCaseApp {})) = do
+--   return $ VNeu (VRepr m n)
+-- vRepr l m (VNeu h@(VReprApp m' v sp))
+--   | (m > Finite 0 && m' < Finite 0)
+--       || (m > Finite 0 && m' > Finite 0)
+--       || (m < Finite 0 && m' < Finite 0) = do
+--       sp' <- mapSpineM (vRepr l m) sp
+--       let mm' = m <> m'
+--       if mm' == mempty
+--         then do
+--           return $ vAppNeu v sp'
+--         else
+--           return $ VNeu (VReprApp mm' v sp')
+--   | otherwise = return $ VNeu (VReprApp m h Empty)
+-- vRepr _ m (VNeu n@(VApp (VFlex _) _)) = do
+--   return $ VNeu (VRepr m n)
+-- vRepr l m (VNeu (VApp h sp)) = do
+--   sp' <- mapSpineM (vRepr l m) sp
+--   return (VNeu (VReprApp m (VApp h Empty) sp'))
 
 reprInfSig :: (Eval m) => m ()
 reprInfSig = do
@@ -462,22 +509,22 @@ vMeta m = do
     Nothing -> return $ VNeu (VMeta m)
 
 force :: (Eval m) => VTm -> m VTm
-force v@(VNeu (VApp (VFlex m) sp)) = do
-  mt <- lookupMetaVar m
-  case mt of
-    Just t -> do
-      t' <- vApp t sp
-      force t'
-    Nothing -> return v
+-- force v@(VNeu (VApp (VFlex m) sp)) = do
+--   mt <- lookupMetaVar m
+--   case mt of
+--     Just t -> do
+--       t' <- vApp t sp
+--       force t'
+--     Nothing -> return v
 force v = return v
 
 unfoldDefs :: (Eval m) => VTm -> m VTm
 unfoldDefs s = case s of
-  VNeu (VApp (VGlobal (DefGlob g) _) sp) -> do
-    g' <- access (unfoldDef g)
-    case g' of
-      Just t -> vApp t sp >>= unfoldDefs
-      _ -> return s
+  -- VNeu (VApp (VGlobal (DefGlob g) _) sp) -> do
+  --   g' <- access (unfoldDef g)
+  --   case g' of
+  --     Just t -> vApp t sp >>= unfoldDefs
+  --     _ -> return s
   _ -> return s
 
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
@@ -487,12 +534,12 @@ quoteSpine l t (sp :|> Arg m u) = do
   u' <- quote l u
   return $ SApp m t' u'
 
-quoteHead :: (Eval m) => Lvl -> VHead -> m STm
-quoteHead _ (VFlex m) = return $ SMeta m []
-quoteHead l (VRigid l') = return $ SVar (lvlToIdx l l')
-quoteHead l (VGlobal g pp) = do
-  pp' <- mapM (quote l) pp
-  return $ SGlobal g pp'
+-- quoteHead :: (Eval m) => Lvl -> VHead -> m STm
+-- quoteHead _ (VFlex m) = return $ SMeta m []
+-- quoteHead l (VRigid l') = return $ SVar (lvlToIdx l l')
+-- quoteHead l (VGlobal g pp) = do
+--   pp' <- mapM (quote l) pp
+--   return $ SGlobal g pp'
 
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
@@ -505,33 +552,36 @@ quotePat l p = do
   return $ SPat p' p.binds
   where
     quotePat' :: (Eval m) => Lvl -> VTm -> m STm
-    quotePat' l' (VNeu (VApp vh sp)) = do
-      sp' <- mapSpineM (quotePat' l') sp
-      vh' <- quotePatHead l' vh
-      return $ sAppSpine vh' sp'
+    -- quotePat' l' (VNeu (VApp vh sp)) = do
+    --   sp' <- mapSpineM (quotePat' l') sp
+    --   vh' <- quotePatHead l' vh
+    --   return $ sAppSpine vh' sp'
     quotePat' _ _ = error "impossible"
-    quotePatHead :: (Eval m) => Lvl -> VHead -> m STm
-    quotePatHead _ (VFlex _) = error "impossible"
-    quotePatHead _ (VRigid _) = return $ SVar (Idx 0)
-    quotePatHead _ (VGlobal g pp) = do
-      pp' <- mapM (quote l) pp
-      return $ SGlobal g pp'
+
+-- quotePatHead :: (Eval m) => Lvl -> VHead -> m STm
+-- quotePatHead _ (VFlex _) = error "impossible"
+-- quotePatHead _ (VRigid _) = return $ SVar (Idx 0)
+-- quotePatHead _ (VGlobal g pp) = do
+--   pp' <- mapM (quote l) pp
+--   return $ SGlobal g pp'
 
 quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
 quoteNeu l vt = case vt of
-  (VApp h sp) -> do
-    h' <- quoteHead l h
-    quoteSpine l h' sp
-  (VReprApp m v sp) -> do
-    v' <- quoteNeu l v
-    quoteSpine l (SRepr m v') sp
-  (VCaseApp (Case dat pp v i r cs) sp) -> do
-    v' <- quote l (VNeu v)
-    cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
-    r' <- quote l r
-    pp' <- mapSpineM (quote l) pp
-    i' <- mapSpineM (quote l) i
-    quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
+  _ -> undefined
+
+-- (VApp h sp) -> do
+--   h' <- quoteHead l h
+--   quoteSpine l h' sp
+-- (VReprApp m v sp) -> do
+--   v' <- quoteNeu l v
+--   quoteSpine l (SRepr m v') sp
+-- (VCaseApp (Case dat pp v i r cs) sp) -> do
+--   v' <- quote l (VNeu v)
+--   cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
+--   r' <- quote l r
+--   pp' <- mapSpineM (quote l) pp
+--   i' <- mapSpineM (quote l) i
+--   quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
 
 quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l vt = do
@@ -545,7 +595,7 @@ quote l vt = do
       t' <- quoteClosure l t
       return $ SPi m x ty' t'
     VU -> return SU
-    VLit lit -> SLit <$> traverse (quote l) lit
+    -- VLit lit -> SLit <$> traverse (quote l) lit
     VNeu n -> quoteNeu l n
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
@@ -578,19 +628,19 @@ isCtorTy l d t = do
     (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
-    (VNeu (VApp (VGlobal (DataGlob d') _) sp)) | d == d' -> return (Just (mapSpine (const ()) sp))
+    -- (VNeu (VApp (VGlobal (DataGlob d') _) sp)) | d == d' -> return (Just (mapSpine (const ()) sp))
     _ -> return Nothing
 
 ifIsData :: (Eval m) => VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
 ifIsData v a b = do
   v' <- force v >>= unfoldDefs
   case v' of
-    VGlob (DataGlob g@(DataGlobal _)) sp -> a g sp
+    -- VGlob (DataGlob g@(DataGlobal _)) sp -> a g sp
     _ -> b
 
 ensureIsCtor :: (Eval m) => VTm -> CtorGlobal -> m () -> m ()
 ensureIsCtor v c a = do
   v' <- force v >>= unfoldDefs
   case v' of
-    VNeu (VApp (VGlobal (CtorGlob c') _) _) | c == c' -> return ()
+    -- VNeu (VApp (VGlobal (CtorGlob c') _) _) | c == c' -> return ()
     _ -> a

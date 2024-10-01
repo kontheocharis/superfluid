@@ -2,76 +2,78 @@ module Literals (minusOneNat, unfoldLit) where
 
 import Common
   ( Arg (..),
-    Glob (..),
     Lit (..),
     PiMode (..),
   )
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Globals (KnownGlobal (..), knownCtor, knownData)
+import Globals (KnownGlobal (..), knownCtor, knownData, knownDef)
 import Numeric.Natural (Natural)
 import Syntax
-  ( VHead (..),
-    VNeu (..),
+  ( VLazyHead (..),
+    VNorm (..),
     VTm (..),
-    pattern VGl,
-    pattern VGlobE,
   )
 
 minusOneNat :: VTm -> VTm
-minusOneNat (VLit l@(NatLit _)) = minusOneNat (unfoldLit l)
-minusOneNat (VNeu (VApp (VGlobal (CtorGlob g) _) sp)) | g == knownCtor KnownSucc = case sp of
-  (Arg Explicit x :<| Empty) -> x
-  _ -> error "minusOneNat: invalid spine"
-minusOneNat _ = error "minusOneNat: invalid term"
+minusOneNat t = VLazy (VDef (knownDef KnownSub), S.singleton (Arg Explicit t))
 
-unfoldLit :: Lit VTm -> VTm
+unfoldLit :: Lit VTm -> VNorm
 unfoldLit = \case
   StringLit [] ->
     let inner =
-          VGlobE
-            (CtorGlob (knownCtor KnownNil))
-            ( S.fromList
-                [Arg Implicit (VGl (DataGlob (knownData KnownChar)))]
+          VNorm
+            ( VCtor
+                ( (knownCtor KnownNil, []),
+                  S.fromList [Arg Implicit (VNorm (VData (knownData KnownChar, Empty)))]
+                )
             )
-     in VGlobE (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
+     in VCtor ((knownCtor KnownStr, []), S.fromList [Arg Explicit inner])
   StringLit (x : xs) ->
     let inner =
-          VGlobE
-            (CtorGlob (knownCtor KnownCons))
-            ( S.fromList
-                [ Arg Implicit (VGl (DataGlob (knownData KnownChar))),
-                  Arg Explicit (VLit (CharLit x)),
-                  Arg Explicit (VLit (StringLit xs))
-                ]
+          VNorm
+            ( VCtor
+                ( (knownCtor KnownCons, []),
+                  S.fromList
+                    [ Arg Implicit (VNorm (VData (knownData KnownChar, Empty))),
+                      Arg Explicit (VLazy (VLit (CharLit x), Empty)),
+                      Arg Explicit (VLazy (VLit (StringLit xs), Empty))
+                    ]
+                )
             )
-     in VGlobE (CtorGlob (knownCtor KnownStr)) (S.fromList [Arg Explicit inner])
+     in VCtor ((knownCtor KnownStr, []), S.fromList [Arg Explicit inner])
   CharLit x ->
-    let finBound = VLit (NatLit (2 ^ (32 :: Natural)))
-     in VGlobE
-          (CtorGlob (knownCtor KnownChr))
-          ( S.singleton
+    let finBound = VLazy (VLit (NatLit (2 ^ (32 :: Natural))), Empty)
+     in VCtor
+          ( (knownCtor KnownChr, []),
+            S.singleton
               ( Arg
                   Explicit
-                  ( VLit
-                      ( FinLit
-                          (fromIntegral (fromEnum x))
-                          finBound
+                  ( VLazy
+                      ( VLit
+                          ( FinLit
+                              (fromIntegral (fromEnum x))
+                              finBound
+                          ),
+                        Empty
                       )
                   )
               )
           )
   NatLit 0 ->
-    VGl (CtorGlob (knownCtor KnownZero))
+    VCtor ((knownCtor KnownZero, []), S.empty)
   NatLit n ->
-    VGlobE (CtorGlob (knownCtor KnownSucc)) (S.singleton (Arg Explicit (VLit (NatLit (n - 1)))))
-  FinLit 0 n -> do
-    VGlobE (CtorGlob (knownCtor KnownFZero)) (S.singleton (Arg Implicit n))
+    VCtor ((knownCtor KnownSucc, []), S.singleton (Arg Explicit (VLazy (VLit (NatLit (n - 1)), Empty))))
+  FinLit 0 n ->
+    VCtor
+        ( (knownCtor KnownFZero, []),
+          S.singleton (Arg Implicit (VNorm (VData (knownData KnownNat, S.singleton (Arg Explicit n)))))
+        )
   FinLit d n ->
-    VGlobE
-      (CtorGlob (knownCtor KnownFSucc))
-      ( S.fromList
-          [ Arg Implicit n,
-            Arg Explicit (VLit (FinLit (d - 1) (minusOneNat n)))
-          ]
-      )
+    VCtor
+        ( (knownCtor KnownFSucc, []),
+          S.fromList
+            [ Arg Implicit (VNorm (VData (knownData KnownNat, S.singleton (Arg Explicit n)))),
+              Arg Explicit (VLazy (VLit (FinLit (d - 1) (minusOneNat n)), Empty))
+            ]
+        )

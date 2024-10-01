@@ -20,14 +20,18 @@ module Syntax
     VTy,
     Env,
     Closure (..),
-    VHead (..),
-    VNeu (..),
+    VNeu,
     VTm (..),
+    VLazy,
+    VNeuHead (..),
+    VLazyHead (..),
+    VNorm (..),
+    WTm (..),
     PRen (..),
     Sub (..),
     SCase,
-    VCase,
     mapClosureM,
+    weakAsValue,
     subbing,
     liftPRen,
     liftPRenN,
@@ -36,18 +40,15 @@ module Syntax
     pattern VVar,
     pattern VMeta,
     pattern VHead,
-    pattern VRepr,
-    pattern VGl,
-    pattern VGlob,
-    pattern VCase,
-    pattern VGlobE,
   )
 where
 
 import Common
   ( Arg (..),
     Clause,
+    CtorGlobal,
     DataGlobal,
+    DefGlobal,
     Glob,
     HasNameSupply (uniqueName),
     Idx,
@@ -60,7 +61,7 @@ import Common
     Spine,
     Tel,
     Times,
-    unLvl,
+    unLvl, PrimGlobal,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -112,8 +113,6 @@ data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (S
 mapClosureM :: (Monad m) => (STm -> m STm) -> Closure -> m Closure
 mapClosureM f (Closure n env t) = Closure n env <$> f t
 
-
-
 data Case s t p c = Case
   { dat :: DataGlobal,
     datParams :: Spine t,
@@ -124,56 +123,77 @@ data Case s t p c = Case
   }
   deriving (Show)
 
-type VCase = Case VNeu VTm VPatB Closure
-
 type SCase = Case STm STm SPat STm
 
--- The spine in global is just for constructor params!
-data VHead = VFlex MetaVar | VRigid Lvl | VGlobal Glob [VTm] deriving (Show)
+type VSpined t = (t, Spine VTm)
 
-data VNeu
-  = VApp VHead (Spine VTm)
-  | VCaseApp VCase (Spine VTm)
-  | VReprApp Times VNeu (Spine VTm)
+type VNeu = VSpined VNeuHead
+
+type VLazy = VSpined VLazyHead
+
+type VData = VSpined DataGlobal
+
+type VCtor = VSpined (CtorGlobal, [VTm])
+
+data VNeuHead
+  = VFlex MetaVar
+  | VRigid Lvl
+  | VBlockedCase (Case VNeu VTm VPatB Closure)
+  | VReprFlex MetaVar
+  | VReprRigid Lvl
+  | VPrim PrimGlobal
+  deriving (Show)
+
+data VLazyHead
+  = VDef DefGlobal
+  | VLit (Lit VTm)
+  | VLazyCase (Case VLazy VTm VPatB Closure)
+  | VReprLazyCase Int (Case VLazy VTm VPatB Closure)
+  | VReprBlockedCase Int (Case VNeu VTm VPatB Closure)
+  | VReprDef Int DefGlobal
+  | VReprCtor Int (CtorGlobal, [VTm])
+  | VReprData Int DataGlobal
+  deriving (Show)
+
+data VNorm
+  = VPi PiMode Name VTy Closure
+  | VLam PiMode Name Closure
+  | VData VData
+  | VCtor VCtor
+  | VUnrepr Closure
+  | VU
   deriving (Show)
 
 data VTm
-  = VPi PiMode Name VTy Closure
-  | VLam PiMode Name Closure
-  | VU
-  | VLit (Lit VTm)
+  = VNorm VNorm
+  | VLazy VLazy
   | VNeu VNeu
   deriving (Show)
 
+data WTm
+  = WNorm VNorm
+  | WNeu VNeu
+  deriving (Show)
+
+weakAsValue :: WTm -> VTm
+weakAsValue (WNorm n) = VNorm n
+weakAsValue (WNeu n) = VNeu n
+
 vGetSpine :: VTm -> Spine VTm
-vGetSpine (VNeu (VApp _ sp)) = sp
-vGetSpine (VNeu (VCaseApp _ sp)) = sp
-vGetSpine (VNeu (VReprApp _ _ sp)) = sp
+vGetSpine (VNorm (VData (_, sp))) = sp
+vGetSpine (VNorm (VCtor (_, sp))) = sp
+vGetSpine (VNeu (_, sp)) = sp
+vGetSpine (VLazy (_, sp)) = sp
 vGetSpine _ = Empty
 
 pattern VVar :: Lvl -> VNeu
-pattern VVar l = VApp (VRigid l) Empty
-
-pattern VCase :: Case VNeu VTm VPatB Closure -> VNeu
-pattern VCase c = VCaseApp c Empty
+pattern VVar l = (VRigid l, Empty)
 
 pattern VMeta :: MetaVar -> VNeu
-pattern VMeta m = VApp (VFlex m) Empty
+pattern VMeta m = (VFlex m, Empty)
 
-pattern VHead :: VHead -> VNeu
-pattern VHead m = VApp m Empty
-
-pattern VRepr :: Times -> VNeu -> VNeu
-pattern VRepr m t = VReprApp m t Empty
-
-pattern VGl :: Glob -> VTm
-pattern VGl g = VNeu (VHead (VGlobal g []))
-
-pattern VGlob :: Glob -> Spine VTm -> VTm
-pattern VGlob g sp <- VNeu (VApp (VGlobal g _) sp)
-
-pattern VGlobE :: Glob -> Spine VTm -> VTm
-pattern VGlobE g sp = VNeu (VApp (VGlobal g []) sp)
+pattern VHead :: t -> VSpined t
+pattern VHead m = (m, Empty)
 
 type STy = STm
 

@@ -20,6 +20,10 @@ data Value : Type {
   value : ByteList -> Value
 }
 
+def implicit-pair : [x : A] -> B x -> (a : A) * B a {
+  \[x] b => (x, b)
+}
+
 data Op : Type {
   get : Op,
   insert : Op,
