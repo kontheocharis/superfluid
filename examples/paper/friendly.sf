@@ -33,22 +33,31 @@ def is-friendly-pair : (a : Nat, b : Nat) -> Dec (FriendlyPair a b) {
     case nat-eq-dep sum-a b {
       yes p1 => case nat-eq-dep sum-b a {
         yes p2 => yes (friendly a b p1 p2),
-        no p2 => no (?no1)
+        no p2 => {
+          let contr : FriendlyPair a b -> Empty = \f => case f {
+            friendly a' b' p q => p2 q,
+          };
+          ?nocontr2
+        }
       },
-      no _ => no (?no2)
+      no p1 => {
+        let contr : FriendlyPair a b -> Empty = \(friendly _ _ p q) => ?h312;
+        ?nocontr
+      }
     }
   }
 }
 
 def main : IO () {
-
-
-  io-return (debug-print (is-friendly-pair-of-divisors 284) tt)
+  case is-friendly-pair 284 221 {
+    yes _ => io-return (debug-print "Friendly!" tt),
+    no _ => io-return (debug-print "Not friendly!" tt)
+  }
 }
 
-def test : FriendlyPair 220 284 {
-  friendly 220 284 refl refl
-}
+-- def test : FriendlyPair 220 284 {
+--   friendly 220 284 refl refl
+-- }
 
 -- def check-friendly-pair : (a : Nat) -> (b : Nat) -> String {
 --   \a b =>

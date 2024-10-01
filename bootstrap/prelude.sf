@@ -595,6 +595,14 @@ repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint
 repr def mod as \a b => unrepr (js-uint-mod (repr a) (repr b))
 repr def div as \a b => unrepr (js-uint-div (repr a) (repr b))
 repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
+repr def nat-eq-dep as \a b => {
+  let res : Bool = unrepr (js-eqq (repr a) (repr b));
+  if res {
+    yes trust-me
+  } else {
+    no (conjure _)
+  }
+}
 
 repr data Fin i as JsBoundedUint (repr i) {
   fz as js-bounded-uint-zero,

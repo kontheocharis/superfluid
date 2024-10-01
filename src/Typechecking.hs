@@ -1071,13 +1071,13 @@ instance (Eval m) => Lattice (m CanUnify) where
   a \/ b = do
     a' <- a
     case a' of
-      Yes -> a
+      Yes -> return a'
       No _ -> b
       Maybe -> do
         b' <- b
         case b' of
           Yes -> return Yes
-          No _ -> a
+          No _ -> return a'
           Maybe -> return Maybe
 
   a /\ b = do
@@ -1087,7 +1087,7 @@ instance (Eval m) => Lattice (m CanUnify) where
       No xs -> do
         b' <- b
         case b' of
-          Yes -> a
+          Yes -> return a'
           No ys -> return $ No (xs ++ ys)
           Maybe -> return $ No xs
       Maybe -> do
@@ -1325,9 +1325,9 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  -- pt1 <- pretty t1'
-  -- pt2 <- pretty t2'
-  -- msg $ "unify: " ++ pt1 ++ " =? " ++ pt2
+  pt1 <- pretty t1'
+  pt2 <- pretty t2'
+  msg $ "unify: " ++ pt1 ++ " =? " ++ pt2
   case (t1', t2') of
     (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
     (t, VLam m' _ c') -> etaConvert t m' c'
@@ -1348,7 +1348,7 @@ unify t1 t2 = do
         else iDontKnow
     (VGlob (DefGlob f) sp, VGlob (DefGlob f') sp') ->
       if f == f'
-        then unifySpines sp sp' \/ unfoldDefAndUnify f sp t2'
+        then unifySpines sp sp' \/ (unfoldDefAndUnify f sp t2')
         else unfoldDefAndUnify f sp t2'
     (VGlob (DefGlob f) sp, t') -> unfoldDefAndUnify f sp t'
     (t, VGlob (DefGlob f') sp') -> unfoldDefAndUnify f' sp' t
