@@ -144,7 +144,8 @@ data PTm
   | PName Name
   | PLit (Lit PTm)
   | PHole Name
-  | PRepr Times PTm
+  | PRepr PTm
+  | PUnrepr PTm
   | PParams PTm [PTm]
   | PWild
   | PUnit
@@ -272,13 +273,12 @@ instance (Monad m) => Pretty m PTm where
   pretty (PHole i) = do
     pi' <- pretty i
     return $ "?" ++ pi'
-  pretty (PRepr n s) = do
-    pn <- pretty n
+  pretty (PUnrepr s) = do
     ps <- singlePretty s
-    case n of
-      Finite 1 -> return $ "repr " ++ ps
-      Finite (-1) -> return $ "unrepr " ++ ps
-      _ -> return $ "repr " ++ pn ++ " " ++ ps
+    return $ "unrepr " ++ ps
+  pretty (PRepr s) = do
+    ps <- singlePretty s
+    return $ "repr " ++ ps
   pretty (PLocated _ t) = pretty t
   pretty PUnit = return "()"
   pretty (PParams t []) = pretty t

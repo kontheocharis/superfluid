@@ -13,6 +13,7 @@ module Syntax
     sGatherApps,
     sGatherPis,
     sGatherLams,
+    sGlobWithParams,
     uniqueSLams,
     sGatherLets,
     VPat,
@@ -29,6 +30,8 @@ module Syntax
     WTm (..),
     PRen (..),
     Sub (..),
+    VLazyCase,
+    VBlockedCase,
     SCase,
     mapClosureM,
     weakAsValue,
@@ -49,7 +52,7 @@ import Common
     CtorGlobal,
     DataGlobal,
     DefGlobal,
-    Glob,
+    Glob (..),
     HasNameSupply (uniqueName),
     Idx,
     Lit,
@@ -61,7 +64,7 @@ import Common
     Spine,
     Tel,
     Times,
-    unLvl, PrimGlobal,
+    unLvl, PrimGlobal, Positive,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -135,24 +138,32 @@ type VData = VSpined DataGlobal
 
 type VCtor = VSpined (CtorGlobal, [VTm])
 
+type VLazyCase = Case VLazy VTm VPatB Closure
+
+type VBlockedCase = Case VNeu VTm VPatB Closure
+
 data VNeuHead
   = VFlex MetaVar
   | VRigid Lvl
-  | VBlockedCase (Case VNeu VTm VPatB Closure)
-  | VReprFlex MetaVar
-  | VReprRigid Lvl
+  | VBlockedCase VBlockedCase
   | VPrim PrimGlobal
+  | VUnrepr Closure
+  | VReprFlex Positive MetaVar
+  | VReprRigid Positive Lvl
+  | VReprPrim Positive PrimGlobal
   deriving (Show)
+
 
 data VLazyHead
   = VDef DefGlobal
   | VLit (Lit VTm)
-  | VLazyCase (Case VLazy VTm VPatB Closure)
-  | VReprLazyCase Int (Case VLazy VTm VPatB Closure)
-  | VReprBlockedCase Int (Case VNeu VTm VPatB Closure)
-  | VReprDef Int DefGlobal
-  | VReprCtor Int (CtorGlobal, [VTm])
-  | VReprData Int DataGlobal
+  | VLazyCase VLazyCase
+  | VReprLit Positive (Lit VTm)
+  | VReprLazyCase Positive VLazyCase
+  | VReprBlockedCase Positive VBlockedCase
+  | VReprDef Positive DefGlobal
+  | VReprCtor Positive (CtorGlobal, [VTm])
+  | VReprData Positive DataGlobal
   deriving (Show)
 
 data VNorm
@@ -160,7 +171,6 @@ data VNorm
   | VLam PiMode Name Closure
   | VData VData
   | VCtor VCtor
-  | VUnrepr Closure
   | VU
   deriving (Show)
 
@@ -211,10 +221,14 @@ data STm
   | SApp PiMode STm STm
   | SCase SCase
   | SU
-  | SGlobal Glob [STm]
+  | SData DataGlobal
+  | SCtor (CtorGlobal, [STm])
+  | SDef DefGlobal
+  | SPrim PrimGlobal
   | SVar Idx
   | SLit (Lit STm)
-  | SRepr Times STm
+  | SRepr STm
+  | SUnrepr STm
   deriving (Show)
 
 -- @@Todo: case and constructor params should be (Lvl, [VTm]) instead.
@@ -255,3 +269,9 @@ sGatherLets :: STm -> ([(Name, STy, STm)], STm)
 sGatherLets = \case
   SLet n ty t u -> let (binds, ret) = sGatherLets u in ((n, ty, t) : binds, ret)
   t -> ([], t)
+
+sGlobWithParams :: Glob -> [STm] -> STm
+sGlobWithParams (DataGlob d) _ = SData d
+sGlobWithParams (CtorGlob c) xs = SCtor (c, xs)
+sGlobWithParams (DefGlob d) _ = SDef d
+sGlobWithParams (PrimGlob p) _ = SPrim p

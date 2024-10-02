@@ -482,13 +482,13 @@ app = do
 repTerm :: Parser PTm
 repTerm = locatedTerm $ do
   try $ reserved "repr"
-  PRepr (Finite 1) <$> singleTerm
+  PRepr <$> singleTerm
 
 -- | Parse an unrepresentation term
 unrepTerm :: Parser PTm
 unrepTerm = locatedTerm $ do
   try $ reserved "unrepr"
-  PRepr (Finite (-1)) <$> singleTerm
+  PUnrepr <$> singleTerm
 
 -- | Parse a series of let terms.
 lets :: Parser PTm

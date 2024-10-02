@@ -17,6 +17,7 @@ module Common
     startPos,
     endPos,
     globName,
+    Positive (..),
     Idx (..),
     Lvl (..),
     WithNames (..),
@@ -32,6 +33,8 @@ module Common
     mapSpine,
     mapSpineM,
     telWithNames,
+    composeN,
+    composeNM,
     MetaVar (..),
     Glob (..),
     Tag (..),
@@ -56,6 +59,7 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import Control.Monad ((>=>))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -113,48 +117,54 @@ data Lit t
   | FinLit Natural t
   deriving (Eq, Data, Typeable, Show, Functor, Traversable, Foldable)
 
+data Positive = One | OnePlus Positive deriving (Eq, Show)
+
+composeN :: Positive -> (a -> a) -> a -> a
+composeN One f = f
+composeN (OnePlus n) f = f . composeN n f
+
+composeNM :: (Monad m) => Positive -> (a -> m a) -> a -> m a
+composeNM One f = f
+composeNM (OnePlus n) f = f >=> composeNM n f
+
+-- data Negative = Negative Positive deriving (Eq, Show)
+
+-- positiveToTimes :: Positive -> Times
+-- positiveToTimes One = Finite 1
+-- positiveToTimes (OnePlus x) = inc (positiveToTimes x)
+
+-- timesToPositive :: Times -> Maybe (Either Negative Positive)
+-- timesToPositive (Finite 0) = Nothing
+-- timesToPositive (Finite 1) = Just (Right One)
+-- timesToPositive (Finite n) | n > 1 = case timesToPositive (Finite (n - 1)) of
+--   Nothing -> Just (Right One)
+--   Just (Right x) -> Just (Right (OnePlus x))
+--   Just (Left (Negative x)) -> Just (Left (Negative (OnePlus x)))
+
+instance Semigroup Positive where
+  One <> x = OnePlus x
+  OnePlus x <> y = OnePlus (x <> y)
+
+-- instance Monoid Negative where
+--   mempty = Negative One
+
 -- | An amount of times to do something, which might be infinite.
-data Times = Finite Int | NegInf | PosInf deriving (Eq, Show)
+newtype Times = Finite Int deriving (Eq, Ord)
 
 inc :: Times -> Times
 inc (Finite n) = Finite (n + 1)
-inc NegInf = NegInf
-inc PosInf = PosInf
 
 dec :: Times -> Times
 dec (Finite n) = Finite (n - 1)
-dec NegInf = NegInf
-dec PosInf = PosInf
 
 inv :: Times -> Times
 inv (Finite n) = Finite (-n)
-inv NegInf = PosInf
-inv PosInf = NegInf
 
 instance Semigroup Times where
   Finite n <> Finite m = Finite (n + m)
-  NegInf <> PosInf = Finite 0
-  PosInf <> NegInf = Finite 0
-  PosInf <> _ = PosInf
-  _ <> PosInf = PosInf
-  NegInf <> _ = NegInf
-  _ <> NegInf = NegInf
 
 instance Monoid Times where
   mempty = Finite 0
-
-instance Bounded Times where
-  minBound = NegInf
-  maxBound = PosInf
-
-instance Ord Times where
-  compare (Finite n) (Finite m) = compare n m
-  compare NegInf NegInf = EQ
-  compare PosInf PosInf = EQ
-  compare NegInf _ = LT
-  compare _ NegInf = GT
-  compare PosInf _ = GT
-  compare _ PosInf = LT
 
 type Filename = String
 
@@ -320,8 +330,6 @@ instance (Monad m) => Pretty m PiMode where
 
 instance (Monad m) => Pretty m Times where
   pretty (Finite n) = return $ show n
-  pretty NegInf = return "-inf"
-  pretty PosInf = return "inf"
 
 instance (Pretty m a) => Pretty m (Lit a) where
   pretty (StringLit s) = return $ show s
