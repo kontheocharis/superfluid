@@ -52,8 +52,6 @@ import Common
     Tel,
     composeN,
     composeNM,
-    globName,
-    inv,
     lvlToIdx,
     mapSpine,
     mapSpineM,
@@ -70,8 +68,6 @@ import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (toList)
-import Data.List.Extra (firstJust)
-import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
@@ -82,17 +78,12 @@ import Globals
     PrimGlobalInfo (..),
     Sig (..),
     getCaseRepr,
-    getCtorGlobal,
-    getCtorRepr,
-    getDataRepr,
-    getDefRepr,
     getGlobalRepr,
     getGlobalTags,
     mapSigContentsM,
     removeRepresentedItems,
     unfoldDef,
   )
-import Language.C (Position)
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
 import Syntax
@@ -108,7 +99,7 @@ import Syntax
     VLazy,
     VLazyCase,
     VLazyHead (..),
-    VNeu (..),
+    VNeu,
     VNeuHead (..),
     VNorm (..),
     VPat,
@@ -122,7 +113,6 @@ import Syntax
     sLams,
     uniqueSLams,
     weakAsValue,
-    pattern VHead,
     pattern VMeta,
     pattern VVar,
   )
@@ -279,13 +269,12 @@ vCase c = do
     VNeu n -> return $ VNeu (VBlockedCase (c {subject = n}), Empty)
     VLazy n -> return $ VLazy (VLazyCase (c {subject = n}), Empty)
 
-postCompose :: (Eval m) => (STm -> STm) -> Closure -> m Closure
-postCompose f (Closure n env t) = return $ Closure n env (f t)
+postCompose :: (STm -> STm) -> Closure -> Closure
+postCompose f (Closure n env t) = Closure n env (f t)
 
-preCompose :: (Eval m) => Closure -> (STm -> STm) -> m Closure
-preCompose (Closure n env t) f = do
-  assert (n == 1) $ return ()
-  return $
+preCompose :: Closure -> (STm -> STm) -> Closure
+preCompose (Closure n env t) f =
+  assert (n == 1) $
     Closure
       n
       env
@@ -301,15 +290,8 @@ preCompose (Closure n env t) f = do
           (f (SVar (Idx 0)))
       )
 
-unreprClosure :: (Eval m) => Closure -> m Closure
-unreprClosure t = do
-  a <- postCompose SUnrepr t
-  preCompose a SRepr
-
-reprClosure :: (Eval m) => Closure -> m Closure
-reprClosure t = do
-  a <- postCompose SRepr t
-  preCompose a SUnrepr
+reprClosure :: Closure -> Closure
+reprClosure t = preCompose (postCompose SRepr t) SUnrepr
 
 sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
 sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const Explicit) p.binds)) True
@@ -371,18 +353,18 @@ mapGlobalInfoM f i = case i of
 vReprTel :: (Eval m) => Lvl -> Positive -> Tel STm -> m (Tel STm)
 vReprTel _ _ Empty = return Empty
 vReprTel l m (Param m' n a :<| xs) = do
-  a' <- (\a' -> a'.body) <$> postCompose (composeN m SRepr) (Closure 0 [] a)
+  let a' = (postCompose (composeN m SRepr) (Closure 0 [] a)).body
   xs' <- vReprTel l m xs
-  xs'' <- traverse (traverse (\x -> (\x' -> x'.body) <$> composeNM m reprClosure (Closure 0 [] x))) xs'
+  let xs'' = fmap (fmap (\x -> (composeN m reprClosure (Closure 0 [] x)).body)) xs'
   return $ Param m' n a' :<| xs''
 
 vReprNorm :: (Eval m) => Lvl -> Positive -> VNorm -> m VTm
 vReprNorm l m (VPi e v ty t) = do
   ty' <- vRepr l m ty
-  t' <- composeNM m reprClosure t
+  let t' = composeN m reprClosure t
   return . VNorm $ VPi e v ty' t'
 vReprNorm _ m (VLam e v t) = do
-  t' <- composeNM m reprClosure t
+  let t' = composeN m reprClosure t
   return . VNorm $ VLam e v t'
 vReprNorm _ _ VU = return (VNorm VU)
 vReprNorm l m (VData (d, sp)) = do
@@ -571,18 +553,21 @@ eval l (SLit i) = do
 eval env (SMeta m bds) = do
   m' <- vMeta m
   vAppBinds env m' bds
-eval env (SData d) = return $ VNorm (VData (d, Empty))
+eval _ (SData d) = return $ VNorm (VData (d, Empty))
 eval env (SCtor (c, pp)) = do
   pp' <- mapM (eval env) pp
   return $ VNorm (VCtor ((c, pp'), Empty))
-eval env (SDef d) = do
+eval _ (SDef d) = do
   return $ VLazy (VDef d, Empty)
-eval env (SPrim p) = do
+eval _ (SPrim p) = do
   return $ VNeu (VPrim p, Empty)
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr t) = do
   t' <- eval env t
-  undefined
+  vRepr (envLvl env) One t'
+eval env (SUnrepr t) = do
+  t' <- close 0 env t
+  return $ VNeu (VUnrepr t', Empty)
 
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
@@ -628,56 +613,66 @@ quotePat l p = do
   return $ SPat p' p.binds
   where
     quotePat' :: (Eval m) => Lvl -> VTm -> m STm
-    -- quotePat' l' (VNeu (VApp vh sp)) = do
-    --   sp' <- mapSpineM (quotePat' l') sp
-    --   vh' <- quotePatHead l' vh
-    --   return $ sAppSpine vh' sp'
+    quotePat' l' (VNorm (VCtor ((c, pp), sp))) = do
+      sp' <- mapSpineM (quotePat' l') sp
+      pp' <- mapM (quote l') pp
+      return $ sAppSpine (SCtor (c, pp')) sp'
+    quotePat' _ (VNeu (VVar _)) = return $ SVar (Idx 0)
     quotePat' _ _ = error "impossible"
 
--- quotePatHead :: (Eval m) => Lvl -> VHead -> m STm
--- quotePatHead _ (VFlex _) = error "impossible"
--- quotePatHead _ (VRigid _) = return $ SVar (Idx 0)
--- quotePatHead _ (VGlobal g pp) = do
---   pp' <- mapM (quote l) pp
---   return $ SGlobal g pp'
+quoteCaseSpine :: (Eval m) => (Lvl -> s -> m STm) -> Lvl -> Case s VTm VPatB Closure -> Spine VTm -> m STm
+quoteCaseSpine quoteSubject l (Case dat pp v i r cs) sp = do
+  v' <- quoteSubject l v
+  cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
+  r' <- quote l r
+  pp' <- mapSpineM (quote l) pp
+  i' <- mapSpineM (quote l) i
+  quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
 
--- (VApp h sp) -> do
---   h' <- quoteHead l h
---   quoteSpine l h' sp
--- (VReprApp m v sp) -> do
---   v' <- quoteNeu l v
---   quoteSpine l (SRepr m v') sp
--- (VCaseApp (Case dat pp v i r cs) sp) -> do
---   v' <- quote l (VNeu v)
---   cs' <- mapM (bitraverse (quotePat l) (quoteClosure l)) cs
---   r' <- quote l r
---   pp' <- mapSpineM (quote l) pp
---   i' <- mapSpineM (quote l) i
---   quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
+quoteReprSpine :: (Eval m) => Lvl -> Positive -> VTm -> Spine VTm -> m STm
+quoteReprSpine l t n sp = do
+  m' <- quote l n
+  let hd = composeN t SRepr m'
+  quoteSpine l hd sp
 
 quoteLazy :: (Eval m) => Lvl -> VLazy -> m STm
-quoteLazy = undefined
-
--- quoteNeuRepr :: (Eval m) => Lvl -> VNeuHead -> m STm
--- quoteNeuRepr l t h = do
---   m' <- quoteNeu l (h, Empty)
---   return $ SRepr t m'
+quoteLazy l (n, sp) = do
+  case n of
+    VDef d -> do
+      ts <- access (getGlobalTags d.globalName)
+      if UnfoldTag `elem` ts
+        then do
+          g' <- access (unfoldDef d)
+          case g' of
+            Just t -> do
+              res <- vApp t sp
+              quote l res
+            _ -> quoteSpine l (SDef d) sp
+        else quoteSpine l (SDef d) sp
+    VLit t -> do
+      t' <- traverse (quote l) t
+      quoteSpine l (SLit t') sp
+    VLazyCase c -> quoteCaseSpine quoteLazy l c sp
+    VReprLit t c -> quoteReprSpine l t (VLazy (VLit c, Empty)) sp
+    VReprLazyCase t c -> quoteReprSpine l t (VLazy (VLazyCase c, Empty)) sp
+    VReprBlockedCase t c -> quoteReprSpine l t (VNeu (VBlockedCase c, Empty)) sp
+    VReprDef t d -> quoteReprSpine l t (VLazy (VDef d, Empty)) sp
+    VReprCtor t c -> quoteReprSpine l t (VNorm (VCtor (c, Empty))) sp
+    VReprData t d -> quoteReprSpine l t (VNorm (VData (d, Empty))) sp
 
 quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
-quoteNeu l (n, sp) = do
-  n' <- case n of
-    VFlex m -> return $ SMeta m []
-    VRigid l' -> return $ SVar (lvlToIdx l l')
-    VBlockedCase b -> undefined
-    VPrim p -> return $ SPrim p
-  -- VUnrepr c -> do
-  --   c' <- c $$ []
-  --   cq <- quote l c'
-  --   return $ SRepr (Finite (-1)) cq
-  -- VReprFlex t m -> quoteNeuRepr l t (VFlex m)
-  -- VReprRigid t x -> quoteNeuRepr l t (VRigid x)
-  -- VReprPrim t p -> quoteNeuRepr l t (VPrim p)
-  quoteSpine l n' sp
+quoteNeu l (n, sp) = case n of
+  VFlex m -> quoteSpine l (SMeta m []) sp
+  VRigid l' -> quoteSpine l (SVar (lvlToIdx l l')) sp
+  VBlockedCase c -> quoteCaseSpine quoteNeu l c sp
+  VPrim p -> quoteSpine l (SPrim p) sp
+  VUnrepr c -> do
+    c' <- c $$ []
+    cq <- quote l c'
+    quoteSpine l (SUnrepr cq) sp
+  VReprFlex t m -> quoteReprSpine l t (VNeu (VFlex m, Empty)) sp
+  VReprRigid t x -> quoteReprSpine l t (VNeu (VRigid x, Empty)) sp
+  VReprPrim t p -> quoteReprSpine l t (VNeu (VPrim p, Empty)) sp
 
 quoteNorm :: (Eval m) => Lvl -> VNorm -> m STm
 quoteNorm l n = case n of
@@ -698,32 +693,6 @@ quote :: (Eval m) => Lvl -> VTm -> m STm
 quote l (VNorm n) = quoteNorm l n
 quote l (VLazy n) = quoteLazy l n
 quote l (VNeu n) = quoteNeu l n
-
--- case vt' of
---   VLam m x t -> do
---     t' <- quoteClosure l t
---     return $ SLam m x t'
---   VPi m x ty t -> do
---     ty' <- quote l ty
---     t' <- quoteClosure l t
---     return $ SPi m x ty' t'
---   VU -> return SU
---   -- VLit lit -> SLit <$> traverse (quote l) lit
---   VNeu n -> quoteNeu l n
-
--- @@TODO: The below should happen in quote
--- ts <- access (getGlobalTags (globName g))
--- case (UnfoldTag `elem` ts, g) of
---   (True, DefGlob d) -> do
---     g' <- access (unfoldDef d)
---     case g' of
---       Just t -> return t
---       _ -> do
---         pp' <- mapM (eval env) pp
---         return $ VNeu (VHead (VGlobal g pp'))
---   _ -> do
---     pp' <- mapM (eval env) pp
---     return $ VNeu (VHead (VGlobal g pp'))
 
 nf :: (Eval m) => Env VTm -> STm -> m STm
 nf env t = do
