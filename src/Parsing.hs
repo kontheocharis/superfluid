@@ -9,8 +9,9 @@ import Common
     Loc (Loc),
     Name (..),
     Param (..),
-    PiMode (Explicit, Implicit),
+    PiMode (..),
     Pos (Pos),
+    Qty (..),
     Tag,
     Tel,
     Times (Finite),
@@ -44,30 +45,7 @@ import Presyntax
     tagged,
   )
 import Printing (Pretty (..))
-import Text.Parsec
-  ( Parsec,
-    between,
-    char,
-    choice,
-    eof,
-    errorPos,
-    getPosition,
-    many,
-    many1,
-    noneOf,
-    notFollowedBy,
-    optionMaybe,
-    optional,
-    runParser,
-    satisfy,
-    skipMany,
-    skipMany1,
-    sourceColumn,
-    sourceLine,
-    sourceName,
-    string,
-    (<|>),
-  )
+import Text.Parsec (Parsec, between, char, choice, eof, errorPos, getPosition, many, many1, noneOf, notFollowedBy, optionMaybe, optional, runParser, satisfy, skipMany, skipMany1, sourceColumn, sourceLine, sourceName, string, (<|>))
 import qualified Text.Parsec as PS
 import Text.Parsec.Char (alphaNum, letter)
 import Text.Parsec.Combinator (endBy1, sepEndBy, sepEndBy1)
@@ -354,14 +332,14 @@ term = choice [caseExpr, ifExpr, lets, piTOrSigmaT, lam, app]
 -- | Parse a list
 list :: Parser PTm
 list = locatedTerm $ do
-  try $ reservedOp   "["
-  end <- optionMaybe (reservedOp   "]")
+  try $ reservedOp "["
+  end <- optionMaybe (reservedOp "]")
   case end of
     Just _ -> return $ PList [] Nothing
     Nothing -> els []
   where
     els xs = do
-      consIndicator <- optionMaybe (reservedOp   "..")
+      consIndicator <- optionMaybe (reservedOp "..")
       case consIndicator of
         Just _ -> do
           xs' <- term
@@ -445,23 +423,35 @@ tel =
     namelessTyping :: Parser (NonEmpty (Param PTy, Loc))
     namelessTyping =
       located
-        (\(n, t) l -> singleton (Param Explicit n t, l))
+        (\(q, n, t) l -> singleton (Param Explicit q n t, l))
         ( do
+            q <- fromMaybe Many <$> optionMaybe qty
             t <- app
-            return (Name "_", t)
+            return (q, Name "_", t)
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
     typings m = do
       ts <- commaSep1
-        . located (\ts l -> map (\(n, t) -> (Param m n t, l)) ts)
+        . located (\ts l -> map (\(q, n, t) -> (Param m q n t, l)) ts)
         . try
         $ do
           n <- many1 var
           _ <- colon
+          q <-
+            fromMaybe
+              ( case m of
+                  Explicit -> Many
+                  Implicit -> Zero
+                  Instance -> Many
+              )
+              <$> optionMaybe qty
           ty <- term
-          return $ map (,ty) n
+          return $ map (q,,ty) n
       return . NE.fromList $ concat ts
+
+qty :: Parser Qty
+qty = try (reservedOp "0" >> return Zero) <|> try (reservedOp "1" >> return One) <|> try (reservedOp "*" >> return Many)
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy

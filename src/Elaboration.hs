@@ -26,7 +26,7 @@ import Common
     Times (..),
     mapSpine,
     unName,
-    pattern Possible,
+    pattern Possible, Qty,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
@@ -126,7 +126,7 @@ patAsVar PWild = Left (Name "_")
 patAsVar (PLocated _ t) = patAsVar t
 patAsVar p = Right p
 
-elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
+elab :: (Elab m) => PTm -> Mode -> m (STm, Qty, VTy)
 elab p mode = case (p, mode) of
   -- Check/both modes:
   (PLocated l t, md) -> enterLoc l (elab t md)

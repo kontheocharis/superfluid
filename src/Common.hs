@@ -14,8 +14,10 @@ module Common
     dec,
     Loc (..),
     Pos (..),
+    Qty (..),
     startPos,
     endPos,
+    members,
     globName,
     Idx (..),
     Lvl (..),
@@ -51,6 +53,7 @@ import Data.Bitraversable (Bitraversable (..))
 import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
 import Data.List (intercalate)
+import Data.Semiring (Semiring (..))
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -112,6 +115,27 @@ data Lit t
   | NatLit Natural
   | FinLit Natural t
   deriving (Eq, Data, Typeable, Show, Functor, Traversable, Foldable)
+
+-- | A quantity
+data Qty = Zero | One | Many deriving (Eq)
+
+instance Show Qty where
+  show Zero = "0"
+  show One = "1"
+  show Many = ""
+
+instance Semiring Qty where
+  one = One
+  zero = Zero
+
+  times Zero _ = Zero
+  times _ Zero = Zero
+  times One One = One
+  times _ _ = Many
+
+  plus Zero n = n
+  plus n Zero = n
+  plus _ _ = Many
 
 -- | An amount of times to do something, which might be infinite.
 data Times = Finite Int | NegInf | PosInf deriving (Eq, Show)
@@ -216,6 +240,9 @@ nextLvls (Lvl l) n = Lvl (l + n)
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
 
+members :: Lvl -> [Lvl]
+members (Lvl l) = map Lvl [0 .. l - 1]
+
 -- Spines and arguments
 
 data Arg t = Arg {mode :: PiMode, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
@@ -228,7 +255,7 @@ mapSpine f = fmap (fmap f)
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
-data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
+data Param t = Param {mode :: PiMode, qty :: Qty, name :: Name, ty :: t}
   deriving
     ( Eq,
       Show,
@@ -240,7 +267,7 @@ data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
 type Tel t = Seq (Param t)
 
 telWithNames :: Tel a -> Spine Name -> Tel a
-telWithNames = S.zipWith (\(Param m _ t) (Arg _ n) -> Param m n t)
+telWithNames = S.zipWith (\(Param m q _ t) (Arg _ n) -> Param m q n t)
 
 -- Metas
 
@@ -349,18 +376,21 @@ instance (Pretty m p, Pretty m t) => Pretty m (Clause p t) where
     return $ pp ++ " => " ++ pc
 
 instance (Pretty m t) => Pretty m (Param t) where
-  pretty (Param Explicit n t) = do
+  pretty (Param Explicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "(" ++ n' ++ " : " ++ t' ++ ")"
-  pretty (Param Implicit n t) = do
+    let q' = show q
+    return $ "(" ++ n' ++ " : " ++ (if null q' then "" else q') ++ " " ++ t' ++ ")"
+  pretty (Param Implicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[" ++ n' ++ " : " ++ t' ++ "]"
-  pretty (Param Instance n t) = do
+    let q' = show q
+    return $ "[" ++ n' ++ " : " ++ (if null q' then "" else q' ++ " ") ++ t' ++ "]"
+  pretty (Param Instance q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[[" ++ n' ++ " : " ++ t' ++ "]]"
+    let q' = show q
+    return $ "[[" ++ n' ++ " : " ++ (if null q' then "" else q' ++ " ") ++ t' ++ "]]"
 
 -- Files
 

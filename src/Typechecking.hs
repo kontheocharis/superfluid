@@ -66,17 +66,20 @@ import Common
     Param (..),
     PiMode (..),
     PrimGlobal (..),
+    Qty (..),
     Spine,
     Tag,
     Tel,
     Times (..),
     inv,
     lvlToIdx,
+    mapSpine,
+    mapSpineM,
     nextLvl,
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible, mapSpineM, mapSpine,
+    pattern Possible,
   )
 import Context
   ( Ctx (..),
@@ -148,13 +151,15 @@ import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
 import Syntax
-  ( Closure (body, numVars),
+  ( Case (..),
+    Closure (body, numVars),
     Env,
     PRen (..),
     SPat (..),
     STm (..),
     STy,
     Sub,
+    VCase,
     VHead (VFlex, VGlobal, VRigid),
     VNeu (VApp, VCaseApp, VReprApp),
     VPatB (..),
@@ -172,7 +177,7 @@ import Syntax
     pattern VGlob,
     pattern VGlobE,
     pattern VRepr,
-    pattern VVar, Case (..), VCase,
+    pattern VVar,
   )
 import Unelaboration (Unelab)
 
@@ -279,7 +284,18 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m SolveAttempts) => Tc m where
+class
+  ( Eval m,
+    Unelab m,
+    Has m Loc,
+    Has m (Seq Problem),
+    Has m InPat,
+    Has m Ctx,
+    Has m Qty,
+    Has m SolveAttempts
+  ) =>
+  Tc m
+  where
   addGoal :: Goal -> m ()
 
   getCtx :: m Ctx
@@ -321,7 +337,7 @@ class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx,
     NotInPat -> b
     _ -> a
 
-data Mode = Check VTy | Infer
+data Mode = Check Qty VTy | Infer
 
 type Child m = (Mode -> m (STm, VTy))
 
@@ -482,42 +498,44 @@ ifForcePiType m ty the els = do
 forbidPat :: (Tc m) => m ()
 forbidPat = ifInPat (tcError InvalidPattern) (return ())
 
-inferPatBind :: (Tc m) => Name -> m (STm, VTy)
+inferPatBind :: (Tc m) => Name -> m (STm, Qty, VTy)
 inferPatBind x = do
   ty <- freshMeta >>= evalHere
-  checkPatBind x ty
+  checkPatBind x Zero ty
 
-checkPatBind :: (Tc m) => Name -> VTy -> m (STm, VTy)
-checkPatBind x ty = do
-  modifyCtx (bind x ty)
+checkPatBind :: (Tc m) => Name -> Qty -> VTy -> m (STm, Qty, VTy)
+checkPatBind x q ty = do
+  modifyCtx (bind x q ty)
   whenInPat
     ( \case
         InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [x]))
         _ -> return ()
     )
-  return (SVar (Idx 0), ty)
+  return (SVar (Idx 0), q, ty)
 
 reprHere :: (Tc m) => Times -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
 
-name :: (Tc m) => Name -> m (STm, VTy)
-name n =
+name :: (Tc m) => Name -> m (STm, Qty, VTy)
+name n = do
+  l :: Lvl <- view
+  q :: Qty <- view
   ifInPat
     ( do
-        l <- access (lookupGlobal n)
-        case l of
+        n' <- access (lookupGlobal n)
+        case n' of
           Just c@(CtorInfo _) -> globalInfoToTm n c
           _ -> inferPatBind n
     )
     ( do
         r <- accessCtx (lookupName n)
         case r of
-          Just (i, t) -> return (SVar i, t)
+          Just e -> return (SVar (lvlToIdx l e.unIdx), e.ty)
           Nothing -> do
-            l <- access (lookupGlobal n)
-            case l of
+            n' <- access (lookupGlobal n)
+            case n' of
               Just x -> globalInfoToTm n x
               Nothing -> tcError $ UnresolvedVariable n
     )
@@ -543,7 +561,7 @@ lam :: (Tc m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
 lam mode m x t = do
   forbidPat
   case mode of
-    Check ty ->
+    Check q ty ->
       ifForcePiType
         m
         ty
@@ -618,15 +636,15 @@ repr :: (Tc m) => Mode -> Times -> Child m -> m (STm, VTy)
 repr mode m t = do
   forbidPat
   case mode of
-    Check ty@(VNeu (VRepr m' t')) | m == m' -> do
+    Check q ty@(VNeu (VRepr m' t')) | m == m' -> do
       (tc, _) <- t (Check (VNeu t'))
       return (SRepr m tc, ty)
-    Check ty | m < mempty -> do
+    Check q ty | m < mempty -> do
       (t', ty') <- t Infer >>= insert
       reprTy <- reprHere (inv m) ty
       unifyHere reprTy ty'
       return (SRepr m t', ty)
-    Check ty -> checkByInfer (repr Infer m t) ty
+    Check q ty -> checkByInfer (repr Infer m t) ty
     Infer -> do
       (t', ty) <- t Infer
       reprTy <- reprHere m ty
@@ -705,7 +723,7 @@ caseOf mode s r cs = do
     Infer -> do
       retTy <- freshMeta >>= evalHere
       caseOf (Check retTy) s r cs
-    Check ty -> do
+    Check q ty -> do
       (ss, ssTy) <- s Infer
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
       di <- access (getDataGlobal d)
@@ -732,18 +750,18 @@ wildPat mode = do
   n <- uniqueName
   case mode of
     Infer -> inferPatBind n
-    (Check ty) -> checkPatBind n ty
+    (Check q ty) -> checkPatBind n ty
 
 meta :: (Tc m) => Mode -> Maybe Name -> m (STm, VTy)
 meta mode n = do
   forbidPat
   case mode of
     Infer -> inferMeta n
-    Check ty -> checkMeta n ty
+    Check q ty -> checkMeta n ty
 
 lit :: (Tc m) => Mode -> Lit (Child m) -> m (STm, VTy)
 lit mode l = case mode of
-  Check ty -> checkByInfer (lit Infer l) ty
+  Check q ty -> checkByInfer (lit Infer l) ty
   Infer -> do
     (l', ty, args) <- case l of
       StringLit s -> return (StringLit s, KnownString, Empty)
@@ -1053,7 +1071,7 @@ instance (Tc m) => Pretty m UnifyError where
     t'' <- pretty t
     t''' <- pretty t'
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
-  pretty (ErrorInCtx ns e) = enterCtx (const $ typelessBinds ns emptyCtx) $ pretty e
+  pretty (ErrorInCtx ns e) = enterCtx (const $ typelessBinds (map (,Zero) ns) emptyCtx) $ pretty e
 
 instance (Tc m) => Has m (Env VTm) where
   view = accessCtx (\c -> c.env)
@@ -1102,7 +1120,7 @@ type SolveT = ExceptT SolveError
 enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
   ns <- uniqueNames c.numVars
-  enterCtx (typelessBinds ns) m
+  enterCtx (typelessBinds (map (,Zero) ns)) m
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do

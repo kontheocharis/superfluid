@@ -11,12 +11,11 @@ module Context
     define,
     typelessBind,
     typelessBinds,
-    CtxTy (..),
     lookupName,
   )
 where
 
-import Common (Idx (..), Lvl (..), Name, lvlToIdx, nextLvl)
+import Common (Idx (..), Lvl (..), Name, Qty, lvlToIdx, nextLvl, members)
 import Data.List (intercalate, zipWith4)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -38,6 +37,7 @@ data Ctx = Ctx
   { env :: Env VTm,
     lvl :: Lvl,
     types :: [CtxTy],
+    qtys :: [Qty],
     bounds :: Bounds,
     nameList :: [Name],
     names :: Map Name Lvl
@@ -48,35 +48,18 @@ instance (Monad m, Pretty m VTm) => Pretty m CtxTy where
   pretty (CtxTy t) = pretty t
   pretty TyUnneeded = return "_"
 
-instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
+instance (Monad m, Pretty m Name, Pretty m VTy, Pretty m VTm) => Pretty m CtxEntry where
+  pretty (CtxEntry name ty tm lvl qty bound) = do
+    name' <- pretty name
+    ty' <- pretty ty
+    tm' <- case bound of
+      Defined -> (" = " ++) <$> pretty tm
+      Bound -> return ""
+    return $ name' ++ " : " ++ show qty ++ " " ++ ty' ++ tm'
+
+instance (Monad m, Pretty m Name, Pretty m VTy, Pretty m VTm) => Pretty m Ctx where
   pretty c =
-    intercalate "\n"
-      <$> mapM
-        ( \(n, ty, tm) -> do
-            n' <- pretty n
-            ty' <- pretty ty
-            tm' <- case tm of
-              Just t -> (" = " ++) <$> pretty t
-              Nothing -> return ""
-            return $ n' ++ " : " ++ ty' ++ tm'
-        )
-        (reverse con)
-    where
-      con :: [(Name, CtxTy, Maybe VTm)]
-      con =
-        zipWith4
-          ( \i n t e ->
-              ( n,
-                t,
-                case e of
-                  VNeu (VVar x) | x == Lvl i -> Nothing
-                  _ -> Just e
-              )
-          )
-          [c.lvl.unLvl - 1, c.lvl.unLvl - 2 .. 0]
-          c.nameList
-          c.types
-          c.env
+    intercalate "\n" <$> mapM pretty (reverse (ctxEntries c))
 
 emptyCtx :: Ctx
 emptyCtx =
@@ -86,6 +69,7 @@ emptyCtx =
       types = [],
       bounds = [],
       nameList = [],
+      qtys = [],
       names = M.empty
     }
 
@@ -94,46 +78,50 @@ data CtxEntry = CtxEntry
     ty :: CtxTy,
     tm :: VTm,
     lvl :: Lvl,
+    qty :: Qty,
     bound :: BoundState
   }
 
-bind :: Name -> VTy -> Ctx -> Ctx
-bind x ty ctx =
+bind :: Name -> Qty -> VTy -> Ctx -> Ctx
+bind x q ty ctx =
   addCtxEntry
     ( CtxEntry
         { name = x,
           ty = CtxTy ty,
           tm = VNeu (VVar ctx.lvl),
           lvl = ctx.lvl,
+          qty = q,
           bound = Bound
         }
     )
     ctx
 
-insertedBind :: Name -> VTy -> Ctx -> Ctx
+insertedBind :: Name -> Qty -> VTy -> Ctx -> Ctx
 insertedBind = bind
 
-define :: Name -> VTm -> VTy -> Ctx -> Ctx
-define x t ty ctx =
+define :: Name -> Qty -> VTm -> VTy -> Ctx -> Ctx
+define x q t ty ctx =
   addCtxEntry
     ( CtxEntry
         { tm = t,
           ty = CtxTy ty,
           bound = Defined,
           lvl = ctx.lvl,
+          qty = q,
           name = x
         }
     )
     ctx
 
-typelessBind :: Name -> Ctx -> Ctx
-typelessBind x ctx =
+typelessBind :: Name -> Qty -> Ctx -> Ctx
+typelessBind x q ctx =
   addCtxEntry
     ( CtxEntry
         { tm = VNeu (VVar ctx.lvl),
           ty = TyUnneeded,
           lvl = ctx.lvl,
           bound = Bound,
+          qty = q,
           name = x
         }
     )
@@ -147,19 +135,30 @@ addCtxEntry e ctx =
       types = e.ty : ctx.types,
       bounds = e.bound : ctx.bounds,
       names = M.insert e.name e.lvl ctx.names,
+      qtys = e.qty : ctx.qtys,
       nameList = e.name : ctx.nameList
     }
 
-typelessBinds :: [Name] -> Ctx -> Ctx
-typelessBinds ns ctx = foldr typelessBind ctx (reverse ns)
+typelessBinds :: [(Name, Qty)] -> Ctx -> Ctx
+typelessBinds ns ctx = foldr (uncurry typelessBind) ctx (reverse ns)
 
-ensureNeeded :: CtxTy -> VTm
-ensureNeeded (CtxTy t) = t
-ensureNeeded TyUnneeded = error "Type is unneeded"
+ctxEntries :: Ctx -> [CtxEntry]
+ctxEntries ctx = map (indexCtx ctx) (members ctx.lvl )
 
-lookupName :: Name -> Ctx -> Maybe (Idx, VTy)
+indexCtx :: Ctx -> Lvl -> CtxEntry
+indexCtx ctx l =
+  CtxEntry
+    { name = ctx.nameList !! l.unLvl,
+      ty = ctx.types !! l.unLvl,
+      tm = ctx.env !! l.unLvl,
+      lvl = l,
+      qty = ctx.qtys !! l.unLvl,
+      bound = ctx.bounds !! l.unLvl
+    }
+
+lookupName :: Name -> Ctx -> Maybe CtxEntry
 lookupName n ctx = case M.lookup n ctx.names of
-  Just l -> let idx = lvlToIdx ctx.lvl l in Just (idx, ensureNeeded (ctx.types !! idx.unIdx))
+  Just l -> Just $ indexCtx ctx l
   Nothing -> Nothing
 
 data Goal = Goal

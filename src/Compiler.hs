@@ -11,7 +11,7 @@ import Common
     HasProjectFiles (getProjectFileContents),
     Loc (..),
     Logger (..),
-    Name (..),
+    Name (..), Qty (Zero),
   )
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
@@ -156,7 +156,8 @@ data Compiler = Compiler
     reduceUnfoldDefs :: Bool,
     solveAttempts :: SolveAttempts,
     problems :: Seq Problem,
-    codegenStatements :: [JsStat]
+    codegenStatements :: [JsStat],
+    qty :: Qty
   }
 
 data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError | ElabCompilerError ElabError
@@ -206,6 +207,10 @@ instance Unelab Comp
 instance Logger Comp where
   msg m = liftIO $ putStrLn m
 
+instance Has Comp Qty where
+  view = gets (\c -> c.qty)
+  modify f = ST.modify (\s -> s {qty = f s.qty})
+
 instance Tc Comp where
   tcError = throwError . TcCompilerError
 
@@ -253,7 +258,8 @@ emptyCompiler =
       goals = [],
       codegenStatements = [],
       problems = mempty,
-      solveAttempts = SolveAttempts 1
+      solveAttempts = SolveAttempts 1,
+      qty = Zero
     }
 
 runComp :: Comp a -> Compiler -> IO ()
