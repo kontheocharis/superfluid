@@ -3,6 +3,7 @@
 module Syntax
   ( STm (..),
     STy,
+    VHead (..),
     SPat (..),
     BoundState (..),
     Bounds,
@@ -24,6 +25,9 @@ module Syntax
     VNeu,
     VTm (..),
     VLazy,
+    mapHeadM,
+    vGatherApps,
+    headAsValue,
     VNeuHead (..),
     VLazyHead (..),
     VNorm (..),
@@ -42,7 +46,6 @@ module Syntax
     vGetSpine,
     pattern VVar,
     pattern VMeta,
-    pattern VHead,
   )
 where
 
@@ -61,10 +64,12 @@ import Common
     Name,
     Param (..),
     PiMode,
+    Positive,
+    PrimGlobal,
     Spine,
     Tel,
     Times,
-    unLvl, PrimGlobal, Positive,
+    unLvl,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -147,10 +152,7 @@ data VNeuHead
   | VRigid Lvl
   | VBlockedCase VBlockedCase
   | VPrim PrimGlobal
-  | VUnrepr Closure
-  | VReprFlex Positive MetaVar
-  | VReprRigid Positive Lvl
-  | VReprPrim Positive PrimGlobal
+  | VUnrepr VHead
   deriving (Show)
 
 
@@ -158,13 +160,36 @@ data VLazyHead
   = VDef DefGlobal
   | VLit (Lit VTm)
   | VLazyCase VLazyCase
-  | VReprLit Positive (Lit VTm)
-  | VReprLazyCase Positive VLazyCase
-  | VReprBlockedCase Positive VBlockedCase
-  | VReprDef Positive DefGlobal
-  | VReprCtor Positive (CtorGlobal, [VTm])
-  | VReprData Positive DataGlobal
+  | VRepr VHead
   deriving (Show)
+
+data VHead
+  = VNeuHead VNeuHead
+  | VLazyHead VLazyHead
+  | VDataHead DataGlobal
+  | VCtorHead (CtorGlobal, [VTm])
+  deriving (Show)
+
+mapHeadM :: (Monad m) => (VTm -> m VTm) -> VHead -> m VHead
+mapHeadM f h = do
+  h' <- f (headAsValue h)
+  case vGatherApps h' of
+    Just (h'', Empty) -> return h''
+    _ -> error "mapHeadM: got non-head value"
+
+vGatherApps :: VTm -> Maybe (VSpined VHead)
+vGatherApps (VNorm (VCtor (c, sp))) = Just (VCtorHead c, sp)
+vGatherApps (VNorm (VData (d, sp))) = Just (VDataHead d, sp)
+vGatherApps (VNeu (h, sp)) = Just (VNeuHead h, sp)
+vGatherApps (VLazy (h, sp)) = Just (VLazyHead h, sp)
+vGatherApps _ = Nothing
+
+headAsValue :: VHead -> VTm
+headAsValue (VNeuHead h) = VNeu (h, Empty)
+headAsValue (VLazyHead h) = VLazy (h, Empty)
+headAsValue (VDataHead d) = VNorm (VData (d, Empty))
+headAsValue (VCtorHead c) = VNorm (VCtor (c, Empty))
+
 
 data VNorm
   = VPi PiMode Name VTy Closure
@@ -201,9 +226,6 @@ pattern VVar l = (VRigid l, Empty)
 
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = (VFlex m, Empty)
-
-pattern VHead :: t -> VSpined t
-pattern VHead m = (m, Empty)
 
 type STy = STm
 

@@ -149,7 +149,7 @@ instance Semigroup Positive where
 --   mempty = Negative One
 
 -- | An amount of times to do something, which might be infinite.
-newtype Times = Finite Int deriving (Eq, Ord)
+newtype Times = Finite Int deriving (Eq, Ord, Show)
 
 inc :: Times -> Times
 inc (Finite n) = Finite (n + 1)
