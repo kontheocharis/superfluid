@@ -15,6 +15,7 @@ module Evaluation
     ($$),
     vApp,
     vRepr,
+    vUnrepr,
     vAppNeu,
     evalPat,
     quoteSpine,
@@ -36,6 +37,10 @@ import Common
     Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
+    DefGlobal (..),
+    DataGlobal (..),
+    CtorGlobal (..),
+    PrimGlobal (..),
     Glob (..),
     Has (..),
     HasNameSupply (..),
@@ -411,6 +416,12 @@ vRepr :: (Eval m) => Lvl -> Positive -> VTm -> m VTm
 vRepr l t (VNorm n) = vReprNorm l t n
 vRepr l t (VNeu n) = vReprNeu l t n
 vRepr l t (VLazy n) = vReprLazy l t n
+
+vUnrepr :: (Eval m) => Env VTm -> VTm -> m VTm
+vUnrepr env t = do
+  t' <- quote (envLvl env) t
+  t'' <- close 0 env t'
+  return $ VNeu (VUnrepr t'', Empty)
 
 reprInfSig :: (Eval m) => m ()
 reprInfSig = do

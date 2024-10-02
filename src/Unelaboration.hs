@@ -20,6 +20,10 @@ import Common
     Lvl (..),
     MetaVar,
     Name (..),
+    DefGlobal (..),
+    DataGlobal (..),
+    CtorGlobal (..),
+    PrimGlobal (..),
     Param (..),
     PiMode (..),
     Tag,
@@ -90,9 +94,9 @@ unelabPat ns pat = do
   where
     unelabPat' :: (Unelab m) => STm -> StateT [Name] m PTm
     unelabPat' pat' = case pat' of
-      (SGlobal (CtorGlob (CtorGlobal c)) pp) -> do
+      (SCtor (c, pp)) -> do
         pp' <- lift $ mapM (unelab ns) pp
-        return $ PParams (PName c) pp'
+        return $ PParams (PName c.globalName) pp'
       (SApp m a b) -> do
         a' <- unelabPat' a
         b' <- unelabPat' b
@@ -134,11 +138,16 @@ unelab ns = \case
         )
         cs
   SU -> return PU
-  (SGlobal g pp) -> do
+  SCtor (g, pp) -> do
     pp' <- mapM (unelab ns) pp
-    return $ PParams (PName (globName g)) pp'
-  (SLit l) -> PLit <$> traverse (unelab ns) l
-  (SRepr m t) -> PRepr m <$> unelab ns t
+    return $ PParams (PName g.globalName) pp'
+  SDef g -> return $ PName g.globalName
+  SData g -> return $ PName g.globalName
+  SPrim g -> return $ PName g.globalName
+  SLit l -> PLit <$> traverse (unelab ns) l
+  SRepr t -> PRepr <$> unelab ns t
+  SUnrepr t -> PUnrepr <$> unelab ns t
+
 
 unelabTel :: (Unelab m) => [Name] -> Tel STm -> m (Tel PTm)
 unelabTel _ Empty = return Empty

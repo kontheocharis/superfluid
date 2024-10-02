@@ -8,6 +8,10 @@ import Common
     Has (..),
     Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
+    DefGlobal (..),
+    DataGlobal (..),
+    CtorGlobal (..),
+    PrimGlobal (..),
     Name (Name),
     PiMode (Explicit),
     Spine,
@@ -150,8 +154,10 @@ generateExpr t@((SApp {})) = do
   a <- generateExpr subject
   args' <- mapSpineM generateExpr args
   return $ jsApp a args'
-generateExpr (SGlobal s@(PrimGlob _) _) = return $ jsGlobal (globName s)
-generateExpr (SGlobal s _) = return $ jsGlobal (globName s)
+generateExpr (SPrim s) = return $ jsGlobal s.globalName
+generateExpr (SCtor (s, _)) = return $ jsGlobal s.globalName
+generateExpr (SData s) = return $ jsGlobal s.globalName
+generateExpr (SDef s) = return $ jsGlobal s.globalName
 generateExpr (SVar v) = jsVar v
 generateExpr (SCase c) = do
   sub <- generateExpr c.subject
@@ -182,7 +188,8 @@ generateExpr ((SLit (StringLit s))) = return $ jsStringLit s
 generateExpr ((SLit (NatLit i))) = return $ jsIntLit (fromIntegral i)
 generateExpr ((SLit (FinLit i _))) = return $ jsIntLit (fromIntegral i)
 generateExpr ((SLit (CharLit c))) = return $ jsCharLit c
-generateExpr ((SRepr _ _)) = error "Found repr in generateExpr"
+generateExpr ((SRepr _)) = error "Found repr in generateExpr"
+generateExpr ((SUnrepr _)) = error "Found unrepr in generateExpr"
 
 intToNat :: Int -> JsExpr
 intToNat = JsExpr . show

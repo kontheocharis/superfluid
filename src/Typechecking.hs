@@ -76,7 +76,7 @@ import Common
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible, mapSpineM, mapSpine, Logger (msg),
+    pattern Possible, mapSpineM, mapSpine, Logger (msg), Positive,
   )
 import Context
   ( Ctx (..),
@@ -115,7 +115,6 @@ import Evaluation
     quote,
     quotePat,
     resolve,
-    unfoldDefs,
     vApp,
     vCase,
     vRepr,
@@ -155,8 +154,6 @@ import Syntax
     STm (..),
     STy,
     Sub,
-    VHead (VFlex, VGlobal, VRigid),
-    VNeu (VApp, VCaseApp, VReprApp),
     VPatB (..),
     VTm (..),
     VTy,
@@ -169,10 +166,7 @@ import Syntax
     sPis,
     uniqueSLams,
     vGetSpine,
-    pattern VGlob,
-    pattern VGlobE,
-    pattern VRepr,
-    pattern VVar, Case (..), VCase,
+    pattern VVar, Case (..), VNorm (..), WTm (..),
   )
 import Unelaboration (Unelab)
 
@@ -393,7 +387,7 @@ insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- force ty
   case f of
-    VPi Implicit _ _ b -> do
+    WNorm (VPi Implicit _ _ b) -> do
       (a, va) <- freshMetaOrPatBind
       ty' <- b $$ [va]
       insertFull (SApp Implicit tm a, ty')
@@ -458,6 +452,11 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
+vWhnfHere :: (Tc m) => VTm -> m VTm
+vWhnfHere t = do
+  e <- accessCtx (\c -> c.env)
+  vWhnf e t
+
 ifForcePiType ::
   (Tc m) =>
   PiMode ->
@@ -497,10 +496,15 @@ checkPatBind x ty = do
     )
   return (SVar (Idx 0), ty)
 
-reprHere :: (Tc m) => Times -> VTm -> m VTm
+reprHere :: (Tc m) => Positive -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
+
+unreprHere :: (Tc m) => VTm -> m VTm
+unreprHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  vRepr l Negative t
 
 name :: (Tc m) => Name -> m (STm, VTy)
 name n =
@@ -614,23 +618,29 @@ piTy m x a b = do
   (b', _) <- enterCtx (bind x av) $ b (Check VU)
   return (SPi m x a' b', VU)
 
-repr :: (Tc m) => Mode -> Times -> Child m -> m (STm, VTy)
-repr mode m t = do
+repr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
+repr mode t = do
   forbidPat
   case mode of
-    Check ty@(VNeu (VRepr m' t')) | m == m' -> do
-      (tc, _) <- t (Check (VNeu t'))
-      return (SRepr m tc, ty)
-    Check ty | m < mempty -> do
-      (t', ty') <- t Infer >>= insert
-      reprTy <- reprHere (inv m) ty
-      unifyHere reprTy ty'
-      return (SRepr m t', ty)
-    Check ty -> checkByInfer (repr Infer m t) ty
+    Check ty -> checkByInfer (repr Infer t) ty
     Infer -> do
       (t', ty) <- t Infer
       reprTy <- reprHere m ty
       return (SRepr m t', reprTy)
+
+unrepr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
+unrepr mode t = do
+  forbidPat
+  case mode of
+    Check ty -> do
+      (t', ty') <- t Infer >>= insert
+      reprTy <- reprHere (inv m) ty
+      unifyHere reprTy ty'
+      return (SRepr m t', ty)
+    Infer -> do
+      (t', ty) <- t Infer
+      reprTy <- reprHere m ty
+      return (SUnrepr t', reprTy)
 
 checkByInfer :: (Tc m) => m (STm, VTy) -> VTy -> m (STm, VTy)
 checkByInfer t ty = do
