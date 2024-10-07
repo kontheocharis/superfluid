@@ -407,7 +407,8 @@ insertFull (tm, ty) = do
   m <- pretty ty
   msg $ " Getting whnf for " ++ m
   f <- unfoldHere ty
-  msg " Got whnf "
+  f' <- pretty f
+  msg $ " Got whnf " ++ f'
   case f of
     VNorm (VPi Implicit _ _ b) -> do
       (a, va) <- freshMetaOrPatBind
@@ -482,7 +483,12 @@ unfoldLazyHere (n, sp) = do
 unfoldHere :: (Tc m) => VTm -> m VTm
 unfoldHere t = do
   l <- accessCtx (\c -> c.lvl)
-  vUnfold l t
+  t' <- pretty t
+  msg $ "Trying to unfold " ++  t'
+  res <- vUnfold l t
+  res' <- pretty res
+  msg $ "Unfolded to " ++  res'
+  return res
 
 ifForcePiType ::
   (Tc m) =>
