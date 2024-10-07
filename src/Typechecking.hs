@@ -403,7 +403,10 @@ freshMetaOrPatBind =
 
 insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
+  m <- pretty ty
+  msg $ " Getting whnf for " ++ m
   f <- whnfHere ty
+  msg " Got whnf "
   case f of
     Just (WNorm (VPi Implicit _ _ b)) -> do
       (a, va) <- freshMetaOrPatBind
@@ -640,10 +643,14 @@ repr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
 repr mode t = do
   forbidPat
   case mode of
-    Check ty -> checkByInfer (repr Infer t) ty
+    Check ty -> do
+      msg "Checking"
+      checkByInfer (repr Infer t) ty
     Infer -> do
       (t', ty) <- t Infer
+      msg $ "Inferred"
       reprTy <- reprHere 1 ty
+      msg $ "Represented"
       return (SRepr t', reprTy)
 
 unrepr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
@@ -662,7 +669,9 @@ unrepr mode t = do
 
 checkByInfer :: (Tc m) => m (STm, VTy) -> VTy -> m (STm, VTy)
 checkByInfer t ty = do
+  msg "Inserting"
   (t', ty') <- t >>= insert
+  msg "Unifying"
   unifyHere ty ty'
   return (t', ty)
 
@@ -865,7 +874,11 @@ reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> 
 reprItem te getGlob addGlob ts r = do
   ty <- getGlob
   (r', _) <- enterTel te $ do
-    r (Check ty)
+    ty' <- pretty ty
+    msg $ "Checking repr item: " ++ ty'
+    x <- r (Check ty)
+    msg $ "Checked repr item"
+    return x
   vr <- closeHere (length te) r'
   modify (addGlob vr ts)
   return r'
@@ -886,6 +899,7 @@ reprDataItem dat ts c = do
 reprCtorItem :: (Tc m) => Tel STm -> CtorGlobal -> Set Tag -> Child m -> m ()
 reprCtorItem te ctor ts c = do
   ci <- access (getCtorGlobal ctor)
+  msg $ "repr ctor " ++ show (ctor.globalName)
   _ <-
     reprItem
       te
@@ -893,6 +907,7 @@ reprCtorItem te ctor ts c = do
       (addCtorRepr ctor)
       ts
       c
+  msg $ "repr ctor done" ++ show (ctor.globalName)
   return ()
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
@@ -1336,18 +1351,30 @@ unify t1 t2 = do
   msg $ "unify: " ++ pt1 ++ " =? " ++ pt2
   unifyForced t1' t2'
 
+etaConvert :: (Tc m) => VTm -> PiMode -> Closure -> m CanUnify
+etaConvert t m c = do
+  l <- getLvl
+  x <- evalInOwnCtx l c
+  x' <- vApp t (S.singleton (Arg m (VNeu (VVar l))))
+  enterTypelessClosure c $ unify x x'
+
 unifyForced :: (Tc m) => VTm -> VTm -> m CanUnify
 unifyForced t1 t2 = case (t1, t2) of
-  (VNorm n1, VNorm n2) -> unifyNorm n1 n2
+  (VNorm (VLam m _ c), VNorm (VLam m' _ c')) | m == m' -> unifyClosure c c'
+  (t, VNorm (VLam m' _ c')) -> etaConvert t m' c'
+  (VNorm (VLam m _ c), t) -> etaConvert t m c
+  (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
+  (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifySpines sp sp' \/ iDontKnow
+  (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
+  (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
   (VLazy l1, VLazy l2) -> unifyLazy l1 l2
-  (VNeu n1, VNeu n2) -> unifyNeu n1 n2
+  (VNeu n1, VNeu n2) -> unifyNeuRest n1 n2
   (VLazy l, t) -> unifyLazyWithTerm l t
   (t, VLazy l) -> unifyLazyWithTerm l t
   _ -> return $ No [Mismatching t1 t2]
 
-unifyNorm :: (Tc m) => VNorm -> VNorm -> m CanUnify
-unifyNorm n1 n2 = case (n1, n2) of
-  (VLam m _ c, VLam m' _ c') | m == m' -> unifyClosure c c'
+unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
+unifyNormRest n1 n2 = case (n1, n2) of
   (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
   (VU, VU) -> return Yes
   (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
@@ -1363,11 +1390,8 @@ unifyLazy (n1, sp1) (n2, sp2) = case (n1, n2) of
   (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2') /\ unifySpines sp1 sp2
   _ -> unfoldLazyAndUnify (n1, sp1) (n2, sp2)
 
-unifyNeu :: (Tc m) => VNeu -> VNeu -> m CanUnify
-unifyNeu (n1, sp1) (n2, sp2) = case (n1, n2) of
-  (VFlex x, VFlex x') | x == x' -> unifySpines sp1 sp2 \/ iDontKnow
-  (VFlex x, _) -> unifyFlex x sp1 (VNeu (n2, sp2))
-  (_, VFlex x') -> unifyFlex x' sp2 (VNeu (n1, sp1))
+unifyNeuRest :: (Tc m) => VNeu -> VNeu -> m CanUnify
+unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
   (VRigid x, VRigid x') | x == x' -> unifySpines sp1 sp2 \/ iDontKnow
   (VBlockedCase c1, VBlockedCase c2) -> unifyCases VNeu c1 c2 /\ unifySpines sp1 sp2
   (VPrim p1, VPrim p2) | p1 == p2 -> unifySpines sp1 sp2

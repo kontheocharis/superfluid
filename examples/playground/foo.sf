@@ -1,10 +1,11 @@
 
 def main : IO () {
-  if nat-eq 1 2 {
-    io-return tt
-  } else if nat-eq 2 3 {
-    io-return tt
-  } else {
-    panic "1 is not equal to 2"
-  }
+  ?main
+  -- if nat-eq 1 2 {
+  --   io-return tt
+  -- } else if nat-eq 2 3 {
+  --   io-return tt
+  -- } else {
+  --   panic "1 is not equal to 2"
+  -- }
 }

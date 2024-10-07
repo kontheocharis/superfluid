@@ -144,14 +144,19 @@ vAppNeu (a, sp) sp' = (a, sp >< sp')
 vAppLazy :: VLazy -> Spine VTm -> VLazy
 vAppLazy (a, sp) u = (a, sp >< u)
 
-vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
-vApp a Empty = return a
-vApp (VNorm (VLam _ _ c)) (Arg _ u :<| us) = do
+vAppNorm :: (Eval m) => VNorm -> Spine VTm -> m VTm
+vAppNorm ((VLam _ _ c)) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
+vAppNorm ((VData (n, us))) u = return . VNorm $ VData (n, us >< u)
+vAppNorm ((VCtor (n, us))) u = return . VNorm $ VCtor (n, us >< u)
+vAppNorm a b = error $ "impossible application: " ++ show a ++ " applied to " ++ show b
+
+vApp :: (Eval m) => VTm -> Spine VTm -> m VTm
+vApp a Empty = return a
 vApp (VNeu n) u = return . VNeu $ vAppNeu n u
 vApp (VLazy n) u = return . VLazy $ vAppLazy n u
-vApp a b = error $ "impossible application: " ++ show a ++ " applied to " ++ show b
+vApp (VNorm n) u = vAppNorm n u
 
 uniqueVLams :: (Eval m) => [PiMode] -> Closure -> m VTm
 uniqueVLams ms t = do
@@ -177,6 +182,14 @@ vMatch (VNorm (VCtor ((CtorGlobal c, _), ps))) (VNorm (VCtor ((CtorGlobal c', _)
         []
         (S.zip ps xs)
 vMatch _ _ = Nothing
+
+vWhnfChange :: (Eval m) => Lvl -> VTm -> m (Maybe WTm)
+vWhnfChange l x = do
+  x' <- force x
+  case x' of
+    VNorm _ -> return Nothing
+    VNeu _ -> return Nothing
+    VLazy n -> vUnfoldLazy l n
 
 vWhnf :: (Eval m) => Lvl -> VTm -> m (Maybe WTm)
 vWhnf l x = do
@@ -212,7 +225,7 @@ vUnfoldLazyHead l = \case
         vWhnf l c'
       Nothing -> return Nothing
   VRepr h -> do
-    h' <- vWhnf l (headAsValue h)
+    h' <- vWhnfChange l (headAsValue h)
     case h' of
       Just t -> do
         t' <- vRepr l 1 (weakAsValue t)
@@ -400,7 +413,7 @@ vReprNeu l i (n, sp) = do
   sp' <- mapSpineM (vRepr l i) sp
   case n of
     VUnrepr x -> vApp (headAsValue x) sp'
-    _ -> return $ VLazy (VRepr (VNeuHead n), sp)
+    _ -> return $ VLazy (VRepr (VNeuHead n), sp')
 
 vRepr :: (Eval m) => Lvl -> Int -> VTm -> m VTm
 vRepr l i (VNorm n) = vReprNorm l i n

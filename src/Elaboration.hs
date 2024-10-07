@@ -26,7 +26,7 @@ import Common
     Times (..),
     mapSpine,
     unName,
-    pattern Possible,
+    pattern Possible, Logger (..),
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
@@ -229,8 +229,11 @@ elabDataRep r = do
     Just (DataInfo info) -> do
       let target' = pLams sp (PUnrepr r.target)
       let dat = DataGlobal h
+      msg $ "Checking data representation for " ++ show h
       te <- reprDataItem dat r.tags (elab target')
+      msg $ "Checking ctor representations for " ++ show h
       mapM_ (elabCtorRep te) r.ctors
+      msg $ "Checking case representations for " ++ show h
       elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
 
