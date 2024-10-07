@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Evaluation
@@ -15,14 +16,14 @@ module Evaluation
     ($$),
     vApp,
     vRepr,
-    vUnrepr,
     vAppNeu,
     evalPat,
     quoteSpine,
     ensureIsCtor,
     vLams,
     vCase,
-    vReprTel,
+    vWhnf,
+    vUnfoldLazy,
     reprInfSig,
     uniqueVLams,
     evalInOwnCtx,
@@ -38,9 +39,6 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
-    DataGlobal (..),
-    CtorGlobal (..),
-    PrimGlobal (..),
     Glob (..),
     Has (..),
     HasNameSupply (..),
@@ -52,11 +50,13 @@ import Common
     Param (..),
     PiMode (..),
     Positive (..),
+    PrimGlobal (..),
     Spine,
     Tag (..),
     Tel,
     composeN,
     composeNM,
+    composeZ,
     lvlToIdx,
     mapSpine,
     mapSpineM,
@@ -101,6 +101,7 @@ import Syntax
     SPat (..),
     STm (..),
     VBlockedCase,
+    VHead (..),
     VLazy,
     VLazyCase,
     VLazyHead (..),
@@ -112,14 +113,17 @@ import Syntax
     VTm (..),
     VTy,
     WTm (WNeu, WNorm),
+    headAsValue,
     mapClosureM,
+    mapHeadM,
     sAppSpine,
     sGlobWithParams,
     sLams,
+    sReprTimes,
     uniqueSLams,
     weakAsValue,
     pattern VMeta,
-    pattern VVar, VHead (..), headAsValue,
+    pattern VVar,
   )
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
@@ -211,21 +215,21 @@ vUnfoldLazyHead l = \case
     h' <- vWhnf l (headAsValue h)
     case h' of
       Just t -> do
-        t' <- vRepr l (weakAsValue t)
+        t' <- vRepr l 1 (weakAsValue t)
         vWhnf l t'
       Nothing -> return Nothing
 
-vWhnfReprLazyHead :: (Eval m) => Lvl -> VLazyHead -> m (Maybe WTm)
-vWhnfReprLazyHead l h = case h of
+vWhnfReprLazyHead :: (Eval m) => Lvl -> Int -> VLazyHead -> m (Maybe WTm)
+vWhnfReprLazyHead l i h = case h of
   VLit n -> do
-    nr <- vRepr l (VNorm (unfoldLit n))
+    nr <- vRepr l i (VNorm (unfoldLit n))
     vWhnf l nr
   VLazyCase c -> do
     s' <- vUnfoldLazy l c.subject
     case s' of
       Just s'' -> do
         c' <- vCase (c {subject = weakAsValue s''})
-        cr <- vRepr l c'
+        cr <- vRepr l i c'
         vWhnf l cr
       Nothing -> vWhnfReprCase l vLazyCaseToSpine c
   VDef d -> vWhnfReprGlob l (DefGlob d) []
@@ -300,8 +304,8 @@ preCompose (Closure n env t) f =
           (f (SVar (Idx 0)))
       )
 
-reprClosure :: Closure -> Closure
-reprClosure t = preCompose (postCompose SRepr t) SUnrepr
+reprClosure :: Int -> Closure -> Closure
+reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))
 
 sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
 sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const Explicit) p.binds)) True
@@ -360,52 +364,48 @@ mapGlobalInfoM f i = case i of
   DefInfo d -> DefInfo <$> mapDefGlobalInfoM f d
   PrimInfo p -> PrimInfo <$> mapPrimGlobalInfoM f p
 
-
-vReprTel :: (Eval m) => Lvl -> Positive -> Tel STm -> m (Tel STm)
-vReprTel _ _ Empty = return Empty
-vReprTel l m (Param m' n a :<| xs) = do
-  let a' = (postCompose (composeN m SRepr) (Closure 0 [] a)).body
-  xs' <- vReprTel l m xs
-  let xs'' = fmap (fmap (\x -> (composeN m reprClosure (Closure 0 [] x)).body)) xs'
-  return $ Param m' n a' :<| xs''
-
-vReprNorm :: (Eval m) => Lvl -> VNorm -> m VTm
-vReprNorm l (VPi e v ty t) = do
-  ty' <- vRepr l ty
-  let t' = reprClosure t
+vReprNorm :: (Eval m) => Lvl -> Int -> VNorm -> m VTm
+vReprNorm l i (VPi e v ty t) = do
+  ty' <- vRepr l i ty
+  let t' = reprClosure i t
   return . VNorm $ VPi e v ty' t'
-vReprNorm _ (VLam e v t) = do
-  let t' = reprClosure t
+vReprNorm _ i (VLam e v t) = do
+  let t' = reprClosure i t
   return . VNorm $ VLam e v t'
-vReprNorm _ VU = return (VNorm VU)
-vReprNorm l (VData (d, sp)) = do
-  sp' <- mapSpineM (vRepr l) sp
+vReprNorm _ _ VU = return (VNorm VU)
+vReprNorm l i (VData (d, sp)) | i > 0 = do
+  sp' <- mapSpineM (vRepr l i) sp
   return $ VLazy (VRepr (VDataHead d), sp')
-vReprNorm l (VCtor ((c, pp), sp)) = do
-  pp' <- mapM (vRepr l) pp
-  sp' <- mapSpineM (vRepr l) sp
-  return $ VLazy (VRepr (VCtorHead (c, pp')), sp')
+vReprNorm l i (VCtor ((c, pp), sp))
+  | i > 0 = do
+      pp' <- mapM (vRepr l i) pp
+      sp' <- mapSpineM (vRepr l i) sp
+      return $ VLazy (VRepr (VCtorHead (c, pp')), sp')
+  | otherwise = do
+      pp' <- mapM (vRepr l i) pp
+      sp' <- mapSpineM (vRepr l i) sp
+      return $ VNeu (VUnrepr (VCtorHead (c, pp')), sp')
+vReprNorm l i (VData (d, pp)) = do
+  pp' <- mapSpineM (vRepr l i) pp
+  return $ VNorm (VData (d, pp'))
 
-vReprLazy :: (Eval m) => Lvl -> VLazy -> m VTm
-vReprLazy l (n, sp) = do
-  sp' <- mapSpineM (vRepr l) sp
+vReprLazy :: (Eval m) => Lvl -> Int -> VLazy -> m VTm
+vReprLazy l i (n, sp) = do
+  sp' <- mapSpineM (vRepr l i) sp
   let n' = VLazyHead n
   return $ VLazy (VRepr n', sp')
 
-vReprNeu :: (Eval m) => Lvl -> VNeu -> m VTm
-vReprNeu l (n, sp) = do
-  sp' <- mapSpineM (vRepr l) sp
+vReprNeu :: (Eval m) => Lvl -> Int -> VNeu -> m VTm
+vReprNeu l i (n, sp) = do
+  sp' <- mapSpineM (vRepr l i) sp
   case n of
-    VUnrepr x -> vApp x sp'
+    VUnrepr x -> vApp (headAsValue x) sp'
     _ -> return $ VLazy (VRepr (VNeuHead n), sp)
 
-vRepr :: (Eval m) => Lvl -> VTm -> m VTm
-vRepr l (VNorm n) = vReprNorm l n
-vRepr l (VNeu n) = vReprNeu l n
-vRepr l (VLazy n) = vReprLazy l n
-
-vUnrepr :: VTm -> VTm
-vUnrepr t = VNeu (VUnrepr t, Empty)
+vRepr :: (Eval m) => Lvl -> Int -> VTm -> m VTm
+vRepr l i (VNorm n) = vReprNorm l i n
+vRepr l i (VNeu n) = vReprNeu l i n
+vRepr l i (VLazy n) = vReprLazy l i n
 
 reprInfSig :: (Eval m) => m ()
 reprInfSig = do
@@ -559,10 +559,10 @@ eval _ (SPrim p) = do
 eval env (SVar (Idx i)) = return $ env !! i
 eval env (SRepr t) = do
   t' <- eval env t
-  vRepr (envLvl env) One t'
+  vRepr (envLvl env) 1 t'
 eval env (SUnrepr t) = do
-  t' <- close 0 env t
-  return $ VNeu (VUnrepr t', Empty)
+  t' <- eval env t
+  vRepr (envLvl env) (-1) t'
 
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
@@ -624,10 +624,10 @@ quoteCaseSpine quoteSubject l (Case dat pp v i r cs) sp = do
   i' <- mapSpineM (quote l) i
   quoteSpine l (SCase (Case dat pp' v' i' r' cs')) sp
 
-quoteReprSpine :: (Eval m) => Lvl -> Positive -> VTm -> Spine VTm -> m STm
+quoteReprSpine :: (Eval m) => Lvl -> Int -> VTm -> Spine VTm -> m STm
 quoteReprSpine l t n sp = do
   m' <- quote l n
-  let hd = composeN t SRepr m'
+  let hd = composeZ t SRepr SUnrepr m'
   quoteSpine l hd sp
 
 quoteLazy :: (Eval m) => Lvl -> VLazy -> m STm
@@ -648,7 +648,7 @@ quoteLazy l (n, sp) = do
       t' <- traverse (quote l) t
       quoteSpine l (SLit t') sp
     VLazyCase c -> quoteCaseSpine quoteLazy l c sp
-    VRepr n -> quoteReprSpine l t n sp
+    VRepr n' -> quoteReprSpine l 1 (headAsValue n') sp
 
 quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
 quoteNeu l (n, sp) = case n of
@@ -656,10 +656,7 @@ quoteNeu l (n, sp) = case n of
   VRigid l' -> quoteSpine l (SVar (lvlToIdx l l')) sp
   VBlockedCase c -> quoteCaseSpine quoteNeu l c sp
   VPrim p -> quoteSpine l (SPrim p) sp
-  VUnrepr c -> do
-    c' <- c $$ []
-    cq <- quote l c'
-    quoteSpine l (SUnrepr cq) sp
+  VUnrepr n' -> quoteReprSpine l (-1) (headAsValue n') sp
 
 quoteNorm :: (Eval m) => Lvl -> VNorm -> m STm
 quoteNorm l n = case n of

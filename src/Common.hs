@@ -34,7 +34,9 @@ module Common
     mapSpineM,
     telWithNames,
     composeN,
+    composeZ,
     composeNM,
+    composeZM,
     MetaVar (..),
     Glob (..),
     Tag (..),
@@ -123,9 +125,17 @@ composeN :: Positive -> (a -> a) -> a -> a
 composeN One f = f
 composeN (OnePlus n) f = f . composeN n f
 
+composeZ :: Int -> (a -> a) -> (a -> a) -> a -> a
+composeZ 0 _ _ = id
+composeZ n f g = if n > 0 then f . composeZ (n - 1) f g else g . composeZ (n + 1) f g
+
 composeNM :: (Monad m) => Positive -> (a -> m a) -> a -> m a
 composeNM One f = f
 composeNM (OnePlus n) f = f >=> composeNM n f
+
+composeZM :: (Monad m) => Int -> (a -> m a) -> (a -> m a) -> a -> m a
+composeZM 0 _ _ = return
+composeZM n f g = if n > 0 then f >=> composeZM (n - 1) f g else g >=> composeZM (n + 1) f g
 
 -- data Negative = Negative Positive deriving (Eq, Show)
 

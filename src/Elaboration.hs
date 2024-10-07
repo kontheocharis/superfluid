@@ -31,6 +31,7 @@ import Common
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import qualified Data.Sequence as S
+import Debug.Trace (traceM)
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
@@ -51,7 +52,7 @@ import Presyntax
     toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (STm (..), STy, VTm (..), VTy)
+import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -77,9 +78,9 @@ import Typechecking
     reprDataItem,
     reprDefItem,
     univ,
+    unrepr,
     wildPat,
   )
-import Debug.Trace (traceM)
 
 -- Presyntax exists below here
 
@@ -137,8 +138,8 @@ elab p mode = case (p, mode) of
         n <- uniqueName
         lam md m n (elab (PCase (PName n) Nothing [Possible p' t]))
   -- Lambda insertion
-  (t, Check (VPi Implicit x' a b)) -> insertLam x' a b (elab t)
-  (PUnit, Check ty@VU) -> elab (pKnownData KnownUnit []) (Check ty)
+  (t, Check (VNorm (VPi Implicit x' a b))) -> insertLam x' a b (elab t)
+  (PUnit, Check ty@(VNorm VU)) -> elab (pKnownData KnownUnit []) (Check ty)
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
   (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
@@ -148,7 +149,8 @@ elab p mode = case (p, mode) of
       Right p' -> do
         n <- uniqueName
         letIn md n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
-  (PRepr m t, md) -> repr md m (elab t)
+  (PRepr t, md) -> repr md (elab t)
+  (PUnrepr t, md) -> unrepr md (elab t)
   (PHole n, md) -> meta md (Just n)
   (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
   (PLambdaCase r cs, md) -> do
@@ -225,7 +227,7 @@ elabDataRep r = do
   g <- access (lookupGlobal h)
   case g of
     Just (DataInfo info) -> do
-      let target' = pLams sp (PRepr (Finite (-1)) r.target)
+      let target' = pLams sp (PUnrepr r.target)
       let dat = DataGlobal h
       te <- reprDataItem dat r.tags (elab target')
       mapM_ (elabCtorRep te) r.ctors
@@ -238,7 +240,7 @@ elabCtorRep te r = do
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
-      let target' = pLams sp (PRepr (Finite (-1)) r.target)
+      let target' = pLams sp (PRepr r.target)
       reprCtorItem te (CtorGlobal h) r.tags (elab target')
     _ -> elabError (ExpectedCtorGlobal h)
 
@@ -252,7 +254,7 @@ elabCaseRep te dat info r = do
   let target' =
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
-          (PRepr (Finite (-1)) r.target)
+          (PRepr r.target)
   reprCaseItem te dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()

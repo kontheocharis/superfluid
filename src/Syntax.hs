@@ -28,6 +28,7 @@ module Syntax
     mapHeadM,
     vGatherApps,
     headAsValue,
+    sReprTimes,
     VNeuHead (..),
     VLazyHead (..),
     VNorm (..),
@@ -170,6 +171,7 @@ data VHead
   | VCtorHead (CtorGlobal, [VTm])
   deriving (Show)
 
+
 mapHeadM :: (Monad m) => (VTm -> m VTm) -> VHead -> m VHead
 mapHeadM f h = do
   h' <- f (headAsValue h)
@@ -189,7 +191,6 @@ headAsValue (VNeuHead h) = VNeu (h, Empty)
 headAsValue (VLazyHead h) = VLazy (h, Empty)
 headAsValue (VDataHead d) = VNorm (VData (d, Empty))
 headAsValue (VCtorHead c) = VNorm (VCtor (c, Empty))
-
 
 data VNorm
   = VPi PiMode Name VTy Closure
@@ -252,6 +253,11 @@ data STm
   | SRepr STm
   | SUnrepr STm
   deriving (Show)
+
+sReprTimes :: Int -> STm -> STm
+sReprTimes 0 t = t
+sReprTimes n t | n > 0 = SRepr (sReprTimes (n - 1) t)
+               | otherwise = SUnrepr (sReprTimes (n + 1) t)
 
 -- @@Todo: case and constructor params should be (Lvl, [VTm]) instead.
 -- Otherwise we are doing lots of unnecessary work.
