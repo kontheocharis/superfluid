@@ -23,6 +23,7 @@ module Evaluation
     vLams,
     vCase,
     vWhnf,
+    vUnfold,
     vUnfoldLazy,
     reprInfSig,
     uniqueVLams,
@@ -183,99 +184,94 @@ vMatch (VNorm (VCtor ((CtorGlobal c, _), ps))) (VNorm (VCtor ((CtorGlobal c', _)
         (S.zip ps xs)
 vMatch _ _ = Nothing
 
-vWhnfChange :: (Eval m) => Lvl -> VTm -> m (Maybe WTm)
-vWhnfChange l x = do
+vUnfold :: (Eval m) => Lvl -> VTm -> m VTm
+vUnfold l x = do
+  x' <- vWhnf l x
+  case x' of
+    Just x'' -> return x''
+    Nothing -> force x
+
+vWhnf :: (Eval m) => Lvl -> VTm -> m (Maybe VTm)
+vWhnf l x = do
   x' <- force x
   case x' of
     VNorm _ -> return Nothing
     VNeu _ -> return Nothing
     VLazy n -> vUnfoldLazy l n
 
-vWhnf :: (Eval m) => Lvl -> VTm -> m (Maybe WTm)
-vWhnf l x = do
-  x' <- force x
-  case x' of
-    VNorm n -> return . Just $ WNorm n
-    VNeu n -> return . Just $ WNeu n
-    VLazy n -> vUnfoldLazy l n
-
-vUnfoldLazy :: (Eval m) => Lvl -> VLazy -> m (Maybe WTm)
+vUnfoldLazy :: (Eval m) => Lvl -> VLazy -> m (Maybe VTm)
 vUnfoldLazy l (n, sp) = do
   n' <- vUnfoldLazyHead l n
   case n' of
-    Just m -> do
-      res <- vApp (weakAsValue m) sp
-      vWhnf l res
+    Just m -> Just <$> vApp m sp
     Nothing -> return Nothing
 
--- Returns: Just t if t is a weak head normal form, Nothing otherwise.
-vUnfoldLazyHead :: (Eval m) => Lvl -> VLazyHead -> m (Maybe WTm)
+vUnfoldLazyHead :: (Eval m) => Lvl -> VLazyHead -> m (Maybe VTm)
 vUnfoldLazyHead l = \case
-  VDef d -> do
-    d' <- access (unfoldDef d)
-    case d' of
-      Just t -> vWhnf l t
-      _ -> return Nothing
-  VLit n -> return $ Just (WNorm (unfoldLit n))
+  VDef d -> access (unfoldDef d)
+  VLit n -> return $ Just (VNorm (unfoldLit n))
   VLazyCase c -> do
     s <- vUnfoldLazy l c.subject
     case s of
-      Just s' -> do
-        c' <- vCase (c {subject = weakAsValue s'})
-        vWhnf l c'
+      Just s' -> Just <$> vCase (c {subject = s'})
       Nothing -> return Nothing
   VRepr h -> do
-    h' <- vWhnfChange l (headAsValue h)
+    h' <- vWhnf l (headAsValue h)
     case h' of
-      Just t -> do
-        t' <- vRepr l 1 (weakAsValue t)
-        vWhnf l t'
-      Nothing -> return Nothing
+      Just t -> Just <$> vRepr l 1 t
+      Nothing -> vWhnfReprHead l 1 h
 
-vWhnfReprLazyHead :: (Eval m) => Lvl -> Int -> VLazyHead -> m (Maybe WTm)
-vWhnfReprLazyHead l i h = case h of
-  VLit n -> do
-    nr <- vRepr l i (VNorm (unfoldLit n))
-    vWhnf l nr
-  VLazyCase c -> do
-    s' <- vUnfoldLazy l c.subject
-    case s' of
-      Just s'' -> do
-        c' <- vCase (c {subject = weakAsValue s''})
-        cr <- vRepr l i c'
-        vWhnf l cr
-      Nothing -> vWhnfReprCase l vLazyCaseToSpine c
-  VDef d -> vWhnfReprGlob l (DefGlob d) []
-  VRepr h' -> do
-    h'' <- vWhnf l (headAsValue h')
-    case h'' of
-      Just t -> vWhnf l (weakAsValue t)
-      Nothing -> return Nothing
+vWhnfReprHead :: (Eval m) => Lvl -> Int -> VHead -> m (Maybe VTm)
+vWhnfReprHead _ 0 _ = return Nothing
+vWhnfReprHead l i h = case h of
+  VNeuHead h' -> vWhnfReprNeuHead h'
+  VLazyHead h' -> vWhnfReprLazyHead h'
+  VDataHead h' -> vWhnfReprGlob (DataGlob h') []
+  VCtorHead (h', pp) -> vWhnfReprGlob (CtorGlob h') pp
+  where
+    vWhnfReprNeuHead :: (Eval m) =>  VNeuHead -> m (Maybe VTm)
+    vWhnfReprNeuHead = \case
+      VFlex _ -> return Nothing
+      VRigid _ -> return Nothing
+      VBlockedCase c -> vWhnfReprCase vBlockedCaseToSpine c
+      VPrim _ -> return Nothing
+      VUnrepr _ | i == 0 -> return Nothing
+      VUnrepr x -> Just <$> vRepr l (i - 1) (headAsValue x)
 
-vWhnfReprCase ::
-  (Eval m) =>
-  Lvl ->
-  (Case n VTm VPatB Closure -> m (Spine VTm)) ->
-  Case n VTm VPatB Closure ->
-  m (Maybe WTm)
-vWhnfReprCase l toSpine c = do
-  d' <- access (getCaseRepr c.dat)
-  case d' of
-    Just t -> do
-      t' <- t $$ map (\a -> a.arg) (toList c.datParams)
-      sp <- toSpine c
-      res <- vApp t' sp
-      vWhnf l res
-    _ -> return Nothing
+    vWhnfReprLazyHead :: (Eval m) =>  VLazyHead -> m (Maybe VTm)
+    vWhnfReprLazyHead = \case
+      VLit n -> Just <$> vRepr l i (VNorm (unfoldLit n))
+      VLazyCase c -> vWhnfReprCase vLazyCaseToSpine c
+      VDef d -> vWhnfReprGlob (DefGlob d) []
+      VRepr _ -> return Nothing
 
-vWhnfReprGlob :: (Eval m) => Lvl -> Glob -> [VTm] -> m (Maybe WTm)
-vWhnfReprGlob l g xs = do
-  d' <- access (getGlobalRepr g)
-  case d' of
-    Just t -> do
-      t' <- t $$ xs
-      vWhnf l t'
-    Nothing -> return Nothing
+    vWhnfReprCase ::
+      (Eval m) =>
+      (Case n VTm VPatB Closure -> m (Spine VTm)) ->
+      Case n VTm VPatB Closure ->
+      m (Maybe VTm)
+    vWhnfReprCase toSpine c
+      | i > 0 = do
+          d' <- access (getCaseRepr c.dat)
+          case d' of
+            Just t -> do
+              t' <- t $$ map (\a -> a.arg) (toList c.datParams)
+              sp <- toSpine c
+              res <- vApp t' sp
+              Just <$> vRepr l i res
+            _ -> return Nothing
+      | otherwise = return Nothing
+
+    vWhnfReprGlob :: (Eval m) =>  Glob -> [VTm] -> m (Maybe VTm)
+    vWhnfReprGlob g xs
+      | i > 0 = do
+          d' <- access (getGlobalRepr g)
+          case d' of
+            Just t -> do
+              res <- t $$ xs
+              Just <$> vRepr l i res
+            Nothing -> return Nothing
+      | otherwise = return Nothing
 
 vCase :: (Eval m) => Case VTm VTm VPatB Closure -> m VTm
 vCase c = do
@@ -377,48 +373,47 @@ mapGlobalInfoM f i = case i of
   DefInfo d -> DefInfo <$> mapDefGlobalInfoM f d
   PrimInfo p -> PrimInfo <$> mapPrimGlobalInfoM f p
 
-vReprNorm :: (Eval m) => Lvl -> Int -> VNorm -> m VTm
-vReprNorm l i (VPi e v ty t) = do
-  ty' <- vRepr l i ty
-  let t' = reprClosure i t
-  return . VNorm $ VPi e v ty' t'
-vReprNorm _ i (VLam e v t) = do
-  let t' = reprClosure i t
-  return . VNorm $ VLam e v t'
-vReprNorm _ _ VU = return (VNorm VU)
-vReprNorm l i (VData (d, sp)) | i > 0 = do
-  sp' <- mapSpineM (vRepr l i) sp
-  return $ VLazy (VRepr (VDataHead d), sp')
-vReprNorm l i (VCtor ((c, pp), sp))
-  | i > 0 = do
-      pp' <- mapM (vRepr l i) pp
-      sp' <- mapSpineM (vRepr l i) sp
-      return $ VLazy (VRepr (VCtorHead (c, pp')), sp')
-  | otherwise = do
-      pp' <- mapM (vRepr l i) pp
-      sp' <- mapSpineM (vRepr l i) sp
-      return $ VNeu (VUnrepr (VCtorHead (c, pp')), sp')
-vReprNorm l i (VData (d, pp)) = do
-  pp' <- mapSpineM (vRepr l i) pp
-  return $ VNorm (VData (d, pp'))
-
-vReprLazy :: (Eval m) => Lvl -> Int -> VLazy -> m VTm
-vReprLazy l i (n, sp) = do
-  sp' <- mapSpineM (vRepr l i) sp
-  let n' = VLazyHead n
-  return $ VLazy (VRepr n', sp')
-
-vReprNeu :: (Eval m) => Lvl -> Int -> VNeu -> m VTm
-vReprNeu l i (n, sp) = do
-  sp' <- mapSpineM (vRepr l i) sp
-  case n of
-    VUnrepr x -> vApp (headAsValue x) sp'
-    _ -> return $ VLazy (VRepr (VNeuHead n), sp')
+vReprNTimes :: Int -> VHead -> VHead
+vReprNTimes i = composeZ i (VLazyHead . VRepr) (VNeuHead . VUnrepr)
 
 vRepr :: (Eval m) => Lvl -> Int -> VTm -> m VTm
-vRepr l i (VNorm n) = vReprNorm l i n
-vRepr l i (VNeu n) = vReprNeu l i n
-vRepr l i (VLazy n) = vReprLazy l i n
+vRepr _ 0 t = return t
+vRepr l i t = case t of
+  VNorm n -> vReprNorm n
+  VNeu n -> vReprNeu n
+  VLazy n -> vReprLazy n
+  where
+    vReprNorm :: (Eval m) => VNorm -> m VTm
+    vReprNorm (VPi e v a b) = do
+      ty' <- vRepr l i a
+      let t' = reprClosure i b
+      return . VNorm $ VPi e v ty' t'
+    vReprNorm (VLam e v a) = do
+      let t' = reprClosure i a
+      return . VNorm $ VLam e v t'
+    vReprNorm VU = return (VNorm VU)
+    vReprNorm (VData (d, sp)) = do
+      sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VDataHead d))) sp'
+    vReprNorm (VCtor ((c, pp), sp)) = do
+      pp' <- mapM (vRepr l i) pp
+      sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VCtorHead (c, pp')))) sp'
+
+    vReprNeu :: (Eval m) => VNeu -> m VTm
+    vReprNeu (n, sp) = do
+      sp' <- mapSpineM (vRepr l i) sp
+      case n of
+        VUnrepr x -> do
+          x' <- vRepr l (i - 1) (headAsValue x)
+          vApp x' sp'
+        _ -> do
+          vApp (headAsValue (vReprNTimes i (VNeuHead n))) sp'
+
+    vReprLazy :: (Eval m) => VLazy -> m VTm
+    vReprLazy (n, sp) = do
+      sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VLazyHead n))) sp'
 
 reprInfSig :: (Eval m) => m ()
 reprInfSig = do
@@ -706,34 +701,34 @@ envLvl env = Lvl (length env)
 
 isTypeFamily :: (Eval m) => Lvl -> VTm -> m Bool
 isTypeFamily l t = do
-  t' <- vWhnf l t
+  t' <- vUnfold l t
   case t' of
-    Just (WNorm (VPi _ _ _ b)) -> do
+    VNorm (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isTypeFamily (nextLvl l) b'
-    Just (WNorm VU) -> return True
+    VNorm VU -> return True
     _ -> return False
 
 isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine ()))
 isCtorTy l d t = do
-  t' <- vWhnf l t
+  t' <- vUnfold l t
   case t' of
-    Just (WNorm (VPi _ _ _ b)) -> do
+    VNorm (VPi _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
-    Just (WNorm (VData (d', sp))) | d == d' -> return (Just (mapSpine (const ()) sp))
+    VNorm (VData (d', sp)) | d == d' -> return (Just (mapSpine (const ()) sp))
     _ -> return Nothing
 
 ifIsData :: (Eval m) => Lvl -> VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
 ifIsData l v a b = do
-  v' <- vWhnf l v
+  v' <- vUnfold l v
   case v' of
-    Just (WNorm (VData (d, sp))) -> a d sp
+    VNorm (VData (d, sp)) -> a d sp
     _ -> b
 
 ensureIsCtor :: (Eval m) => Lvl -> VTm -> CtorGlobal -> m () -> m ()
 ensureIsCtor l v c a = do
-  v' <- vWhnf l v
+  v' <- vUnfold l v
   case v' of
-    Just (WNorm (VCtor ((c', _), _))) | c == c' -> return ()
+    VNorm (VCtor ((c', _), _)) | c == c' -> return ()
     _ -> a

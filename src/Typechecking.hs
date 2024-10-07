@@ -125,6 +125,7 @@ import Evaluation
     vApp,
     vCase,
     vRepr,
+    vUnfold,
     vUnfoldLazy,
     vWhnf,
     ($$),
@@ -405,10 +406,10 @@ insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   m <- pretty ty
   msg $ " Getting whnf for " ++ m
-  f <- whnfHere ty
+  f <- unfoldHere ty
   msg " Got whnf "
   case f of
-    Just (WNorm (VPi Implicit _ _ b)) -> do
+    VNorm (VPi Implicit _ _ b) -> do
       (a, va) <- freshMetaOrPatBind
       ty' <- b $$ [va]
       insertFull (SApp Implicit tm a, ty')
@@ -473,15 +474,15 @@ closeHere n t = do
   e <- accessCtx (\c -> c.env)
   close n e t
 
-unfoldLazyHere :: (Tc m) => VLazy -> m (Maybe WTm)
+unfoldLazyHere :: (Tc m) => VLazy -> m (Maybe VTm)
 unfoldLazyHere (n, sp) = do
   lvl <- getLvl
   vUnfoldLazy lvl (n, sp)
 
-whnfHere :: (Tc m) => VTm -> m (Maybe WTm)
-whnfHere t = do
+unfoldHere :: (Tc m) => VTm -> m VTm
+unfoldHere t = do
   l <- accessCtx (\c -> c.lvl)
-  vWhnf l t
+  vUnfold l t
 
 ifForcePiType ::
   (Tc m) =>
@@ -491,9 +492,9 @@ ifForcePiType ::
   (PiMode -> Name -> VTy -> Closure -> m a) ->
   m a
 ifForcePiType m ty the els = do
-  ty' <- whnfHere ty
+  ty' <- unfoldHere ty
   case ty' of
-    Just (WNorm (VPi m' x a b)) -> do
+    VNorm (VPi m' x a b) -> do
       if m == m'
         then the m' x a b
         else els m' x a b
@@ -525,7 +526,11 @@ checkPatBind x ty = do
 reprHere :: (Tc m) => Int -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
-  vRepr l m t
+  res <- vRepr l m t
+  t' <- pretty t
+  t'' <- pretty res
+  msg $ "Result of REPR " ++ show m ++ " " ++ t' ++ " is " ++ t''
+  return res
 
 name :: (Tc m) => Name -> m (STm, VTy)
 name n =
@@ -659,13 +664,13 @@ unrepr mode t = do
   case mode of
     Check ty -> do
       (t', ty') <- t Infer >>= insert
-      reprTy <- reprHere (-1) ty
+      reprTy <- reprHere 1 ty
       unifyHere reprTy ty'
       return (SUnrepr t', ty)
     Infer -> do
       (t', ty) <- t Infer
-      reprTy <- reprHere (-1) ty
-      return (SUnrepr t', reprTy)
+      unreprTy <- reprHere (-1) ty
+      return (SUnrepr t', unreprTy)
 
 checkByInfer :: (Tc m) => m (STm, VTy) -> VTy -> m (STm, VTy)
 checkByInfer t ty = do
@@ -1367,10 +1372,10 @@ unifyForced t1 t2 = case (t1, t2) of
   (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifySpines sp sp' \/ iDontKnow
   (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
   (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
-  (VLazy l1, VLazy l2) -> unifyLazy l1 l2
   (VNeu n1, VNeu n2) -> unifyNeuRest n1 n2
-  (VLazy l, t) -> unifyLazyWithTerm l t
-  (t, VLazy l) -> unifyLazyWithTerm l t
+  (VLazy l1, VLazy l2) -> unifyLazy l1 l2
+  (VLazy l, t) -> unifyLazyWithTermOr l t iDontKnow
+  (t, VLazy l) -> unifyLazyWithTermOr l t iDontKnow
   _ -> return $ No [Mismatching t1 t2]
 
 unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
@@ -1388,7 +1393,7 @@ unifyLazy (n1, sp1) (n2, sp2) = case (n1, n2) of
   (VLit l1, VLit l2) -> unifyLit l1 l2 /\ unifySpines sp1 sp2
   (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2 /\ unifySpines sp1 sp2
   (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2') /\ unifySpines sp1 sp2
-  _ -> unfoldLazyAndUnify (n1, sp1) (n2, sp2)
+  _ -> unifyLazyWithTermOr (n1, sp1) (VLazy (n2, sp2)) (unifyLazyWithTermOr (n2, sp2) (VLazy (n1, sp1)) iDontKnow)
 
 unifyNeuRest :: (Tc m) => VNeu -> VNeu -> m CanUnify
 unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
@@ -1398,20 +1403,12 @@ unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
   (VUnrepr c1, VUnrepr c2) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
   _ -> return $ No [Mismatching (VNeu (n1, sp1)) (VNeu (n2, sp2))]
 
-unifyLazyWithTerm :: (Tc m) => VLazy -> VTm -> m CanUnify
-unifyLazyWithTerm l t = do
+unifyLazyWithTermOr :: (Tc m) => VLazy -> VTm -> m CanUnify -> m CanUnify
+unifyLazyWithTermOr l t els = do
   l' <- unfoldLazyHere l
   case l' of
-    Just l'' -> unify (weakAsValue l'') t
-    Nothing -> iDontKnow
-
-unfoldLazyAndUnify :: (Tc m) => VLazy -> VLazy -> m CanUnify
-unfoldLazyAndUnify l1 l2 = do
-  t1 <- unfoldLazyHere l1
-  t2 <- unfoldLazyHere l2
-  case (t1, t2) of
-    (Just t1', Just t2') -> unify (weakAsValue t1') (weakAsValue t2')
-    _ -> iDontKnow
+    Just l'' -> unify l'' t
+    Nothing -> els
 
 unifyCases :: (Tc m) => (s -> VTm) -> Case s VTm VPatB Closure -> Case s VTm VPatB Closure -> m CanUnify
 unifyCases f c1 c2 = unify (f c1.subject) (f c2.subject) /\ unifyClauses c1.clauses c2.clauses

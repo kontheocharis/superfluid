@@ -243,7 +243,9 @@ elabCtorRep te r = do
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
-      let target' = pLams sp (PRepr r.target)
+      let target' = pLams sp (PUnrepr r.target)
+      target'' <- pretty target'
+      traceM $ "Target is " ++ target''
       reprCtorItem te (CtorGlobal h) r.tags (elab target')
     _ -> elabError (ExpectedCtorGlobal h)
 
@@ -257,7 +259,7 @@ elabCaseRep te dat info r = do
   let target' =
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
-          (PRepr r.target)
+          (PUnrepr r.target)
   reprCaseItem te dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
