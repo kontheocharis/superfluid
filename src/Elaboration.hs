@@ -23,15 +23,13 @@ import Common
     PiMode (..),
     Spine,
     Tel,
-    Times (..),
     mapSpine,
     unName,
-    pattern Possible, Logger (..),
+    pattern Possible,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import qualified Data.Sequence as S
-import Debug.Trace (traceM)
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
@@ -227,13 +225,10 @@ elabDataRep r = do
   g <- access (lookupGlobal h)
   case g of
     Just (DataInfo info) -> do
-      let target' = pLams sp (PUnrepr r.target)
+      let target' = pLams sp r.target
       let dat = DataGlobal h
-      msg $ "Checking data representation for " ++ show h
       te <- reprDataItem dat r.tags (elab target')
-      msg $ "Checking ctor representations for " ++ show h
       mapM_ (elabCtorRep te) r.ctors
-      msg $ "Checking case representations for " ++ show h
       elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
 
@@ -243,9 +238,7 @@ elabCtorRep te r = do
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
-      let target' = pLams sp (PUnrepr r.target)
-      target'' <- pretty target'
-      traceM $ "Target is " ++ target''
+      let target' = pLams sp r.target
       reprCtorItem te (CtorGlobal h) r.tags (elab target')
     _ -> elabError (ExpectedCtorGlobal h)
 
@@ -259,7 +252,7 @@ elabCaseRep te dat info r = do
   let target' =
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
-          (PUnrepr r.target)
+          r.target
   reprCaseItem te dat r.tags (elab target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()

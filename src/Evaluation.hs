@@ -148,9 +148,7 @@ vAppLazy (a, sp) u = (a, sp >< u)
 vAppNorm :: (Eval m) => VNorm -> Spine VTm -> m VTm
 vAppNorm ((VLam _ _ c)) (Arg _ u :<| us) = do
   c' <- c $$ [u]
-  res <- vApp c' us
-  -- msg $ "applying \n" ++ show u ++ "\n to \n" ++ show c ++ "\n gets us \n" ++ show res
-  return res
+  vApp c' us
 vAppNorm ((VData (n, us))) u = return . VNorm $ VData (n, us >< u)
 vAppNorm ((VCtor (n, us))) u = return . VNorm $ VCtor (n, us >< u)
 vAppNorm a b = error $ "impossible application: " ++ show a ++ " applied to " ++ show b
@@ -196,25 +194,18 @@ vUnfold l x = do
 vWhnf :: (Eval m) => Lvl -> VTm -> m (Maybe VTm)
 vWhnf l x = do
   x' <- force x
-  msg $ "Getting whnf of " ++ show x'
-  res <- case x' of
+  case x' of
     VNorm _ -> return Nothing
     VNeu _ -> return Nothing
     VLazy n -> vUnfoldLazy l n
-  msg $ "Got " ++ show res
-  return res
 
 
 vUnfoldLazy :: (Eval m) => Lvl -> VLazy -> m (Maybe VTm)
 vUnfoldLazy l (n, sp) = do
-  msg $ "Getting the lazy of " ++ show (n, sp)
   n' <- vUnfoldLazyHead l n
-  msg $ "Got lazy head " ++ show n'
-  res <- case n' of
+  case n' of
     Just m -> Just <$> vApp m sp
     Nothing -> return Nothing
-  msg $ "Got lazy " ++ show res
-  return res
 
 vUnfoldLazyHead :: (Eval m) => Lvl -> VLazyHead -> m (Maybe VTm)
 vUnfoldLazyHead l = \case
@@ -267,8 +258,8 @@ vWhnfReprHead l i h = case h of
             Just t -> do
               t' <- t $$ map (\a -> a.arg) (toList c.datParams)
               sp <- toSpine c
-              res <- vApp t' sp
-              Just <$> vRepr l i res
+              Just <$> vApp t' sp
+              -- Just <$> vRepr l i res
             _ -> return Nothing
       | otherwise = return Nothing
 
@@ -277,9 +268,7 @@ vWhnfReprHead l i h = case h of
       | i > 0 = do
           d' <- access (getGlobalRepr g)
           case d' of
-            Just t -> do
-              res <- t $$ xs
-              Just <$> vRepr l i res
+            Just t -> Just <$> t $$ xs
             Nothing -> return Nothing
       | otherwise = return Nothing
 
@@ -324,7 +313,8 @@ preCompose (Closure n env t) f =
       )
 
 reprClosure :: Int -> Closure -> Closure
-reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))
+-- reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))
+reprClosure = postCompose . sReprTimes
 
 sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
 sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const Explicit) p.binds)) True
@@ -397,35 +387,35 @@ vRepr l i t = do
   where
     vReprNorm :: (Eval m) => VNorm -> m VTm
     vReprNorm (VPi e v a b) = do
-      ty' <- vRepr l i a
-      let t' = reprClosure i b
-      return . VNorm $ VPi e v ty' t'
+      -- ty' <- vRepr l i a
+      let b' = reprClosure i b
+      return . VNorm $ VPi e v a b'
     vReprNorm (VLam e v a) = do
       let t' = reprClosure i a
       return . VNorm $ VLam e v t'
     vReprNorm VU = return (VNorm VU)
     vReprNorm (VData (d, sp)) = do
-      sp' <- mapSpineM (vRepr l i) sp
-      vApp (headAsValue (vReprNTimes i (VDataHead d))) sp'
+      -- sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VDataHead d))) sp
     vReprNorm (VCtor ((c, pp), sp)) = do
       -- pp' <- mapM (vRepr l i) pp
-      sp' <- mapSpineM (vRepr l i) sp
-      vApp (headAsValue (vReprNTimes i (VCtorHead (c, pp)))) sp'
+      -- sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VCtorHead (c, pp)))) sp
 
     vReprNeu :: (Eval m) => VNeu -> m VTm
     vReprNeu (n, sp) = do
-      sp' <- mapSpineM (vRepr l i) sp
+      -- sp' <- mapSpineM (vRepr l i) sp
       case n of
         VUnrepr x | i > 0 -> do
           x' <- vRepr l (i - 1) (headAsValue x)
-          vApp x' sp'
+          vApp x' sp
         _ -> do
-          vApp (headAsValue (vReprNTimes i (VNeuHead n))) sp'
+          vApp (headAsValue (vReprNTimes i (VNeuHead n))) sp
 
     vReprLazy :: (Eval m) => VLazy -> m VTm
     vReprLazy (n, sp) = do
-      sp' <- mapSpineM (vRepr l i) sp
-      vApp (headAsValue (vReprNTimes i (VLazyHead n))) sp'
+      -- sp' <- mapSpineM (vRepr l i) sp
+      vApp (headAsValue (vReprNTimes i (VLazyHead n))) sp
 
 reprInfSig :: (Eval m) => m ()
 reprInfSig = do

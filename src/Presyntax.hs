@@ -186,6 +186,7 @@ isCompound (PLet {}) = True
 isCompound (PCase {}) = True
 isCompound (PApp {}) = True
 isCompound (PRepr {}) = True
+isCompound (PUnrepr {}) = True
 isCompound (PLocated _ t) = isCompound t
 isCompound (PParams t []) = isCompound t
 isCompound (PParams _ _) = True

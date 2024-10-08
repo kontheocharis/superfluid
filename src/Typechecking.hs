@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 module Typechecking
   ( Tc (..),
@@ -336,6 +337,12 @@ class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx,
 
 data Mode = Check VTy | Infer
 
+instance (Monad m, Pretty m VTy) => Pretty m Mode where
+  pretty (Check ty) = do
+    ty' <- pretty ty
+    return $ "Check " ++ ty'
+  pretty Infer = return "Infer"
+
 type Child m = (Mode -> m (STm, VTy))
 
 ensureAllProblemsSolved :: (Tc m) => m ()
@@ -404,11 +411,7 @@ freshMetaOrPatBind =
 
 insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
-  m <- pretty ty
-  msg $ " Getting whnf for " ++ m
   f <- unfoldHere ty
-  f' <- pretty f
-  msg $ " Got whnf " ++ f'
   case f of
     VNorm (VPi Implicit _ _ b) -> do
       (a, va) <- freshMetaOrPatBind
@@ -483,12 +486,7 @@ unfoldLazyHere (n, sp) = do
 unfoldHere :: (Tc m) => VTm -> m VTm
 unfoldHere t = do
   l <- accessCtx (\c -> c.lvl)
-  t' <- pretty t
-  msg $ "Trying to unfold " ++  t'
-  res <- vUnfold l t
-  res' <- pretty res
-  msg $ "Unfolded to " ++  res'
-  return res
+  vUnfold l t
 
 ifForcePiType ::
   (Tc m) =>
@@ -532,11 +530,7 @@ checkPatBind x ty = do
 reprHere :: (Tc m) => Int -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
-  res <- vRepr l m t
-  t' <- pretty t
-  t'' <- pretty res
-  msg $ "Result of REPR " ++ show m ++ " " ++ t' ++ " is " ++ t''
-  return res
+  vRepr l m t
 
 name :: (Tc m) => Name -> m (STm, VTy)
 name n =
@@ -655,13 +649,10 @@ repr mode t = do
   forbidPat
   case mode of
     Check ty -> do
-      msg "Checking"
       checkByInfer (repr Infer t) ty
     Infer -> do
       (t', ty) <- t Infer
-      msg $ "Inferred"
       reprTy <- reprHere 1 ty
-      msg $ "Represented"
       return (SRepr t', reprTy)
 
 unrepr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
@@ -680,9 +671,7 @@ unrepr mode t = do
 
 checkByInfer :: (Tc m) => m (STm, VTy) -> VTy -> m (STm, VTy)
 checkByInfer t ty = do
-  msg "Inserting"
   (t', ty') <- t >>= insert
-  msg "Unifying"
   unifyHere ty ty'
   return (t', ty)
 
@@ -884,12 +873,7 @@ primItem n ts ty = do
 reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
 reprItem te getGlob addGlob ts r = do
   ty <- getGlob
-  (r', _) <- enterTel te $ do
-    ty' <- pretty ty
-    msg $ "Checking repr item: " ++ ty'
-    x <- r (Check ty)
-    msg $ "Checked repr item"
-    return x
+  (r', _) <- enterTel te $ r (Check ty)
   vr <- closeHere (length te) r'
   modify (addGlob vr ts)
   return r'
@@ -900,7 +884,7 @@ reprDataItem dat ts c = do
   tm <-
     reprItem
       Empty
-      (return di.fullTy)
+      (reprHere 1 di.fullTy)
       (addDataRepr dat)
       ts
       c
@@ -910,15 +894,13 @@ reprDataItem dat ts c = do
 reprCtorItem :: (Tc m) => Tel STm -> CtorGlobal -> Set Tag -> Child m -> m ()
 reprCtorItem te ctor ts c = do
   ci <- access (getCtorGlobal ctor)
-  msg $ "repr ctor " ++ show (ctor.globalName)
   _ <-
     reprItem
       te
-      (evalInOwnCtxHere ci.ty)
+      (evalInOwnCtxHere ci.ty >>= reprHere 1)
       (addCtorRepr ctor)
       ts
       c
-  msg $ "repr ctor done" ++ show (ctor.globalName)
   return ()
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
@@ -1357,9 +1339,6 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  pt1 <- pretty t1'
-  pt2 <- pretty t2'
-  msg $ "unify: " ++ pt1 ++ " =? " ++ pt2
   unifyForced t1' t2'
 
 etaConvert :: (Tc m) => VTm -> PiMode -> Closure -> m CanUnify
@@ -1378,6 +1357,15 @@ unifyForced t1 t2 = case (t1, t2) of
   (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifySpines sp sp' \/ iDontKnow
   (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
   (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
+  (VNeu (VUnrepr c1, sp1), VNeu (VUnrepr c2, sp2)) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
+  (_, VNeu (VUnrepr _, _)) -> do  --- we actually need something more in the system to prove this??
+    rt1 <- reprHere 1 t1
+    rt2 <- reprHere 1 t2
+    unify rt1 rt2
+  (VNeu (VUnrepr _, _), _) -> do
+    rt1 <- reprHere 1 t1
+    rt2 <- reprHere 1 t2
+    unify rt1 rt2
   (VNeu n1, VNeu n2) -> unifyNeuRest n1 n2
   (VLazy l1, VLazy l2) -> unifyLazy l1 l2
   (VLazy l, t) -> unifyLazyWithTermOr l t iDontKnow
@@ -1406,7 +1394,6 @@ unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
   (VRigid x, VRigid x') | x == x' -> unifySpines sp1 sp2 \/ iDontKnow
   (VBlockedCase c1, VBlockedCase c2) -> unifyCases VNeu c1 c2 /\ unifySpines sp1 sp2
   (VPrim p1, VPrim p2) | p1 == p2 -> unifySpines sp1 sp2
-  (VUnrepr c1, VUnrepr c2) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
   _ -> return $ No [Mismatching (VNeu (n1, sp1)) (VNeu (n2, sp2))]
 
 unifyLazyWithTermOr :: (Tc m) => VLazy -> VTm -> m CanUnify -> m CanUnify
