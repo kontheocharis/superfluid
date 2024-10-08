@@ -48,15 +48,9 @@ import Common
     Lvl (..),
     MetaVar,
     Name (..),
-    Param (..),
     PiMode (..),
-    Positive (..),
-    PrimGlobal (..),
     Spine,
     Tag (..),
-    Tel,
-    composeN,
-    composeNM,
     composeZ,
     lvlToIdx,
     mapSpine,
@@ -66,7 +60,6 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Exception (assert)
 import Control.Monad (foldM, (>=>))
 import Control.Monad.Extra (firstJustM)
 import Control.Monad.State (StateT (..))
@@ -113,16 +106,13 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
-    WTm (WNeu, WNorm),
     headAsValue,
     mapClosureM,
-    mapHeadM,
     sAppSpine,
     sGlobWithParams,
     sLams,
     sReprTimes,
     uniqueSLams,
-    weakAsValue,
     pattern VMeta,
     pattern VVar,
   )
@@ -294,23 +284,23 @@ vCase c = do
 postCompose :: (STm -> STm) -> Closure -> Closure
 postCompose f (Closure n env t) = Closure n env (f t)
 
-preCompose :: Closure -> (STm -> STm) -> Closure
-preCompose (Closure n env t) f =
-  assert (n == 1) $
-    Closure
-      n
-      env
-      ( SApp
-          Explicit
-          ( sAppSpine
-              ( sLams
-                  (S.fromList $ map (\i -> Arg Explicit $ Name ("c" ++ show i)) [1 .. length env])
-                  (SLam Explicit (Name "x") t)
-              )
-              (S.fromList $ map (Arg Explicit . SVar . Idx) (reverse [1 .. length env]))
-          )
-          (f (SVar (Idx 0)))
-      )
+-- preCompose :: Closure -> (STm -> STm) -> Closure
+-- preCompose (Closure n env t) f =
+--   assert (n == 1) $
+--     Closure
+--       n
+--       env
+--       ( SApp
+--           Explicit
+--           ( sAppSpine
+--               ( sLams
+--                   (S.fromList $ map (\i -> Arg Explicit $ Name ("c" ++ show i)) [1 .. length env])
+--                   (SLam Explicit (Name "x") t)
+--               )
+--               (S.fromList $ map (Arg Explicit . SVar . Idx) (reverse [1 .. length env]))
+--           )
+--           (f (SVar (Idx 0)))
+--       )
 
 reprClosure :: Int -> Closure -> Closure
 -- reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))

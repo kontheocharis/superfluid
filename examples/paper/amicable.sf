@@ -18,21 +18,21 @@ def sum-of-divisors : Nat -> Nat {
   })
 }
 
-data FriendlyPair : Nat -> Nat -> Type {
-  friendly : (a : Nat, b : Nat) ->
+data AmicablePair : Nat -> Nat -> Type {
+  amicable : (a : Nat, b : Nat) ->
     Equal (sum-of-divisors a) b ->
     Equal (sum-of-divisors b) a ->
-    FriendlyPair a b
+    AmicablePair a b
 }
 
--- Decision procedure for FriendlyPair
-def is-friendly-pair : (a : Nat, b : Nat) -> Maybe (FriendlyPair a b) {
+-- Decision procedure for AmicablePair
+def is-amicable-pair : (a : Nat, b : Nat) -> Maybe (AmicablePair a b) {
   \a b => {
     let sum-a = sum-of-divisors a;
     let sum-b = sum-of-divisors b;
     case nat-eq-dep sum-a b {
       yes p1 => case nat-eq-dep sum-b a {
-        yes p2 => just (friendly a b p1 p2),
+        yes p2 => just (amicable a b p1 p2),
         no _ => nothing
       },
       no _ => nothing
@@ -41,21 +41,25 @@ def is-friendly-pair : (a : Nat, b : Nat) -> Maybe (FriendlyPair a b) {
 }
 
 def main : IO () {
-case is-friendly-pair 284 221 {
-    nothing => io-return (debug-print "Not friendly!" tt),
-    just _ => io-return (debug-print "Friendly!" tt)
+  case is-amicable-pair 284 221 {
+    nothing => io-return (debug-print "Not amicable!" tt),
+    just _ => io-return (debug-print "Amicable!" tt)
   }
 }
 
-def test : FriendlyPair 28 28 {
-  friendly _ _ refl refl
-}
+-- def test : AmicablePair 220 284 {
+--   amicable _ _ refl refl
+-- }
 
--- def check-friendly-pair : (a : Nat) -> (b : Nat) -> String {
+-- def test2 : [n m : Nat] -> Equal (add n m) (add m n)  {
+--   ?h1
+-- }
+
+-- def check-amicable-pair : (a : Nat) -> (b : Nat) -> String {
 --   \a b =>
---     case is-friendly-pair a b {
---       yes _ => "The numbers form an friendly pair",
---       no _ => "The numbers do not form an friendly pair"
+--     case is-amicable-pair a b {
+--       yes _ => "The numbers form an amicable pair",
+--       no _ => "The numbers do not form an amicable pair"
 --     }
 -- }
 
@@ -66,7 +70,7 @@ def test : FriendlyPair 28 28 {
 --     let a <- read-nat;
 --     print-string "Enter the second number: ";
 --     let b <- read-nat;
---     result <- check-friendly-pair a b;
+--     result <- check-amicable-pair a b;
 --     print-string result
 --   }
 -- }

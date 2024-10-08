@@ -5,35 +5,37 @@ module Codegen (Gen (..), generateProgram, renderJsProg, JsStat) where
 
 import Common
   ( Arg (Arg),
+    CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (..),
     Has (..),
+    HasNameSupply (uniqueName),
     Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
-    DefGlobal (..),
-    DataGlobal (..),
-    CtorGlobal (..),
-    PrimGlobal (..),
     Name (Name),
     PiMode (Explicit),
+    PrimGlobal (..),
     Spine,
-    globName,
     mapSpineM,
     pattern Impossible,
-    pattern Possible, HasNameSupply (uniqueName), Glob (PrimGlob),
+    pattern Possible,
   )
 import Control.Monad (zipWithM)
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
+import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval)
 import Globals
-  ( DefGlobalInfo (name, tm),
+  ( CtorGlobalInfo (..),
+    DataGlobalInfo (..),
+    DefGlobalInfo (name, tm),
     GlobalInfo (..),
-    mapSigContentsM_, CtorGlobalInfo(..), DataGlobalInfo(..),
+    mapSigContentsM_,
   )
 import Printing (indentedFst)
 import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
-import Data.Sequence (Seq(..))
 
 newtype JsStat = JsStat String
 

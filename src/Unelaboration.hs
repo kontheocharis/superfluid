@@ -14,7 +14,6 @@ import Common
   ( Arg (..),
     Clause (..),
     CtorGlobal (..),
-    Glob (..),
     Has (..),
     Idx (..),
     Lvl (..),
@@ -28,7 +27,6 @@ import Common
     PiMode (..),
     Tag,
     Tel,
-    globName,
     unMetaVar,
   )
 import Control.Monad.Extra (concatMapM)

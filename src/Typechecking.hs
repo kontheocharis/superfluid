@@ -1,12 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE MonoLocalBinds #-}
 
 module Typechecking
   ( Tc (..),
@@ -48,37 +47,30 @@ module Typechecking
   )
 where
 
-import Algebra.Lattice (Lattice (..), meets1, (/\))
+import Algebra.Lattice (Lattice (..), (/\))
 import Common
   ( Arg (..),
     Clause,
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (DefGlobal),
-    Glob (CtorGlob, DataGlob, DefGlob, PrimGlob),
     Has (..),
     HasNameSupply (uniqueName),
     HasProjectFiles,
     Idx (..),
     Lit (..),
     Loc,
-    Logger (msg),
     Lvl (..),
     MetaVar,
     Name (Name),
     Param (..),
     PiMode (..),
-    Positive,
     PrimGlobal (..),
     Spine,
     Tag,
     Tel,
-    Times (..),
-    composeN,
     composeZ,
-    inv,
     lvlToIdx,
-    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
@@ -97,7 +89,7 @@ import Context
     typelessBinds,
   )
 import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless, zipWithM)
+import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -124,11 +116,9 @@ import Evaluation
     quotePat,
     resolve,
     vApp,
-    vCase,
     vRepr,
     vUnfold,
     vUnfoldLazy,
-    vWhnf,
     ($$),
   )
 import Globals
@@ -152,9 +142,7 @@ import Globals
     lookupGlobal,
     modifyDataItem,
     modifyDefItem,
-    unfoldDef,
   )
-import Literals (unfoldLit)
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
 import Syntax
@@ -174,7 +162,6 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
-    WTm (..),
     headAsValue,
     isEmptySub,
     liftPRenN,
@@ -185,7 +172,6 @@ import Syntax
     sPis,
     uniqueSLams,
     vGetSpine,
-    weakAsValue,
     pattern VVar,
   )
 import Unelaboration (Unelab)
@@ -1358,7 +1344,8 @@ unifyForced t1 t2 = case (t1, t2) of
   (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
   (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
   (VNeu (VUnrepr c1, sp1), VNeu (VUnrepr c2, sp2)) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
-  (_, VNeu (VUnrepr _, _)) -> do  --- we actually need something more in the system to prove this??
+  (_, VNeu (VUnrepr _, _)) -> do
+    --- we actually need something more in the system to prove this??
     rt1 <- reprHere 1 t1
     rt2 <- reprHere 1 t2
     unify rt1 rt2
@@ -1382,12 +1369,17 @@ unifyNormRest n1 n2 = case (n1, n2) of
   _ -> return $ No [Mismatching (VNorm n1) (VNorm n2)]
 
 unifyLazy :: (Tc m) => VLazy -> VLazy -> m CanUnify
-unifyLazy (n1, sp1) (n2, sp2) = case (n1, n2) of
-  (VDef d1, VDef d2) | d1 == d2 -> unifySpines sp1 sp2
-  (VLit l1, VLit l2) -> unifyLit l1 l2 /\ unifySpines sp1 sp2
-  (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2 /\ unifySpines sp1 sp2
-  (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2') /\ unifySpines sp1 sp2
-  _ -> unifyLazyWithTermOr (n1, sp1) (VLazy (n2, sp2)) (unifyLazyWithTermOr (n2, sp2) (VLazy (n1, sp1)) iDontKnow)
+unifyLazy (n1, sp1) (n2, sp2) =
+  ( case (n1, n2) of
+      (VDef d1, VDef d2) | d1 == d2 -> unifySpines sp1 sp2
+      (VLit l1, VLit l2) -> unifyLit l1 l2 /\ unifySpines sp1 sp2
+      (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2 /\ unifySpines sp1 sp2
+      (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2') /\ unifySpines sp1 sp2
+      _ -> iDontKnow
+  )
+    \/ tryUnfold
+  where
+    tryUnfold = unifyLazyWithTermOr (n1, sp1) (VLazy (n2, sp2)) (unifyLazyWithTermOr (n2, sp2) (VLazy (n1, sp1)) iDontKnow)
 
 unifyNeuRest :: (Tc m) => VNeu -> VNeu -> m CanUnify
 unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of

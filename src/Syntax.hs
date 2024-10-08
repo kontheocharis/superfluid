@@ -65,11 +65,9 @@ import Common
     Name,
     Param (..),
     PiMode,
-    Positive,
     PrimGlobal,
     Spine,
     Tel,
-    Times,
     unLvl,
   )
 import Data.IntMap (IntMap)

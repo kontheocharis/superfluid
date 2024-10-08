@@ -33,7 +33,6 @@ import Common
     Spine,
     Tag (..),
     Tel,
-    Times (..),
     arg,
   )
 import Data.Foldable (toList)
