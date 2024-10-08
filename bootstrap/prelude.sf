@@ -806,103 +806,103 @@ repr data ByteList as JsBuffer {
   } as {
     let b' = repr b;
     js-if (js-eqq (js-buffer-byte-length b') (repr 0))
-      (\_ => unsafe-complete E b' n)
+      (\_ => unsafe-complete E b n)
       (\_ => {
         let x : Byte = unrepr (js-bound-trust-me [repr 256] (js-buffer-read-uint8 b' (repr 0)));
         let xs : ByteList = unrepr (js-buffer-subarray b' (repr 1) (js-buffer-byte-length b'));
         let m = c x xs;
-        unsafe-complete E b' m
+        unsafe-complete E b m
       })
   }
 }
 
 -- The `n` can be computed from the data structure!!
--- repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
---   bvnil as (bnil, refl),
---   bvcons x xs as {
---     let (l, p) = repr xs;
---     (bcons x l, cong s p)
---   },
+repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
+  bvnil as (bnil, refl),
+  bvcons x xs as {
+    let (l, p) = repr xs;
+    (bcons x l, cong s p)
+  },
 
---   case b to E {
---     bvnil => n,
---     bvcons => c
---   } as {
---     let b' = repr b;
---     let res = case b' to (\p => (repr (E (byte-list-length (fst p)))) (fst p, refl)) {
---       (l, p) => case l to (\l => repr (E (byte-list-length l)) (l, refl)) {
---         bnil => repr n,
---         bcons x xs => repr (c [byte-list-length xs] x (unrepr (xs, refl))),
---       }
---     };
---     -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
---     -- @@Todo: do this without cast and trust me
---     unsafe-cast (repr (E (byte-vec-length b) b)) res
---   }
--- }
+  case b to E {
+    bvnil => n,
+    bvcons => c
+  } as {
+    let b' = repr b;
+    let res = case b' to (\p => E (byte-list-length (fst p)) (unrepr (fst p, refl))) {
+      (l, p) => case l to (\l => E (byte-list-length l) (unrepr (l, refl))) {
+        bnil => n,
+        bcons x xs => c [byte-list-length xs] x (unrepr (xs, refl)),
+      }
+    };
+    -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
+    -- @@Todo: do this without cast and trust me
+    unsafe-cast (E (byte-vec-length b) b) res
+  }
+}
 
--- repr def byte-list-length as \l => {
---   unrepr (js-buffer-byte-length (repr l))
--- }
+repr def byte-list-length as \l => {
+  unrepr (js-buffer-byte-length (repr l))
+}
 
--- repr def byte-vec-eq as \b b' => {
---   unrepr (js-buffer-eq (repr (fst (repr b))) (repr (fst (repr b'))))
--- }
+repr def byte-vec-eq as \b b' => {
+  unrepr (js-buffer-eq (repr (fst (repr b))) (repr (fst (repr b'))))
+}
 
--- -- Panic
+-- Panic
 
--- def panic : [A : Type] -> String -> A {
---   \a => unsafe-io (io-bind (js-console-log a) (\_ => js-exit js-one))
--- }
+def panic : [A : Type] -> String -> A {
+  \a => unsafe-io (io-bind (js-console-log a) (\_ => js-exit js-one))
+}
 
--- -- REPR helpers
+-- REPR helpers
 
--- def Reprs : Nat -> Type -> Type {
---   \l T => case l {
---     z => T,
---     s l' => repr (Reprs l' T)
---   }
--- }
+def Reprs : Nat -> Type -> Type {
+  \l T => case l {
+    z => T,
+    s l' => repr (Reprs l' T)
+  }
+}
 
--- def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
---   \l t => case l to (\l => Reprs l T) {
---     z => t,
---     s l' => repr (reprs l' t)
---   }
--- }
+def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
+  \l t => case l to (\l => Reprs l T) {
+    z => t,
+    s l' => repr (reprs l' t)
+  }
+}
 
--- def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
---   \l => case l to (\l => Reprs l T -> T) {
---     z => id,
---     s l' => \r => unreprs l' (unrepr r)
---   }
--- }
+def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
+  \l => case l to (\l => Reprs l T -> T) {
+    z => id,
+    s l' => \r => unreprs l' (unrepr r)
+  }
+}
 
--- def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
---   subst-type
--- }
+def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
+  subst-type
+}
 
--- def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
---   \p => subst-type (sym p)
--- }
+def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
+  \p => subst-type (sym p)
+}
 
--- def ReprBy : Type -> Type -> Type {
---   \T U => (l : Nat) * Equal (Reprs l T) U
--- }
+def ReprBy : Type -> Type -> Type {
+  \T U => (l : Nat) * Equal (Reprs l T) U
+}
 
--- def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
---   \r a => {
---     let (l, p) = r;
---     subst-type p (reprs l a)
---   }
--- }
+def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
+  \r a => {
+    let (l, p) = r;
+    subst-type p (reprs l a)
+  }
+}
 
--- def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
---   \r b => {
---     let (l, p) = r;
---     unreprs l (subst-type (sym p) b)
---   }
--- }
+def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
+  \r b => {
+    let (l, p) = r;
+    unreprs l (subst-type (sym p) b)
+  }
+}
 
 -- HTTP
 
