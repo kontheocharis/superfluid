@@ -26,38 +26,30 @@ data FriendlyPair : Nat -> Nat -> Type {
 }
 
 -- Decision procedure for FriendlyPair
-def is-friendly-pair : (a : Nat, b : Nat) -> Dec (FriendlyPair a b) {
+def is-friendly-pair : (a : Nat, b : Nat) -> Maybe (FriendlyPair a b) {
   \a b => {
     let sum-a = sum-of-divisors a;
     let sum-b = sum-of-divisors b;
     case nat-eq-dep sum-a b {
       yes p1 => case nat-eq-dep sum-b a {
-        yes p2 => yes (friendly a b p1 p2),
-      no p2 => {
-          let contr : FriendlyPair a b -> Empty = \f => case f {
-            friendly a' b' p q => p2 q,
-          };
-          ?nocontr2
-        }
+        yes p2 => just (friendly a b p1 p2),
+        no _ => nothing
       },
-      no p1 => {
-        let contr : FriendlyPair a b -> Empty = \(friendly _ _ p q) => ?h312;
-        ?nocontr
-      }
+      no _ => nothing
     }
   }
 }
 
 def main : IO () {
-  case is-friendly-pair 284 221 {
-    yes _ => io-return (debug-print "Friendly!" tt),
-    no _ => io-return (debug-print "Not friendly!" tt)
+case is-friendly-pair 284 221 {
+    nothing => io-return (debug-print "Not friendly!" tt),
+    just _ => io-return (debug-print "Friendly!" tt)
   }
 }
 
--- def test : FriendlyPair 220 284 {
---   friendly 220 284 refl refl
--- }
+def test : FriendlyPair 28 28 {
+  friendly _ _ refl refl
+}
 
 -- def check-friendly-pair : (a : Nat) -> (b : Nat) -> String {
 --   \a b =>
