@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module Typechecking
   ( Tc (..),
@@ -66,6 +67,7 @@ import Common
     Param (..),
     PiMode (..),
     PrimGlobal (..),
+    Qty (..),
     Spine,
     Tag,
     Tel,
@@ -76,11 +78,13 @@ import Common
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Logger (..),
   )
 import Context
   ( Ctx (..),
+    CtxEntry (..),
     Goal (Goal),
+    assertIsNeeded,
     bind,
     define,
     emptyCtx,
@@ -346,7 +350,7 @@ enterTel :: (Tc m) => Tel STy -> m a -> m a
 enterTel Empty f = f
 enterTel (t :<| ts) f = do
   t' <- evalHere t.ty
-  enterCtx (bind t.name t') (enterTel ts f)
+  enterCtx (bind t.name t.qty t') (enterTel ts f)
 
 inferMeta :: (Tc m) => Maybe Name -> m (STm, VTy)
 inferMeta n = do
@@ -399,7 +403,7 @@ insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- unfoldHere ty
   case f of
-    VNorm (VPi Implicit _ _ b) -> do
+    VNorm (VPi Implicit _ _ _ b) -> do
       (a, va) <- freshMetaOrPatBind
       ty' <- b $$ [va]
       insertFull (SApp Implicit tm a, ty')
@@ -407,7 +411,7 @@ insertFull (tm, ty) = do
 
 insert :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insert (tm, ty) = case tm of
-  SLam Implicit _ _ -> return (tm, ty)
+  SLam Implicit _ _ _ -> return (tm, ty)
   _ -> insertFull (tm, ty)
 
 evalHere :: (Tc m) => STm -> m VTm
@@ -478,22 +482,23 @@ ifForcePiType ::
   (Tc m) =>
   PiMode ->
   VTy ->
-  (PiMode -> Name -> VTy -> Closure -> m a) ->
-  (PiMode -> Name -> VTy -> Closure -> m a) ->
+  (PiMode -> Qty -> Name -> VTy -> Closure -> m a) ->
+  (PiMode -> Qty -> Name -> VTy -> Closure -> m a) ->
   m a
 ifForcePiType m ty the els = do
   ty' <- unfoldHere ty
   case ty' of
-    VNorm (VPi m' x a b) -> do
+    VNorm (VPi m' q x a b) -> do
       if m == m'
-        then the m' x a b
-        else els m' x a b
+        then the m' q x a b
+        else els m' q x a b
     _ -> do
       a <- freshMeta >>= evalHere
       x <- uniqueName
-      b <- enterCtx (bind x a) freshMeta >>= closeHere 1
-      unifyHere ty (VNorm (VPi m x a b))
-      the m x a b
+      let q = Many
+      b <- enterCtx (bind x q a) freshMeta >>= closeHere 1
+      unifyHere ty (VNorm (VPi m q x a b))
+      the m q x a b
 
 forbidPat :: (Tc m) => m ()
 forbidPat = ifInPat (tcError InvalidPattern) (return ())
@@ -505,7 +510,7 @@ inferPatBind x = do
 
 checkPatBind :: (Tc m) => Name -> VTy -> m (STm, VTy)
 checkPatBind x ty = do
-  modifyCtx (bind x ty)
+  modifyCtx (bind x Many ty)
   whenInPat
     ( \case
         InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [x]))
@@ -519,7 +524,7 @@ reprHere m t = do
   vRepr l m t
 
 name :: (Tc m) => Name -> m (STm, VTy)
-name n =
+name n = do
   ifInPat
     ( do
         l <- access (lookupGlobal n)
@@ -529,11 +534,12 @@ name n =
     )
     ( do
         r <- accessCtx (lookupName n)
+        l <- getLvl
         case r of
-          Just (i, t) -> return (SVar i, t)
+          Just e -> return (SVar $ lvlToIdx l e.lvl, assertIsNeeded e.ty)
           Nothing -> do
-            l <- access (lookupGlobal n)
-            case l of
+            n' <- access (lookupGlobal n)
+            case n' of
               Just x -> globalInfoToTm n x
               Nothing -> tcError $ UnresolvedVariable n
     )
@@ -563,36 +569,37 @@ lam mode m x t = do
       ifForcePiType
         m
         ty
-        ( \_ x' a b -> do
+        ( \_ q x' a b -> do
             vb <- evalInOwnCtxHere b
-            (t', _) <- enterCtx (bind x a) (t (Check vb))
-            return (SLam m x t', VNorm (VPi m x' a b))
+            (t', _) <- enterCtx (bind x q a) (t (Check vb))
+            return (SLam m q x t', VNorm (VPi m q x' a b))
         )
-        ( \m' x' a b -> case m' of
-            Implicit -> insertLam x' a b (\s -> lam s m x t)
+        ( \m' q x' a b -> case m' of
+            Implicit -> insertLam q x' a b (\s -> lam s m x t)
             _ -> tcError $ ImplicitMismatch m m'
         )
     Infer -> do
       a <- freshMeta >>= evalHere
-      (t', b) <- enterCtx (bind x a) $ t Infer >>= insert
+      let q = Many
+      (t', b) <- enterCtx (bind x q a) $ t Infer >>= insert
       b' <- closeValHere 1 b
-      return (SLam m x t', VNorm (VPi m x a b'))
+      return (SLam m q x t', VNorm (VPi m q x a b'))
 
-insertLam :: (Tc m) => Name -> VTy -> Closure -> Child m -> m (STm, VTy)
-insertLam x' a b t = do
+insertLam :: (Tc m) => Qty -> Name -> VTy -> Closure -> Child m -> m (STm, VTy)
+insertLam q x' a b t = do
   vb <- evalInOwnCtxHere b
-  (t', _) <- enterCtx (insertedBind x' a) (t (Check vb))
-  return (SLam Implicit x' t', VNorm (VPi Implicit x' a b))
+  (t', _) <- enterCtx (insertedBind x' q a) (t (Check vb))
+  return (SLam Implicit q x' t', VNorm (VPi Implicit q x' a b))
 
-letIn :: (Tc m) => Mode -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
-letIn mode x a t u = do
+letIn :: (Tc m) => Mode -> Qty -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
+letIn mode q x a t u = do
   forbidPat
   (a', _) <- a (Check (VNorm VU))
   va <- evalHere a'
   (t', _) <- t (Check va)
   vt <- evalHere t'
-  (u', ty) <- enterCtx (define x vt va) $ u mode
-  return (SLet x a' t' u', ty)
+  (u', ty) <- enterCtx (define x q vt va) $ u mode
+  return (SLet q x a' t' u', ty)
 
 spine :: (Tc m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
 spine (t, ty) Empty = return (t, ty)
@@ -604,13 +611,13 @@ spine (t, ty) (Arg m u :<| sp) = do
   ifForcePiType
     m
     ty'
-    ( \_ _ a b -> do
+    ( \_ _ _ a b -> do
         (u', _) <- u (Check a)
         uv <- evalHere u'
         b' <- b $$ [uv]
         spine (SApp m t' u', b') sp
     )
-    (\m' _ _ _ -> tcError $ ImplicitMismatch m m')
+    (\m' _ _ _ _ -> tcError $ ImplicitMismatch m m')
 
 app :: (Tc m) => Child m -> Spine (Child m) -> m (STm, VTy)
 app s sp = do
@@ -622,13 +629,13 @@ univ = do
   forbidPat
   return (SU, (VNorm VU))
 
-piTy :: (Tc m) => PiMode -> Name -> Child m -> Child m -> m (STm, VTy)
-piTy m x a b = do
+piTy :: (Tc m) => PiMode -> Qty -> Name -> Child m -> Child m -> m (STm, VTy)
+piTy m q x a b = do
   forbidPat
   (a', _) <- a (Check (VNorm VU))
   av <- evalHere a'
-  (b', _) <- enterCtx (bind x av) $ b (Check (VNorm VU))
-  return (SPi m x a' b', (VNorm VU))
+  (b', _) <- enterCtx (bind x q av) $ b (Check (VNorm VU))
+  return (SPi m q x a' b', VNorm VU)
 
 repr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
 repr mode t = do
@@ -678,7 +685,7 @@ constLamsForPis pis val = do
   spis <- quoteHere pis
   let (args, _) = sGatherPis spis
   sval <- closeValHere (length args) val
-  uniqueSLams (toList $ fmap (\p -> p.mode) args) sval.body
+  uniqueSLams (toList $ fmap (\p -> (p.mode, p.qty)) args) sval.body
 
 mzip :: (Alternative m) => [m a] -> [m b] -> [(m a, m b)]
 mzip (a : as) (b : bs) = (a, b) : mzip as bs
@@ -800,8 +807,8 @@ tel Empty = return Empty
 tel (t :<| ts) = do
   (t', _) <- t.ty (Check (VNorm VU))
   vt <- evalHere t'
-  ts' <- enterCtx (bind t.name vt) $ tel ts
-  return (Param t.mode t.name t' :<| ts')
+  ts' <- enterCtx (bind t.name t.qty vt) $ tel ts
+  return (Param t.mode t.qty t.name t' :<| ts')
 
 dataItem :: (Tc m) => Name -> Set Tag -> Tel (Child m) -> Child m -> m ()
 dataItem n ts te ty = do
@@ -875,7 +882,7 @@ reprDataItem dat ts c = do
       ts
       c
   let (ls, _) = sGatherLams tm
-  return (telWithNames di.params ls)
+  return (telWithNames di.params (fmap (\p -> Arg p.mode p.name) ls))
 
 reprCtorItem :: (Tc m) => Tel STm -> CtorGlobal -> Set Tag -> Child m -> m ()
 reprCtorItem te ctor ts c = do
@@ -913,17 +920,17 @@ quoteHere t = do
 
 spineForTel :: Int -> Tel STm -> Spine STm
 spineForTel dist te =
-  S.fromList $ zipWith (curry (\(Param m _ _, i) -> Arg m (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
+  S.fromList $ zipWith (curry (\(Param m _ _ _, i) -> Arg m (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
 
 telWithUniqueNames :: (Tc m) => Tel a -> m (Tel a)
 telWithUniqueNames = do
   mapM
-    ( \(Param m n a) -> do
+    ( \(Param m q n a) -> do
         case n of
           Name "_" -> do
             n' <- uniqueName
-            return (Param m n' a)
-          Name _ -> return (Param m n a)
+            return (Param m q n' a)
+          Name _ -> return (Param m q n a)
     )
 
 buildElimTy :: (Tc m) => DataGlobal -> m (Closure, Closure, Spine ())
@@ -952,7 +959,7 @@ buildElimTy dat = do
   subjectTyName <- uniqueName
   methodTys <- mapM (ctorMethodTy (length sTyParams)) datInfo.ctors
 
-  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
+  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit Many motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
   let subjSpToData = spToData (length mTyIndicesBinds + length methodTys + 1) 0
 
   let elimTy =
@@ -960,15 +967,15 @@ buildElimTy dat = do
           ( foldr
               (><)
               Empty
-              [ S.singleton (Param Explicit elimTyName motiveTy),
+              [ S.singleton (Param Explicit Many elimTyName motiveTy),
                 S.fromList
                   ( zipWith
-                      (\i (methodTy, methodName) -> Param Explicit methodName (methodTy i))
+                      (\i (methodTy, methodName) -> Param Explicit Many methodName (methodTy i))
                       [0 ..]
                       methodTys
                   ),
                 sTyIndicesBinds,
-                S.singleton (Param Explicit subjectTyName subjSpToData)
+                S.singleton (Param Explicit Many subjectTyName subjSpToData)
               ]
           )
           (sAppSpine (SVar (Idx (1 + length sTyIndicesBinds + length methodTys))) (spineForTel 1 sTyIndicesBinds S.|> Arg Explicit (SVar (Idx 0))))
@@ -1022,7 +1029,6 @@ data UnifyError
   | DifferentClauses [Clause VPatB Closure] [Clause VPatB Closure]
   | Mismatching VTm VTm
   | SolveError SolveError
-  | ErrorInCtx [Name] UnifyError
   deriving (Show)
 
 data SolveError
@@ -1075,7 +1081,6 @@ instance (Tc m) => Pretty m UnifyError where
     t'' <- pretty t
     t''' <- pretty t'
     return $ "the terms " ++ t'' ++ " and " ++ t''' ++ " do not match"
-  pretty (ErrorInCtx ns e) = enterCtx (const $ typelessBinds ns emptyCtx) $ pretty e
 
 instance (Tc m) => Has m (Env VTm) where
   view = accessCtx (\c -> c.env)
@@ -1124,7 +1129,7 @@ type SolveT = ExceptT SolveError
 enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
   ns <- uniqueNames c.numVars
-  enterCtx (typelessBinds ns) m
+  enterCtx (typelessBinds (map (,Many) ns)) m
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
@@ -1198,13 +1203,13 @@ renameNeu m pren (n, sp) = case n of
 
 renameNorm :: (Tc m) => MetaVar -> PRen -> VNorm -> SolveT m STm
 renameNorm m pren n = case n of
-  VLam i x t -> do
+  VLam i q x t -> do
     t' <- renameClosure m pren t
-    return $ SLam i x t'
-  VPi i x ty t -> do
+    return $ SLam i q x t'
+  VPi i q x ty t -> do
     ty' <- rename m pren ty
     t' <- renameClosure m pren t
-    return $ SPi i x ty' t'
+    return $ SPi i q x ty' t'
   VU -> return SU
   VData (d, sp) -> renameSp m pren (SData d) sp
   VCtor ((c, pp), sp) -> do
@@ -1306,7 +1311,7 @@ unifyFlex :: (Tc m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
 unifyFlex m sp t = runSolveT m sp t $ do
   pren <- invertSpine sp
   rhs <- rename m pren t
-  solution <- lift $ uniqueSLams (reverse $ map (\a -> a.mode) (toList sp)) rhs >>= eval []
+  solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, Many)) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
 
 unifyClosure :: (Tc m) => Closure -> Closure -> m CanUnify
@@ -1336,9 +1341,9 @@ etaConvert t m c = do
 
 unifyForced :: (Tc m) => VTm -> VTm -> m CanUnify
 unifyForced t1 t2 = case (t1, t2) of
-  (VNorm (VLam m _ c), VNorm (VLam m' _ c')) | m == m' -> unifyClosure c c'
-  (t, VNorm (VLam m' _ c')) -> etaConvert t m' c'
-  (VNorm (VLam m _ c), t) -> etaConvert t m c
+  (VNorm (VLam m _ _ c), VNorm (VLam m' _ _ c')) | m == m' -> unifyClosure c c'
+  (t, VNorm (VLam m' _ _ c')) -> etaConvert t m' c'
+  (VNorm (VLam m _ _ c), t) -> etaConvert t m c
   (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
   (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifySpines sp sp' \/ iDontKnow
   (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
@@ -1361,7 +1366,7 @@ unifyForced t1 t2 = case (t1, t2) of
 
 unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
 unifyNormRest n1 n2 = case (n1, n2) of
-  (VPi m _ t c, VPi m' _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
+  (VPi m _ _ t c, VPi m' _ _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
   (VU, VU) -> return Yes
   (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
   (VCtor ((c, _), sp), VCtor ((c', _), sp'))

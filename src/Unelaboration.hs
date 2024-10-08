@@ -112,9 +112,9 @@ unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns
 
 unelab :: (Unelab m) => [Name] -> STm -> m PTm
 unelab ns = \case
-  (SPi m x a b) -> PPi m x <$> unelab ns a <*> unelab (x : ns) b
-  (SLam m x t) -> PLam m (PName x) <$> unelab (x : ns) t
-  (SLet x ty t u) -> PLet (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+  (SPi m q x a b) -> PPi m q x <$> unelab ns a <*> unelab (x : ns) b
+  (SLam m _ x t) -> PLam m (PName x) <$> unelab (x : ns) t
+  (SLet q x ty t u) -> PLet q (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
   (SMeta m bs) -> do
     (t, ts) <- unelabMeta ns m bs
     return $ pApp t ts
@@ -149,10 +149,10 @@ unelab ns = \case
 
 unelabTel :: (Unelab m) => [Name] -> Tel STm -> m (Tel PTm)
 unelabTel _ Empty = return Empty
-unelabTel ns (Param m n a :<| tel) = do
+unelabTel ns (Param m q n a :<| tel) = do
   a' <- unelab ns a
   tel' <- unelabTel (n : ns) tel
-  return $ Param m n a' :<| tel'
+  return $ Param m q n a' :<| tel'
 
 telNames :: Tel a -> [Name]
 telNames = reverse . toList . fmap (\p -> p.name)

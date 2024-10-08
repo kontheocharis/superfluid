@@ -136,17 +136,17 @@ elab p mode = case (p, mode) of
         n <- uniqueName
         lam md m n (elab (PCase (PName n) Nothing [Possible p' t]))
   -- Lambda insertion
-  (t, Check (VNorm (VPi Implicit x' a b))) -> insertLam x' a b (elab t)
+  (t, Check (VNorm (VPi Implicit q x' a b))) -> insertLam q x' a b (elab t)
   (PUnit, Check ty@(VNorm VU)) -> elab (pKnownData KnownUnit []) (Check ty)
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
-  (PSigma x a b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md
+  (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
-  (PLet x a t u, md) -> do
+  (PLet q x a t u, md) -> do
     case patAsVar x of
-      Left x' -> letIn md x' (elab a) (elab t) (elab u)
+      Left x' -> letIn md q x' (elab a) (elab t) (elab u)
       Right p' -> do
         n <- uniqueName
-        letIn md n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
+        letIn md q n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
   (PRepr t, md) -> repr md (elab t)
   (PUnrepr t, md) -> unrepr md (elab t)
   (PHole n, md) -> meta md (Just n)
@@ -163,7 +163,7 @@ elab p mode = case (p, mode) of
     let (s, sp) = toPSpine p
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
-  (PPi m x a b, Infer) -> piTy m x (elab a) (elab b)
+  (PPi m q x a b, Infer) -> piTy m q x (elab a) (elab b)
   (PList ts rest, md) -> do
     let end = case rest of
           Just t -> t

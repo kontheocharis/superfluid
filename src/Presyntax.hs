@@ -30,10 +30,11 @@ import Common
     Loc,
     Name (..),
     PiMode (..),
+    Qty (..),
     Spine,
     Tag (..),
     Tel,
-    arg, Qty, Param (..),
+    arg,
   )
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -130,7 +131,7 @@ newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 
 data PTm
   = PPi PiMode Qty Name PTy PTy
-  | PSigma Name Qty PTy Qty PTy
+  | PSigma Qty Name PTy Qty PTy
   | PLam PiMode PPat PTm
   | PLet Qty PPat PTy PTm PTm
   | PPair PTm PTm
@@ -210,35 +211,35 @@ instance (Monad m) => Pretty m PTm where
   singlePretty v | isCompound v = pretty v >>= \p -> return $ "(" ++ p ++ ")"
   singlePretty v = pretty v
 
-  pretty (PPi Explicit q (Name "_") t1 t2) = do
+  pretty (PPi Explicit Many (Name "_") t1 t2) = do
     pt1 <- singlePretty t1
     pt2 <- pretty t2
-    return $ show q ++ pt1 ++ " -> " ++ pt2
+    return $ pt1 ++ " -> " ++ pt2
   pretty (PPi Explicit q v t1 t2) = do
     pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "(" ++ pv ++ " : " ++ show q ++ pt1 ++ ") -> " ++ pt2
+    return $ "(" ++ show q ++ pv ++ " : " ++ pt1 ++ ") -> " ++ pt2
   pretty (PPi Implicit q v t1 t2) = do
     pv <- pretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "[" ++ pv ++ " : " ++ show q ++ pt1 ++ "] -> " ++ pt2
+    return $ "[" ++ show q ++ pv ++ " : " ++ pt1 ++ "] -> " ++ pt2
   pretty (PPi Instance q v t1 t2) = do
     pv <- pretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "[[" ++ pv ++ " : " ++ show q ++ pt1 ++ "]] -> " ++ pt2
+    return $ "[[" ++ show q ++ pv ++ " : " ++ pt1 ++ "]] -> " ++ pt2
   pretty l@(PLam {}) = do
     let (vs, b) = pLamsToList l
     pvs <- mapM singlePretty vs
     pb <- pretty b
     return $ "\\" ++ intercalate " " pvs ++ " => " ++ pb
-  pretty (PSigma v q1 t1 q2 t2) = do
+  pretty (PSigma q1 v t1 q2 t2) = do
     pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "(" ++ pv ++ " : " ++ show q1 ++ pt1 ++ ") * " ++ show q2 ++ pt2
+    return $ "(" ++ show q1 ++ pv ++ " : " ++ pt1 ++ ") * " ++ show q2 ++ pt2
   pretty (PPair t1 t2) = do
     pt1 <- pretty t1
     pt2 <- pretty t2

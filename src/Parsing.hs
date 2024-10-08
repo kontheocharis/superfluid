@@ -14,7 +14,6 @@ import Common
     Qty (..),
     Tag,
     Tel,
-    Times (Finite),
   )
 import Data.Char (isDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, singleton)
@@ -434,7 +433,7 @@ singlePat = singleTerm
 var :: Parser Name
 var = identifier
 
--- | Parse named parameters like `(n : 0 Nat)`.
+-- | Parse named parameters like `(0 n : Nat)`.
 tel :: Parser [(Param PTy, Loc)]
 tel =
   ( concatMap NE.toList
@@ -448,9 +447,8 @@ tel =
       located
         (\(q, n, t) l -> singleton (Param Explicit q n t, l))
         ( do
-            q <- fromMaybe Many <$> optionMaybe qty
             t <- app
-            return (q, Name "_", t)
+            return (Many, Name "_", t)
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
@@ -459,8 +457,6 @@ tel =
         . located (\ts l -> map (\(q, n, t) -> (Param m q n t, l)) ts)
         . try
         $ do
-          n <- many1 var
-          _ <- colon
           q <-
             fromMaybe
               ( case m of
@@ -469,6 +465,8 @@ tel =
                   Instance -> Many
               )
               <$> qty
+          n <- many1 var
+          _ <- colon
           ty <- term
           return $ map (q,,ty) n
       return . NE.fromList $ concat ts
@@ -484,10 +482,15 @@ qty =
 piTOrSigmaT :: Parser PTy
 piTOrSigmaT = try $ do
   ns <- tel
-  op <- (reservedOp "->" >> return PPi) <|> (reservedOp "*" >> return (const PSigma))
-  q <- qty
-  ret <- term
-  return $ foldr (\(t, l) acc -> PLocated l (op t.mode t.name t.ty acc)) ret ns
+  ( reservedOp "->" >> do
+      ret <- term
+      return $ foldr (\(t, l) acc ->  PLocated l (PPi t.mode t.qty t.name t.ty acc)) ret ns
+    )
+    <|> ( reservedOp "*" >> do
+            -- q <- qty
+            ret <- term
+            return $ foldr (\(t, l) acc -> PLocated l (PSigma t.qty t.name t.ty Many acc)) ret ns
+        )
 
 -- | Parse an application.
 app :: Parser PTy
@@ -513,6 +516,7 @@ lets :: Parser PTm
 lets = curlies $ do
   bindings <- many . located (,) $ do
     reserved "let"
+    q <- qty
     v <- singlePat
     ty <- optionMaybe $ do
       colon
@@ -520,12 +524,12 @@ lets = curlies $ do
     reservedOp "="
     t <- term
     reservedOp ";"
-    return (v, ty, t)
+    return (fromMaybe Many q, v, ty, t)
   ret <- term
   return $
     foldr
-      ( \((v, ty, t), loc) acc ->
-          PLocated loc (PLet v (fromMaybe PWild ty) t acc)
+      ( \((q, v, ty, t), loc) acc ->
+          PLocated loc (PLet q v (fromMaybe PWild ty) t acc)
       )
       ret
       bindings

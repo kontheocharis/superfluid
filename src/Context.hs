@@ -8,6 +8,8 @@ module Context
     Goal (..),
     bind,
     insertedBind,
+    CtxEntry (..),
+    assertIsNeeded,
     define,
     typelessBind,
     typelessBinds,
@@ -15,8 +17,8 @@ module Context
   )
 where
 
-import Common (Idx (..), Lvl (..), Name, Qty, lvlToIdx, nextLvl, members)
-import Data.List (intercalate, zipWith4)
+import Common (Lvl (..), Name, Qty, nextLvl, members, lvlToIdx, Idx (unIdx))
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Evaluation ()
@@ -60,6 +62,10 @@ instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =
     intercalate "\n" <$> mapM pretty (reverse (ctxEntries c))
+
+assertIsNeeded :: CtxTy -> VTy
+assertIsNeeded (CtxTy t) = t
+assertIsNeeded TyUnneeded = error "assertIsNeeded: TyUnneeded"
 
 emptyCtx :: Ctx
 emptyCtx =
@@ -131,10 +137,10 @@ addCtxEntry :: CtxEntry -> Ctx -> Ctx
 addCtxEntry e ctx =
   ctx
     { env = e.tm : ctx.env,
-      lvl = nextLvl e.lvl,
+      lvl = nextLvl ctx.lvl,
       types = e.ty : ctx.types,
       bounds = e.bound : ctx.bounds,
-      names = M.insert e.name e.lvl ctx.names,
+      names = M.insert e.name ctx.lvl ctx.names,
       qtys = e.qty : ctx.qtys,
       nameList = e.name : ctx.nameList
     }
@@ -146,14 +152,15 @@ ctxEntries :: Ctx -> [CtxEntry]
 ctxEntries ctx = map (indexCtx ctx) (members ctx.lvl )
 
 indexCtx :: Ctx -> Lvl -> CtxEntry
-indexCtx ctx l =
+indexCtx ctx l = do
+  let i = (lvlToIdx ctx.lvl l).unIdx
   CtxEntry
-    { name = ctx.nameList !! l.unLvl,
-      ty = ctx.types !! l.unLvl,
-      tm = ctx.env !! l.unLvl,
+    { name = ctx.nameList !! i,
+      ty = ctx.types !! i,
+      tm = ctx.env !! i,
       lvl = l,
-      qty = ctx.qtys !! l.unLvl,
-      bound = ctx.bounds !! l.unLvl
+      qty = ctx.qtys !! i,
+      bound = ctx.bounds !! i
     }
 
 lookupName :: Name -> Ctx -> Maybe CtxEntry
