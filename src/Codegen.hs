@@ -18,7 +18,7 @@ import Common
     Spine,
     mapSpineM,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Qty,
   )
 import Control.Monad (zipWithM)
 import Data.Foldable (toList)
@@ -137,8 +137,8 @@ generateCtorItem c = do
     return $ jsArray (intToNat c.idx : ns')
   addDecl $ jsConst (jsName c.name) body
 
-generateLets :: (Gen m) => [(Name, STm, STm)] -> STm -> m [JsStat]
-generateLets ((n, _, t) : ts) ret = jsLet n (generateExpr t) (generateLets ts ret)
+generateLets :: (Gen m) => [(Qty, Name, STm, STm)] -> STm -> m [JsStat]
+generateLets ((_, n, _, t) : ts) ret = jsLet n (generateExpr t) (generateLets ts ret)
 generateLets [] ret = do
   ret' <- generateExpr ret
   return [jsReturn ret']
@@ -146,7 +146,7 @@ generateLets [] ret = do
 generateExpr :: (Gen m) => STm -> m JsExpr
 generateExpr (SPi {}) = return jsNull
 generateExpr SU = return jsNull
-generateExpr (SLam _ v t) = jsLam v $ generateExpr t
+generateExpr (SLam _ _ v t) = jsLam v $ generateExpr t
 generateExpr ls@(SLet {}) = do
   let (xs, ret) = sGatherLets ls
   statements <- generateLets xs ret

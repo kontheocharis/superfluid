@@ -13,11 +13,11 @@ module Common
     inv,
     dec,
     Loc (..),
+    Qty (..),
     Pos (..),
     startPos,
     endPos,
     globName,
-    Positive (..),
     Idx (..),
     Lvl (..),
     WithNames (..),
@@ -25,6 +25,7 @@ module Common
     nextLvl,
     nextLvls,
     lvlToIdx,
+    members,
     Logger (..),
     Arg (..),
     Param (..),
@@ -33,9 +34,7 @@ module Common
     mapSpine,
     mapSpineM,
     telWithNames,
-    composeN,
     composeZ,
-    composeNM,
     composeZM,
     MetaVar (..),
     Glob (..),
@@ -62,6 +61,7 @@ import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
 import Control.Monad ((>=>))
+import Data.Semiring (Semiring (..))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -119,44 +119,34 @@ data Lit t
   | FinLit Natural t
   deriving (Eq, Data, Typeable, Show, Functor, Traversable, Foldable)
 
-data Positive = One | OnePlus Positive deriving (Eq, Show)
-
-composeN :: Positive -> (a -> a) -> a -> a
-composeN One f = f
-composeN (OnePlus n) f = f . composeN n f
-
 composeZ :: Int -> (a -> a) -> (a -> a) -> a -> a
 composeZ 0 _ _ = id
 composeZ n f g = if n > 0 then f . composeZ (n - 1) f g else g . composeZ (n + 1) f g
-
-composeNM :: (Monad m) => Positive -> (a -> m a) -> a -> m a
-composeNM One f = f
-composeNM (OnePlus n) f = f >=> composeNM n f
 
 composeZM :: (Monad m) => Int -> (a -> m a) -> (a -> m a) -> a -> m a
 composeZM 0 _ _ = return
 composeZM n f g = if n > 0 then f >=> composeZM (n - 1) f g else g >=> composeZM (n + 1) f g
 
--- data Negative = Negative Positive deriving (Eq, Show)
+-- | A quantity
+data Qty = Zero | One | Many deriving (Eq)
 
--- positiveToTimes :: Positive -> Times
--- positiveToTimes One = Finite 1
--- positiveToTimes (OnePlus x) = inc (positiveToTimes x)
+instance Show Qty where
+  show Zero = "0 "
+  show One = "1 "
+  show Many = ""
 
--- timesToPositive :: Times -> Maybe (Either Negative Positive)
--- timesToPositive (Finite 0) = Nothing
--- timesToPositive (Finite 1) = Just (Right One)
--- timesToPositive (Finite n) | n > 1 = case timesToPositive (Finite (n - 1)) of
---   Nothing -> Just (Right One)
---   Just (Right x) -> Just (Right (OnePlus x))
---   Just (Left (Negative x)) -> Just (Left (Negative (OnePlus x)))
+instance Semiring Qty where
+  one = One
+  zero = Zero
 
-instance Semigroup Positive where
-  One <> x = OnePlus x
-  OnePlus x <> y = OnePlus (x <> y)
+  times Zero _ = Zero
+  times _ Zero = Zero
+  times One One = One
+  times _ _ = Many
 
--- instance Monoid Negative where
---   mempty = Negative One
+  plus Zero n = n
+  plus n Zero = n
+  plus _ _ = Many
 
 -- | An amount of times to do something, which might be infinite.
 newtype Times = Finite Int deriving (Eq, Ord, Show)
@@ -236,6 +226,10 @@ nextLvls (Lvl l) n = Lvl (l + n)
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
 
+-- Members of a context (represented as a level)
+members :: Lvl -> [Lvl]
+members (Lvl l) = map Lvl [0 .. l - 1]
+
 -- Spines and arguments
 
 data Arg t = Arg {mode :: PiMode, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
@@ -248,7 +242,7 @@ mapSpine f = fmap (fmap f)
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
 
-data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
+data Param t = Param {mode :: PiMode, qty :: Qty, name :: Name, ty :: t}
   deriving
     ( Eq,
       Show,
@@ -260,7 +254,7 @@ data Param t = Param {mode :: PiMode, name :: Name, ty :: t}
 type Tel t = Seq (Param t)
 
 telWithNames :: Tel a -> Spine Name -> Tel a
-telWithNames = S.zipWith (\(Param m _ t) (Arg _ n) -> Param m n t)
+telWithNames = S.zipWith (\(Param m q _ t) (Arg _ n) -> Param m q n t)
 
 -- Metas
 
@@ -367,18 +361,18 @@ instance (Pretty m p, Pretty m t) => Pretty m (Clause p t) where
     return $ pp ++ " => " ++ pc
 
 instance (Pretty m t) => Pretty m (Param t) where
-  pretty (Param Explicit n t) = do
+  pretty (Param Explicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "(" ++ n' ++ " : " ++ t' ++ ")"
-  pretty (Param Implicit n t) = do
+    return $ "(" ++ n' ++ " : " ++ show q ++ t' ++ ")"
+  pretty (Param Implicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[" ++ n' ++ " : " ++ t' ++ "]"
-  pretty (Param Instance n t) = do
+    return $ "[" ++ n' ++ " : " ++ show q ++ t' ++ "]"
+  pretty (Param Instance q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[[" ++ n' ++ " : " ++ t' ++ "]]"
+    return $ "[[" ++ n' ++ " : " ++ show q ++ t' ++ "]]"
 
 -- Files
 

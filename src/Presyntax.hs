@@ -33,7 +33,7 @@ import Common
     Spine,
     Tag (..),
     Tel,
-    arg,
+    arg, Qty, Param (..),
   )
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -129,10 +129,10 @@ data PItem
 newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 
 data PTm
-  = PPi PiMode Name PTy PTy
-  | PSigma Name PTy PTy
+  = PPi PiMode Qty Name PTy PTy
+  | PSigma Name Qty PTy Qty PTy
   | PLam PiMode PPat PTm
-  | PLet PPat PTy PTm PTm
+  | PLet Qty PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
@@ -172,8 +172,8 @@ pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
 pGatherApps (PLocated _ t) = pGatherApps t
 pGatherApps t = (t, Empty)
 
-pLetToList :: PTm -> ([(PPat, PTy, PTm)], PTm)
-pLetToList (PLet n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((n, ty, t1) : binds, ret)
+pLetToList :: PTm -> ([(Qty, PPat, PTy, PTm)], PTm)
+pLetToList (PLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, n, ty, t1) : binds, ret)
 pLetToList (PLocated _ t) = pLetToList t
 pLetToList t = ([], t)
 
@@ -191,15 +191,15 @@ isCompound (PParams t []) = isCompound t
 isCompound (PParams _ _) = True
 isCompound _ = False
 
-prettyLets :: (Monad m) => ([(PPat, PTy, PTm)], PTm) -> m String
+prettyLets :: (Monad m) => ([(Qty, PPat, PTy, PTm)], PTm) -> m String
 prettyLets (binds, ret) = do
   pbinds <-
     mapM
-      ( \(v, ty, t) -> do
+      ( \(q, v, ty, t) -> do
           pv <- singlePretty v
           pty <- pretty ty
           pt <- pretty t
-          return $ "let " ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
+          return $ "let " ++ show q ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
       )
       binds
   pret <- pretty ret
@@ -210,35 +210,35 @@ instance (Monad m) => Pretty m PTm where
   singlePretty v | isCompound v = pretty v >>= \p -> return $ "(" ++ p ++ ")"
   singlePretty v = pretty v
 
-  pretty (PPi Explicit (Name "_") t1 t2) = do
+  pretty (PPi Explicit q (Name "_") t1 t2) = do
     pt1 <- singlePretty t1
     pt2 <- pretty t2
-    return $ pt1 ++ " -> " ++ pt2
-  pretty (PPi Explicit v t1 t2) = do
+    return $ show q ++ pt1 ++ " -> " ++ pt2
+  pretty (PPi Explicit q v t1 t2) = do
     pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "(" ++ pv ++ " : " ++ pt1 ++ ") -> " ++ pt2
-  pretty (PPi Implicit v t1 t2) = do
+    return $ "(" ++ pv ++ " : " ++ show q ++ pt1 ++ ") -> " ++ pt2
+  pretty (PPi Implicit q v t1 t2) = do
     pv <- pretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "[" ++ pv ++ " : " ++ pt1 ++ "] -> " ++ pt2
-  pretty (PPi Instance v t1 t2) = do
+    return $ "[" ++ pv ++ " : " ++ show q ++ pt1 ++ "] -> " ++ pt2
+  pretty (PPi Instance q v t1 t2) = do
     pv <- pretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "[[" ++ pv ++ " : " ++ pt1 ++ "]] -> " ++ pt2
+    return $ "[[" ++ pv ++ " : " ++ show q ++ pt1 ++ "]] -> " ++ pt2
   pretty l@(PLam {}) = do
     let (vs, b) = pLamsToList l
     pvs <- mapM singlePretty vs
     pb <- pretty b
     return $ "\\" ++ intercalate " " pvs ++ " => " ++ pb
-  pretty (PSigma v t1 t2) = do
+  pretty (PSigma v q1 t1 q2 t2) = do
     pv <- singlePretty v
     pt1 <- pretty t1
     pt2 <- pretty t2
-    return $ "(" ++ pv ++ " : " ++ pt1 ++ ") * " ++ pt2
+    return $ "(" ++ pv ++ " : " ++ show q1 ++ pt1 ++ ") * " ++ show q2 ++ pt2
   pretty (PPair t1 t2) = do
     pt1 <- pretty t1
     pt2 <- pretty t2

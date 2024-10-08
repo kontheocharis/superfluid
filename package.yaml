@@ -33,6 +33,7 @@ dependencies:
   - vector >= 0.13 && < 0.14
   - template-haskell >= 2.20 && < 2.21
   - criterion >= 1.6 && < 1.7
+  - semirings >= 0.6 && < 0.7
   - random >= 1.2 && < 1.3
   - th-lift >= 0.8 && < 0.9
   - deepseq >= 1.4 && < 1.5

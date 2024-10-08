@@ -58,7 +58,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Qty (Many), Param (..), Tel,
   )
 import Control.Monad (foldM, (>=>))
 import Control.Monad.Extra (firstJustM)
@@ -136,7 +136,7 @@ vAppLazy :: VLazy -> Spine VTm -> VLazy
 vAppLazy (a, sp) u = (a, sp >< u)
 
 vAppNorm :: (Eval m) => VNorm -> Spine VTm -> m VTm
-vAppNorm ((VLam _ _ c)) (Arg _ u :<| us) = do
+vAppNorm ((VLam _ _ _ c)) (Arg _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
 vAppNorm ((VData (n, us))) u = return . VNorm $ VData (n, us >< u)
@@ -149,17 +149,17 @@ vApp (VNeu n) u = return . VNeu $ vAppNeu n u
 vApp (VLazy n) u = return . VLazy $ vAppLazy n u
 vApp (VNorm n) u = vAppNorm n u
 
-uniqueVLams :: (Eval m) => [PiMode] -> Closure -> m VTm
+uniqueVLams :: (Eval m) => [(PiMode, Qty)] -> Closure -> m VTm
 uniqueVLams ms t = do
-  sp <- fromList <$> mapM (\m -> Arg m <$> uniqueName) ms
+  sp <- fromList <$> mapM (\(m, q) -> Param m q <$> uniqueName <*> return ()) ms
   vLams sp t
 
-vLams :: (Eval m) => Spine Name -> Closure -> m VTm
+vLams :: (Eval m) => Tel () -> Closure -> m VTm
 vLams Empty t = do
   t $$ []
-vLams (Arg m x :<| sp) t = do
+vLams (Param m q x () :<| sp) t = do
   let inner = sLams sp t.body
-  return $ VNorm (VLam m x (Closure (t.numVars + 1) t.env inner))
+  return $ VNorm (VLam m q x (Closure (t.numVars + 1) t.env inner))
 
 vMatch :: VPat -> VTm -> Maybe (Env VTm)
 vMatch (VNeu (VVar _)) u = Just [u]
@@ -188,7 +188,6 @@ vWhnf l x = do
     VNorm _ -> return Nothing
     VNeu _ -> return Nothing
     VLazy n -> vUnfoldLazy l n
-
 
 vUnfoldLazy :: (Eval m) => Lvl -> VLazy -> m (Maybe VTm)
 vUnfoldLazy l (n, sp) = do
@@ -220,7 +219,7 @@ vWhnfReprHead l i h = case h of
   VDataHead h' -> vWhnfReprGlob (DataGlob h') []
   VCtorHead (h', pp) -> vWhnfReprGlob (CtorGlob h') pp
   where
-    vWhnfReprNeuHead :: (Eval m) =>  VNeuHead -> m (Maybe VTm)
+    vWhnfReprNeuHead :: (Eval m) => VNeuHead -> m (Maybe VTm)
     vWhnfReprNeuHead = \case
       VFlex _ -> return Nothing
       VRigid _ -> return Nothing
@@ -229,7 +228,7 @@ vWhnfReprHead l i h = case h of
       VUnrepr _ | i <= 0 -> return Nothing
       VUnrepr x -> Just <$> vRepr l (i - 1) (headAsValue x)
 
-    vWhnfReprLazyHead :: (Eval m) =>  VLazyHead -> m (Maybe VTm)
+    vWhnfReprLazyHead :: (Eval m) => VLazyHead -> m (Maybe VTm)
     vWhnfReprLazyHead = \case
       VLit n -> Just <$> vRepr l i (VNorm (unfoldLit n))
       VLazyCase c -> vWhnfReprCase vLazyCaseToSpine c
@@ -249,11 +248,11 @@ vWhnfReprHead l i h = case h of
               t' <- t $$ map (\a -> a.arg) (toList c.datParams)
               sp <- toSpine c
               Just <$> vApp t' sp
-              -- Just <$> vRepr l i res
+            -- Just <$> vRepr l i res
             _ -> return Nothing
       | otherwise = return Nothing
 
-    vWhnfReprGlob :: (Eval m) =>  Glob -> [VTm] -> m (Maybe VTm)
+    vWhnfReprGlob :: (Eval m) => Glob -> [VTm] -> m (Maybe VTm)
     vWhnfReprGlob g xs
       | i > 0 = do
           d' <- access (getGlobalRepr g)
@@ -307,13 +306,13 @@ reprClosure :: Int -> Closure -> Closure
 reprClosure = postCompose . sReprTimes
 
 sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
-sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const Explicit) p.binds)) True
+sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const (Explicit, Many)) p.binds)) True
 
 vLazyCaseToSpine :: (Eval m) => VLazyCase -> m (Spine VTm)
-vLazyCaseToSpine = caseToSpine VLazy (\p -> uniqueVLams (map (const Explicit) p.binds)) False
+vLazyCaseToSpine = caseToSpine VLazy (\p -> uniqueVLams (map (const (Explicit, Many)) p.binds)) False
 
 vBlockedCaseToSpine :: (Eval m) => VBlockedCase -> m (Spine VTm)
-vBlockedCaseToSpine = caseToSpine VNeu (\p -> uniqueVLams (map (const Explicit) p.binds)) False
+vBlockedCaseToSpine = caseToSpine VNeu (\p -> uniqueVLams (map (const (Explicit, Many)) p.binds)) False
 
 caseToSpine :: (Eval m) => (s -> t) -> (p -> c -> m t) -> Bool -> Case s t p c -> m (Spine t)
 caseToSpine sToT uniqueLams withDataParams c = do
@@ -376,13 +375,13 @@ vRepr l i t = do
     VLazy n -> vReprLazy n
   where
     vReprNorm :: (Eval m) => VNorm -> m VTm
-    vReprNorm (VPi e v a b) = do
+    vReprNorm (VPi m q v a b) = do
       -- ty' <- vRepr l i a
       let b' = reprClosure i b
-      return . VNorm $ VPi e v a b'
-    vReprNorm (VLam e v a) = do
+      return . VNorm $ VPi m q v a b'
+    vReprNorm (VLam m q v a) = do
       let t' = reprClosure i a
-      return . VNorm $ VLam e v t'
+      return . VNorm $ VLam m q v t'
     vReprNorm VU = return (VNorm VU)
     vReprNorm (VData (d, sp)) = do
       -- sp' <- mapSpineM (vRepr l i) sp
@@ -444,13 +443,13 @@ sReprInfCase c = do
       return $ SCase (Case c.dat datParams' subject' subjectIndices' elimTy' clauses')
 
 sReprInf :: (Eval m) => STm -> m STm
-sReprInf (SPi m x a b) = do
+sReprInf (SPi m q x a b) = do
   a' <- sReprInf a
   b' <- sReprInf b
-  return $ SPi m x a' b'
-sReprInf (SLam m x t) = do
+  return $ SPi m q x a' b'
+sReprInf (SLam m q x t) = do
   t' <- sReprInf t
-  return $ SLam m x t'
+  return $ SLam m q x t'
 sReprInf SU = return SU
 sReprInf (SLit t) = SLit <$> traverse sReprInf t
 sReprInf (SApp m a b) = do
@@ -467,11 +466,11 @@ sReprInf (SUnrepr x) = sReprInf x
 sReprInf (SMeta m bs) = do
   warnMsg $ "found metavariable while representing program: " ++ show m
   return $ SMeta m bs
-sReprInf (SLet x ty t y) = do
+sReprInf (SLet q x ty t y) = do
   ty' <- sReprInf ty
   t' <- sReprInf t
   y' <- sReprInf y
-  return $ SLet x ty' t' y'
+  return $ SLet q x ty' t' y'
 sReprInf (SVar i) = return $ SVar i
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
@@ -489,7 +488,7 @@ evalInOwnCtx l cl = cl $$ closureArgs cl.numVars l.unLvl
 closureToLam :: (Eval m) => Closure -> m STm
 closureToLam c = do
   r'' <- evalInOwnCtx (Lvl (length c.env)) c >>= quote (nextLvls (Lvl (length c.env)) c.numVars)
-  uniqueSLams (replicate c.numVars Explicit) r''
+  uniqueSLams (replicate c.numVars (Explicit, Many)) r''
 
 evalPat :: (Eval m) => Env VTm -> SPat -> m VPatB
 evalPat env pat = do
@@ -512,14 +511,14 @@ evalPat env pat = do
       _ -> error $ "impossible: found pat " ++ show pat'
 
 eval :: (Eval m) => Env VTm -> STm -> m VTm
-eval env (SPi m v ty1 ty2) = do
+eval env (SPi m q v ty1 ty2) = do
   ty1' <- eval env ty1
   c <- close 1 env ty2
-  return $ VNorm (VPi m v ty1' c)
-eval env (SLam m v t) = do
+  return $ VNorm (VPi m q v ty1' c)
+eval env (SLam m q v t) = do
   c <- close 1 env t
-  return $ VNorm (VLam m v c)
-eval env (SLet _ _ t1 t2) = do
+  return $ VNorm (VLam m q v c)
+eval env (SLet q _ _ t1 t2) = do
   t1' <- eval env t1
   eval (t1' : env) t2
 eval env (SApp m t1 t2) = do
@@ -652,21 +651,21 @@ quoteLazy l (n, sp) = do
 
 quoteNeu :: (Eval m) => Lvl -> VNeu -> m STm
 quoteNeu l (n, sp) = case n of
-    VFlex m -> quoteSpine l (SMeta m []) sp
-    VRigid l' -> quoteSpine l (SVar (lvlToIdx l l')) sp
-    VBlockedCase c -> quoteCaseSpine quoteNeu l c sp
-    VPrim p -> quoteSpine l (SPrim p) sp
-    VUnrepr n' -> quoteReprSpine l (-1) (headAsValue n') sp
+  VFlex m -> quoteSpine l (SMeta m []) sp
+  VRigid l' -> quoteSpine l (SVar (lvlToIdx l l')) sp
+  VBlockedCase c -> quoteCaseSpine quoteNeu l c sp
+  VPrim p -> quoteSpine l (SPrim p) sp
+  VUnrepr n' -> quoteReprSpine l (-1) (headAsValue n') sp
 
 quoteNorm :: (Eval m) => Lvl -> VNorm -> m STm
 quoteNorm l n = case n of
-  VLam m x t -> do
+  VLam m q x t -> do
     t' <- quoteClosure l t
-    return $ SLam m x t'
-  VPi m x ty t -> do
+    return $ SLam m q x t'
+  VPi m q x ty t -> do
     ty' <- quote l ty
     t' <- quoteClosure l t
-    return $ SPi m x ty' t'
+    return $ SPi m q x ty' t'
   VU -> return SU
   VData (d, sp) -> quoteSpine l (SData d) sp
   VCtor ((c, pp), sp) -> do
@@ -698,7 +697,7 @@ isTypeFamily :: (Eval m) => Lvl -> VTm -> m Bool
 isTypeFamily l t = do
   t' <- vUnfold l t
   case t' of
-    VNorm (VPi _ _ _ b) -> do
+    VNorm (VPi _ _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isTypeFamily (nextLvl l) b'
     VNorm VU -> return True
@@ -708,7 +707,7 @@ isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine ()))
 isCtorTy l d t = do
   t' <- vUnfold l t
   case t' of
-    VNorm (VPi _ _ _ b) -> do
+    VNorm (VPi _ _ _ _ b) -> do
       b' <- evalInOwnCtx l b
       isCtorTy (nextLvl l) d b'
     VNorm (VData (d', sp)) | d == d' -> return (Just (mapSpine (const ()) sp))

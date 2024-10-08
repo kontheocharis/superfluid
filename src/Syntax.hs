@@ -68,7 +68,7 @@ import Common
     PrimGlobal,
     Spine,
     Tel,
-    unLvl,
+    unLvl, Qty,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -191,8 +191,8 @@ headAsValue (VDataHead d) = VNorm (VData (d, Empty))
 headAsValue (VCtorHead c) = VNorm (VCtor (c, Empty))
 
 data VNorm
-  = VPi PiMode Name VTy Closure
-  | VLam PiMode Name Closure
+  = VPi PiMode Qty Name VTy Closure
+  | VLam PiMode Qty Name Closure
   | VData VData
   | VCtor VCtor
   | VU
@@ -235,9 +235,9 @@ data BoundState = Bound | Defined deriving (Eq, Show)
 type Bounds = [BoundState]
 
 data STm
-  = SPi PiMode Name STm STm
-  | SLam PiMode Name STm
-  | SLet Name STy STm STm
+  = SPi PiMode Qty Name STm STm
+  | SLam PiMode Qty Name STm
+  | SLet Qty Name STy STm STm
   | SMeta MetaVar Bounds
   | SApp PiMode STm STm
   | SCase SCase
@@ -264,14 +264,14 @@ sAppSpine :: STm -> Spine STm -> STm
 sAppSpine t Empty = t
 sAppSpine t (Arg m u :<| sp) = sAppSpine (SApp m t u) sp
 
-uniqueSLams :: (HasNameSupply m) => [PiMode] -> STm -> m STm
+uniqueSLams :: (HasNameSupply m) => [(PiMode, Qty)] -> STm -> m STm
 uniqueSLams ms t = do
-  sp <- fromList <$> mapM (\m -> Arg m <$> uniqueName) ms
+  sp <- fromList <$> mapM (\(m, q) -> Param m q <$> uniqueName <*> return ()) ms
   return $ sLams sp t
 
-sLams :: Spine Name -> STm -> STm
+sLams :: Tel () -> STm -> STm
 sLams Empty t = t
-sLams (Arg m x :<| sp) t = SLam m x (sLams sp t)
+sLams (Param m q x () :<| sp) t = SLam m q x (sLams sp t)
 
 sGatherApps :: STm -> (STm, Spine STm)
 sGatherApps (SApp m t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m u)
@@ -279,21 +279,21 @@ sGatherApps t = (t, Empty)
 
 sPis :: Tel STm -> STm -> STm
 sPis Empty b = b
-sPis (Param m n a :<| xs) b = SPi m n a (sPis xs b)
+sPis (Param q m n a :<| xs) b = SPi q m n a (sPis xs b)
 
 sGatherPis :: STm -> (Tel STm, STm)
 sGatherPis = \case
-  SPi m n a b -> let (xs, b') = sGatherPis b in (Param m n a :<| xs, b')
+  SPi m q n a b -> let (xs, b') = sGatherPis b in (Param m q n a :<| xs, b')
   t -> (Empty, t)
 
-sGatherLams :: STm -> (Spine Name, STm)
+sGatherLams :: STm -> (Tel (), STm)
 sGatherLams = \case
-  SLam m n t -> let (ns, b) = sGatherLams t in (Arg m n :<| ns, b)
+  SLam m q n t -> let (ns, b) = sGatherLams t in (Param m q n () :<| ns, b)
   t -> (Empty, t)
 
-sGatherLets :: STm -> ([(Name, STy, STm)], STm)
+sGatherLets :: STm -> ([(Qty, Name, STy, STm)], STm)
 sGatherLets = \case
-  SLet n ty t u -> let (binds, ret) = sGatherLets u in ((n, ty, t) : binds, ret)
+  SLet q n ty t u -> let (binds, ret) = sGatherLets u in ((q, n, ty, t) : binds, ret)
   t -> ([], t)
 
 sGlobWithParams :: Glob -> [STm] -> STm
