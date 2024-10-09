@@ -45,7 +45,7 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
 
 prim trust-me : [A : Type, x : A, y : A] -> Equal x y
 
-prim conjure : (A : Type) -> A
+prim conjure : (0 A : Type) -> A
 
 -- -- JS primitives
 
@@ -65,7 +65,7 @@ prim JsUint : Type
 
 -- Extra conditions : make sure this index is computationally irrelevant
 
-prim JsBoundedUint : JsUint -> Type
+prim JsBoundedUint : (0 _ : JsUint) -> Type
 
 prim JsNumber : Type
 
@@ -246,9 +246,9 @@ prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
 
 -- -- General primitives
 
-prim unsafe-cast : [A : Type] -> (B : Type) -> A -> B
+prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
 
-prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (t : T) -> [u : T] -> (h : E u) -> E t
+prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
 
 -- def from-js : [A : Type] -> JS -> A {
 --   \a => cast a
@@ -285,7 +285,7 @@ data List (A : Type) : Type {
   cons : A -> List A -> List A
 }
 
-data Fin : Nat -> Type {
+data Fin : (0 _ : Nat) -> Type {
   fz : [n : Nat] -> Fin (s n),
   fs : [n : Nat] -> Fin n -> Fin (s n)
 }
