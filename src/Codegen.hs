@@ -31,12 +31,13 @@ import Evaluation (Eval)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
-    DefGlobalInfo (name, tm),
+    DefGlobalInfo (..),
     GlobalInfo (..),
     mapSigContentsM_,
   )
 import Printing (indentedFst)
 import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
+import Control.Monad.Extra (when)
 
 newtype JsStat = JsStat String
 
@@ -119,7 +120,7 @@ generateItem :: (Gen m) => GlobalInfo -> m ()
 generateItem (DataInfo d) = generateDataItem d
 generateItem (CtorInfo c) = generateCtorItem c
 generateItem (PrimInfo {}) = return () -- should be handled by the boot file
-generateItem (DefInfo d) = generateDeclItem d
+generateItem (DefInfo d) = when (d.qty > Zero) $ generateDeclItem d
 
 generateDeclItem :: (Gen m) => DefGlobalInfo -> m ()
 generateDeclItem d = do

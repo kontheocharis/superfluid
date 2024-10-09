@@ -41,7 +41,7 @@ def is-amicable-pair : (a : Nat, b : Nat) -> Maybe (AmicablePair a b) {
 }
 
 def main : IO () {
-  case is-amicable-pair 284 221 {
+  case is-amicable-pair 284 220 {
     nothing => io-return (debug-print "Not amicable!" tt),
     just _ => io-return (debug-print "Amicable!" tt)
   }

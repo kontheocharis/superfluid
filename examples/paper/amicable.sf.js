@@ -215,7 +215,6 @@ var yes = (x19640) => [0, x19640];
 var no = (x19650) => [1, x19650];
 var sub = (m0) => (n1) => (js_zero_or_pos)((_2) => m0)((x2) => (js_zero_or_pos)((_3) => js_uint_zero)((x3) => (sub)(x3)(x2))(m0))(n1);
 var upgrade = (k1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (x3) => (js_bounded_uint_inc)((upgrade)(x2)(x3)))(k1);
-var type = A0;
 var find = (p1) => (xs2) => (js_array_switch_l)((_3) => nothing)((a3) => (xs4) => (js_if_dep)((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(p1)(a3)))(xs2);
 var subst = (e4) => (unsafe_cast)((a5) => a5);
 var subst_type = subst;
@@ -270,14 +269,12 @@ var ascii_eq = (a10) => (a21) => (unsafe_complete)((unsafe_complete)((js_eqq)(a1
 var word_to_nat = (n0) => (js_forget_bound)(n0);
 var Holds = JsUndefined;
 var determine = (x0) => (js_if_dep)(x0)((_1) => (just)(js_undefined))((_1) => nothing);
-var byte_vec_length = (b1) => n0;
 var byte_vec_lookup = (s2) => (l3) => (d4) => (js_array_switch_l)((_5) => (d4)(tt))((a5) => (xs6) => (() => {
   switch ((xs6)[0]) {
     case 0: return ((k7) => (v8) => (if_then_else)((js_buffer_eq)((fst)(s2))((fst)(k7)))((_9) => (v8)(tt))((_9) => (byte_vec_lookup)(s2)(a5)(d4)))((xs6)[1])((xs6)[2]);
   }
 })())(l3);
 var panic = (a1) => (unsafe_io)((io_bind)((js_console_log)(a1))((_2) => (js_exit)(js_one)));
-var Reprs = (js_zero_or_pos)((_2) => T1)((x2) => Reprs)(l0);
 var reprs = (l1) => (t2) => (js_zero_or_pos)((_3) => t2)((x3) => (reprs)(x3)(t2))(l1);
 var unreprs = (l1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (r3) => (unreprs)(x2)(r3))(l1);
 var repr_subst = subst_type;
@@ -313,9 +310,9 @@ var is_amicable_pair = (a0) => (b1) => (() => {
   }
 })();
 var main = (() => {
-  switch (((is_amicable_pair)(284)(221))[0]) {
+  switch (((is_amicable_pair)(284)(220))[0]) {
     case 0: return (io_return)((debug_print)("Not amicable!")(tt));
-    case 1: return ((x19240) => (io_return)((debug_print)("Amicable!")(tt)))(((is_amicable_pair)(284)(221))[1]);
+    case 1: return ((x19240) => (io_return)((debug_print)("Amicable!")(tt)))(((is_amicable_pair)(284)(220))[1]);
   }
 })();
 (main)()
