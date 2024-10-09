@@ -497,7 +497,7 @@ piTOrSigmaT = try $ do
 app :: Parser PTy
 app = do
   t <- singleTerm
-  ts <- many ((Arg Implicit <$> try (square term)) <|> (Arg Explicit <$> try singleTerm))
+  ts <- many ((Arg Implicit Many <$> try (square term)) <|> (Arg Explicit Many <$> try singleTerm))
   return $ pApp t ts
 
 -- | Parse a representation term

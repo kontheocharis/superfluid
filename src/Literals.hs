@@ -4,6 +4,7 @@ import Common
   ( Arg (..),
     Lit (..),
     PiMode (..),
+    Qty (..),
   )
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
@@ -16,7 +17,7 @@ import Syntax
   )
 
 minusOneNat :: VTm -> VTm
-minusOneNat t = VLazy (VDef (knownDef KnownSub), S.singleton (Arg Explicit t))
+minusOneNat t = VLazy (VDef (knownDef KnownSub), S.singleton (Arg Explicit Many t))
 
 unfoldLit :: Lit VTm -> VNorm
 unfoldLit = \case
@@ -24,31 +25,32 @@ unfoldLit = \case
     let inner =
           VNorm
             ( VCtor
-                ( (knownCtor KnownNil, []),
-                  S.fromList [Arg Implicit (VNorm (VData (knownData KnownChar, Empty)))]
+                ( (knownCtor KnownNil, Empty),
+                  S.fromList [Arg Implicit Zero (VNorm (VData (knownData KnownChar, Empty)))]
                 )
             )
-     in VCtor ((knownCtor KnownStr, []), S.fromList [Arg Explicit inner])
+     in VCtor ((knownCtor KnownStr, Empty), S.fromList [Arg Explicit Many inner])
   StringLit (x : xs) ->
     let inner =
           VNorm
             ( VCtor
-                ( (knownCtor KnownCons, []),
+                ( (knownCtor KnownCons, Empty),
                   S.fromList
-                    [ Arg Implicit (VNorm (VData (knownData KnownChar, Empty))),
-                      Arg Explicit (VLazy (VLit (CharLit x), Empty)),
-                      Arg Explicit (VLazy (VLit (StringLit xs), Empty))
+                    [ Arg Implicit Zero (VNorm (VData (knownData KnownChar, Empty))),
+                      Arg Explicit Many (VLazy (VLit (CharLit x), Empty)),
+                      Arg Explicit Many (VLazy (VLit (StringLit xs), Empty))
                     ]
                 )
             )
-     in VCtor ((knownCtor KnownStr, []), S.fromList [Arg Explicit inner])
+     in VCtor ((knownCtor KnownStr, Empty), S.fromList [Arg Explicit Many inner])
   CharLit x ->
     let finBound = VLazy (VLit (NatLit (2 ^ (32 :: Natural))), Empty)
      in VCtor
-          ( (knownCtor KnownChr, []),
+          ( (knownCtor KnownChr, Empty),
             S.singleton
               ( Arg
                   Explicit
+                  Many
                   ( VLazy
                       ( VLit
                           ( FinLit
@@ -61,19 +63,19 @@ unfoldLit = \case
               )
           )
   NatLit 0 ->
-    VCtor ((knownCtor KnownZero, []), S.empty)
+    VCtor ((knownCtor KnownZero, Empty), S.empty)
   NatLit n ->
-    VCtor ((knownCtor KnownSucc, []), S.singleton (Arg Explicit (VLazy (VLit (NatLit (n - 1)), Empty))))
+    VCtor ((knownCtor KnownSucc, Empty), S.singleton (Arg Explicit Many (VLazy (VLit (NatLit (n - 1)), Empty))))
   FinLit 0 n ->
     VCtor
-        ( (knownCtor KnownFZero, []),
-          S.singleton (Arg Implicit (VNorm (VData (knownData KnownNat, S.singleton (Arg Explicit n)))))
-        )
+      ( (knownCtor KnownFZero, Empty),
+        S.singleton (Arg Implicit Zero n)
+      )
   FinLit d n ->
     VCtor
-        ( (knownCtor KnownFSucc, []),
-          S.fromList
-            [ Arg Implicit (VNorm (VData (knownData KnownNat, S.singleton (Arg Explicit n)))),
-              Arg Explicit (VLazy (VLit (FinLit (d - 1) (minusOneNat n)), Empty))
-            ]
-        )
+      ( (knownCtor KnownFSucc, Empty),
+        S.fromList
+          [ Arg Implicit Zero n,
+            Arg Explicit Many (VLazy (VLit (FinLit (d - 1) (minusOneNat n)), Empty))
+          ]
+      )

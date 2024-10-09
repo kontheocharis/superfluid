@@ -27,7 +27,7 @@ import Common
     PiMode (..),
     Tag,
     Tel,
-    unMetaVar,
+    unMetaVar, Qty (..), mapSpineM,
   )
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT (..))
@@ -81,24 +81,24 @@ unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
           Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
   (n : ns', Bound : bs') -> do
     (t, ts) <- unelabMeta ns' m bs'
-    return (t, Arg Explicit (PName n) : ts)
+    return (t, Arg Explicit Many (PName n) : ts)
   (_ : ns', Defined : bs') -> unelabMeta ns' m bs'
   _ -> error "impossible"
 
 unelabPat :: (Unelab m) => [Name] -> SPat -> m PTm
 unelabPat ns pat = do
-  (n, _) <- runStateT (unelabPat' pat.asTm) pat.binds
+  (n, _) <- runStateT (unelabPat' pat.asTm) (map snd pat.binds)
   return n
   where
     unelabPat' :: (Unelab m) => STm -> StateT [Name] m PTm
     unelabPat' pat' = case pat' of
       (SCtor (c, pp)) -> do
-        pp' <- lift $ mapM (unelab ns) pp
-        return $ PParams (PName c.globalName) pp'
-      (SApp m a b) -> do
+        pp' <- lift $ mapSpineM (unelab ns) pp
+        return $ PParams (PName c.globalName) (map (\a -> a.arg) $ toList pp')
+      (SApp m q a b) -> do
         a' <- unelabPat' a
         b' <- unelabPat' b
-        return $ pApp a' [Arg m b']
+        return $ pApp a' [Arg m q b']
       (SVar (Idx 0)) ->
         state
           ( \case
@@ -123,7 +123,7 @@ unelab ns = \case
     case i of
       Just i' -> return $ PName i'
       Nothing -> return $ PName (Name $ "?" ++ show v.unIdx)
-  (SApp m t u) -> PApp m <$> unelab ns t <*> unelab ns u
+  (SApp m _ t u) -> PApp m <$> unelab ns t <*> unelab ns u
   (SCase (Case _ _ t _ r cs)) ->
     PCase
       <$> unelab ns t
@@ -132,13 +132,13 @@ unelab ns = \case
         ( \c ->
             Clause
               <$> unelabPat ns c.pat
-              <*> traverse (unelab (reverse c.pat.binds ++ ns)) c.branch
+              <*> traverse (unelab (reverse (map snd c.pat.binds) ++ ns)) c.branch
         )
         cs
   SU -> return PU
   SCtor (g, pp) -> do
-    pp' <- mapM (unelab ns) pp
-    return $ PParams (PName g.globalName) pp'
+    pp' <- mapSpineM (unelab ns) pp
+    return $ PParams (PName g.globalName) (map (\a -> a.arg) $ toList pp')
   SDef g -> return $ PName g.globalName
   SData g -> return $ PName g.globalName
   SPrim g -> return $ PName g.globalName
@@ -226,7 +226,7 @@ instance (Unelab m, Has m [Name]) => Pretty m Closure where
     pretty cl'
 
 instance (Unelab m, Has m [Name]) => Pretty m VPatB where
-  pretty (VPatB pat names) = enter (names ++) $ pretty pat
+  pretty (VPatB pat names) = enter (map snd names ++) $ pretty pat
 
 instance (Unelab m, Has m [Name]) => Pretty m Sub where
   pretty sub = do

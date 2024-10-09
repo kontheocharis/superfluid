@@ -31,6 +31,7 @@ module Evaluation
     extendEnvByNVars,
     mapGlobalInfoM,
     close,
+    ($$>),
   )
 where
 
@@ -129,6 +130,9 @@ infixl 8 $$
 ($$) :: (Eval m) => Closure -> [VTm] -> m VTm
 Closure _ env t $$ us = eval (reverse us ++ env) t
 
+($$>) :: (Eval m) => Closure -> Spine VTm -> m VTm
+c $$> sp = c $$ map (\a -> a.arg) (toList sp)
+
 vAppNeu :: VNeu -> Spine VTm -> VNeu
 vAppNeu (a, sp) sp' = (a, sp >< sp')
 
@@ -136,7 +140,7 @@ vAppLazy :: VLazy -> Spine VTm -> VLazy
 vAppLazy (a, sp) u = (a, sp >< u)
 
 vAppNorm :: (Eval m) => VNorm -> Spine VTm -> m VTm
-vAppNorm ((VLam _ _ _ c)) (Arg _ u :<| us) = do
+vAppNorm ((VLam _ _ _ c)) (Arg _ _ u :<| us) = do
   c' <- c $$ [u]
   vApp c' us
 vAppNorm ((VData (n, us))) u = return . VNorm $ VData (n, us >< u)
@@ -166,7 +170,7 @@ vMatch (VNeu (VVar _)) u = Just [u]
 vMatch (VNorm (VCtor ((CtorGlobal c, _), ps))) (VNorm (VCtor ((CtorGlobal c', _), xs)))
   | c == c' && length ps == length xs =
       foldM
-        ( \acc (Arg _ p, Arg _ x) -> do
+        ( \acc (Arg _ _ p, Arg _ _ x) -> do
             env <- vMatch p x
             return $ acc ++ env
         )
@@ -216,7 +220,7 @@ vWhnfReprHead _ 0 _ = return Nothing
 vWhnfReprHead l i h = case h of
   VNeuHead h' -> vWhnfReprNeuHead h'
   VLazyHead h' -> vWhnfReprLazyHead h'
-  VDataHead h' -> vWhnfReprGlob (DataGlob h') []
+  VDataHead h' -> vWhnfReprGlob (DataGlob h') Empty
   VCtorHead (h', pp) -> vWhnfReprGlob (CtorGlob h') pp
   where
     vWhnfReprNeuHead :: (Eval m) => VNeuHead -> m (Maybe VTm)
@@ -232,7 +236,7 @@ vWhnfReprHead l i h = case h of
     vWhnfReprLazyHead = \case
       VLit n -> Just <$> vRepr l i (VNorm (unfoldLit n))
       VLazyCase c -> vWhnfReprCase vLazyCaseToSpine c
-      VDef d -> vWhnfReprGlob (DefGlob d) []
+      VDef d -> vWhnfReprGlob (DefGlob d) Empty
       VRepr _ -> return Nothing
 
     vWhnfReprCase ::
@@ -252,12 +256,12 @@ vWhnfReprHead l i h = case h of
             _ -> return Nothing
       | otherwise = return Nothing
 
-    vWhnfReprGlob :: (Eval m) => Glob -> [VTm] -> m (Maybe VTm)
+    vWhnfReprGlob :: (Eval m) => Glob -> Spine VTm -> m (Maybe VTm)
     vWhnfReprGlob g xs
       | i > 0 = do
           d' <- access (getGlobalRepr g)
           case d' of
-            Just t -> Just <$> t $$ xs
+            Just t -> Just <$> t $$> xs
             Nothing -> return Nothing
       | otherwise = return Nothing
 
@@ -276,7 +280,7 @@ vCase c = do
         c.clauses
         >>= \case
           Just x' -> return x'
-          Nothing -> error "impossible"
+          Nothing -> error $ "impossible: " ++ show c
     VNeu n -> return $ VNeu (VBlockedCase (c {subject = n}), Empty)
     VLazy n -> return $ VLazy (VLazyCase (c {subject = n}), Empty)
 
@@ -321,12 +325,12 @@ caseToSpine sToT uniqueLams withDataParams c = do
       ( \acc -> \case
           Possible p t -> do
             t' <- uniqueLams p t
-            return $ acc :|> Arg Explicit t'
+            return $ acc :|> Arg Explicit Many t'
           Impossible _ -> return acc
       )
-      (if withDataParams then c.datParams else Empty :|> Arg Explicit c.elimTy)
+      ((if withDataParams then c.datParams else Empty) :|> Arg Explicit Zero c.elimTy)
       c.clauses
-  return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit (sToT c.subject))
+  return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit Many (sToT c.subject))
 
 mapDataGlobalInfoM :: (Eval m) => (STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
 mapDataGlobalInfoM f (DataGlobalInfo n params fullTy ty ctors motiveTy elimTy indexArity) = do
@@ -413,16 +417,16 @@ reprInfSig = do
   s'' <- mapSigContentsM (mapGlobalInfoM sReprInf) s'
   modify (const s'')
 
-sReprInfGlob :: (Eval m) => Glob -> [STm] -> m STm
+sReprInfGlob :: (Eval m) => Glob -> Spine STm -> m STm
 sReprInfGlob g xs = do
   d' <- access (getGlobalRepr g)
   case d' of
     Just r' -> do
       r'' <- closureToLam r'
-      let res = sAppSpine r'' (S.fromList (map (Arg Explicit) xs))
+      let res = sAppSpine r'' xs
       sReprInf res
     Nothing -> do
-      xs' <- mapM sReprInf xs
+      xs' <- mapSpineM sReprInf xs
       return $ sGlobWithParams g xs'
 
 sReprInfCase :: (Eval m) => SCase -> m STm
@@ -452,14 +456,14 @@ sReprInf (SLam m q x t) = do
   return $ SLam m q x t'
 sReprInf SU = return SU
 sReprInf (SLit t) = SLit <$> traverse sReprInf t
-sReprInf (SApp m a b) = do
+sReprInf (SApp m q a b) = do
   a' <- sReprInf a
   b' <- sReprInf b
-  return $ SApp m a' b'
-sReprInf (SData d) = sReprInfGlob (DataGlob d) []
+  return $ SApp m q a' b'
+sReprInf (SData d) = sReprInfGlob (DataGlob d) Empty
 sReprInf (SCtor (c, xs)) = sReprInfGlob (CtorGlob c) xs
-sReprInf (SDef d) = sReprInfGlob (DefGlob d) []
-sReprInf (SPrim p) = sReprInfGlob (PrimGlob p) []
+sReprInf (SDef d) = sReprInfGlob (DefGlob d) Empty
+sReprInf (SPrim p) = sReprInfGlob (PrimGlob p) Empty
 sReprInf (SCase c) = sReprInfCase c
 sReprInf (SRepr x) = sReprInf x
 sReprInf (SUnrepr x) = sReprInf x
@@ -498,12 +502,12 @@ evalPat env pat = do
     evalPat' :: (Eval m) => Env VTm -> STm -> StateT Int m VTm
     evalPat' e pat' = case pat' of
       (SCtor (c, pp)) -> do
-        pp' <- mapM (lift . eval e) pp
+        pp' <- mapSpineM (lift . eval e) pp
         return $ VNorm (VCtor ((c, pp'), Empty))
-      (SApp m a b) -> do
+      (SApp m q a b) -> do
         a' <- evalPat' e a
         b' <- evalPat' e b
-        lift $ vApp a' (S.singleton (Arg m b'))
+        lift $ vApp a' (S.singleton (Arg m q b'))
       (SVar (Idx _)) -> do
         s <- get
         put (s + 1)
@@ -521,10 +525,10 @@ eval env (SLam m q v t) = do
 eval env (SLet _ _ _ t1 t2) = do
   t1' <- eval env t1
   eval (t1' : env) t2
-eval env (SApp m t1 t2) = do
+eval env (SApp m q t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
-  vApp t1' (S.singleton (Arg m t2'))
+  vApp t1' (S.singleton (Arg m q t2'))
 eval env (SCase (Case dat pp t i r cs)) = do
   t' <- eval env t
   cs' <-
@@ -549,7 +553,7 @@ eval env (SMeta m bds) = do
   vAppBinds env m' bds
 eval _ (SData d) = return $ VNorm (VData (d, Empty))
 eval env (SCtor (c, pp)) = do
-  pp' <- mapM (eval env) pp
+  pp' <- mapSpineM (eval env) pp
   return $ VNorm (VCtor ((c, pp'), Empty))
 eval _ (SDef d) = do
   return $ VLazy (VDef d, Empty)
@@ -567,7 +571,7 @@ vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
   (_, []) -> return v
   (x : env', Bound : binds') -> do
-    v' <- vApp v (S.singleton (Arg Explicit x))
+    v' <- vApp v (S.singleton (Arg Explicit Many x))
     vAppBinds env' v' binds'
   (_ : env', Defined : binds') -> vAppBinds env' v binds'
   ([], _) -> error "impossible"
@@ -591,10 +595,10 @@ force v = return v
 
 quoteSpine :: (Eval m) => Lvl -> STm -> Spine VTm -> m STm
 quoteSpine _ t Empty = return t
-quoteSpine l t (sp :|> Arg m u) = do
+quoteSpine l t (sp :|> Arg m q u) = do
   t' <- quoteSpine l t sp
   u' <- quote l u
-  return $ SApp m t' u'
+  return $ SApp m q t' u'
 
 quoteClosure :: (Eval m) => Lvl -> Closure -> m STm
 quoteClosure l cl = do
@@ -609,7 +613,7 @@ quotePat l p = do
     quotePat' :: (Eval m) => Lvl -> VTm -> m STm
     quotePat' l' (VNorm (VCtor ((c, pp), sp))) = do
       sp' <- mapSpineM (quotePat' l') sp
-      pp' <- mapM (quote l') pp
+      pp' <- mapSpineM (quote l') pp
       return $ sAppSpine (SCtor (c, pp')) sp'
     quotePat' _ (VNeu (VVar _)) = return $ SVar (Idx 0)
     quotePat' _ _ = error "impossible"
@@ -669,7 +673,7 @@ quoteNorm l n = case n of
   VU -> return SU
   VData (d, sp) -> quoteSpine l (SData d) sp
   VCtor ((c, pp), sp) -> do
-    pp' <- mapM (quote l) pp
+    pp' <- mapSpineM (quote l) pp
     quoteSpine l (SCtor (c, pp')) sp
 
 quote :: (Eval m) => Lvl -> VTm -> m STm

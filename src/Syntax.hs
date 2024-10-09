@@ -109,7 +109,7 @@ liftPRenN n ren = liftPRenN (n - 1) (liftPRen ren)
 
 type VPat = VTm
 
-data VPatB = VPatB {vPat :: VPat, binds :: [Name]} deriving (Show)
+data VPatB = VPatB {vPat :: VPat, binds :: [(Qty, Name)]} deriving (Show)
 
 type VTy = VTm
 
@@ -140,7 +140,7 @@ type VLazy = VSpined VLazyHead
 
 type VData = VSpined DataGlobal
 
-type VCtor = VSpined (CtorGlobal, [VTm])
+type VCtor = VSpined (CtorGlobal, Spine VTm)
 
 type VLazyCase = Case VLazy VTm VPatB Closure
 
@@ -166,7 +166,7 @@ data VHead
   = VNeuHead VNeuHead
   | VLazyHead VLazyHead
   | VDataHead DataGlobal
-  | VCtorHead (CtorGlobal, [VTm])
+  | VCtorHead (CtorGlobal, Spine VTm)
   deriving (Show)
 
 
@@ -228,7 +228,7 @@ pattern VMeta m = (VFlex m, Empty)
 
 type STy = STm
 
-data SPat = SPat {asTm :: STm, binds :: [Name]} deriving (Show)
+data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show)
 
 data BoundState = Bound | Defined deriving (Eq, Show)
 
@@ -239,11 +239,11 @@ data STm
   | SLam PiMode Qty Name STm
   | SLet Qty Name STy STm STm
   | SMeta MetaVar Bounds
-  | SApp PiMode STm STm
+  | SApp PiMode Qty STm STm
   | SCase SCase
   | SU
   | SData DataGlobal
-  | SCtor (CtorGlobal, [STm])
+  | SCtor (CtorGlobal, Spine STm)
   | SDef DefGlobal
   | SPrim PrimGlobal
   | SVar Idx
@@ -262,7 +262,7 @@ sReprTimes n t | n > 0 = SRepr (sReprTimes (n - 1) t)
 
 sAppSpine :: STm -> Spine STm -> STm
 sAppSpine t Empty = t
-sAppSpine t (Arg m u :<| sp) = sAppSpine (SApp m t u) sp
+sAppSpine t (Arg m q u :<| sp) = sAppSpine (SApp m q t u) sp
 
 uniqueSLams :: (HasNameSupply m) => [(PiMode, Qty)] -> STm -> m STm
 uniqueSLams ms t = do
@@ -274,7 +274,7 @@ sLams Empty t = t
 sLams (Param m q x () :<| sp) t = SLam m q x (sLams sp t)
 
 sGatherApps :: STm -> (STm, Spine STm)
-sGatherApps (SApp m t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m u)
+sGatherApps (SApp m q t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m q u)
 sGatherApps t = (t, Empty)
 
 sPis :: Tel STm -> STm -> STm
@@ -296,7 +296,7 @@ sGatherLets = \case
   SLet q n ty t u -> let (binds, ret) = sGatherLets u in ((q, n, ty, t) : binds, ret)
   t -> ([], t)
 
-sGlobWithParams :: Glob -> [STm] -> STm
+sGlobWithParams :: Glob -> Spine STm -> STm
 sGlobWithParams (DataGlob d) _ = SData d
 sGlobWithParams (CtorGlob c) xs = SCtor (c, xs)
 sGlobWithParams (DefGlob d) _ = SDef d

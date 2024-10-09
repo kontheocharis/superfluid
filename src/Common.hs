@@ -238,7 +238,7 @@ members (Lvl l) = map Lvl [0 .. l - 1]
 
 -- Spines and arguments
 
-data Arg t = Arg {mode :: PiMode, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
+data Arg t = Arg {mode :: PiMode, qty :: Qty, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
 
 type Spine t = Seq (Arg t)
 
@@ -259,8 +259,8 @@ data Param t = Param {mode :: PiMode, qty :: Qty, name :: Name, ty :: t}
 
 type Tel t = Seq (Param t)
 
-telWithNames :: Tel a -> Spine Name -> Tel a
-telWithNames = S.zipWith (\(Param m q _ t) (Arg _ n) -> Param m q n t)
+telWithNames :: Tel a -> [Name] -> Tel a
+telWithNames te ns = S.zipWith (\(Param m q _ t) n -> Param m q n t) te (S.fromList ns)
 
 -- Metas
 
@@ -324,7 +324,7 @@ instance (Monad m) => Pretty m Name where
   pretty (Name n) = return n
 
 instance (Pretty m x) => Pretty m (Arg x) where
-  pretty (Arg m x) = case m of
+  pretty (Arg m _ x) = case m of
     Explicit -> singlePretty x
     Implicit -> do
       x' <- pretty x

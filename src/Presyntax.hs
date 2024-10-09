@@ -158,20 +158,20 @@ pApp :: PTm -> [Arg PTm] -> PTm
 pApp = foldl (\g x -> PApp x.mode g x.arg)
 
 toPSpine :: PTm -> (PTm, Spine PTm)
-toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m u)
+toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m Many u)
 toPSpine t = (t, Empty)
 
 pLamsToList :: PTm -> ([Arg PPat], PTm)
-pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m n : ns, b)
+pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m Many n : ns, b)
 pLamsToList (PLocated _ t) = pLamsToList t
 pLamsToList t = ([], t)
 
 pLams :: Spine Name -> PTm -> PTm
 pLams Empty b = b
-pLams (Arg m n :<| xs) b = PLam m (PName n) (pLams xs b)
+pLams (Arg m _ n :<| xs) b = PLam m (PName n) (pLams xs b)
 
 pGatherApps :: PTm -> (PTm, Spine PTm)
-pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
+pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m Many u)
 pGatherApps (PLocated _ t) = pGatherApps t
 pGatherApps t = (t, Empty)
 

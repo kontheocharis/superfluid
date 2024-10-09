@@ -116,10 +116,10 @@ class (Tc m) => Elab m where
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
-pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit) ts)
+pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit Many) ts)
 
 pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
-pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit) ts)
+pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit Many) ts)
 
 patAsVar :: PPat -> Either Name PPat
 patAsVar (PName n) = Left n
@@ -214,8 +214,8 @@ ensurePatIsHeadWithBinds p =
         _ -> elabError (PatMustBeHeadWithBinds p)
   where
     argIsName = \case
-      Arg m (PLocated l t) -> enterLoc l (argIsName (Arg m t))
-      Arg m (PName an) -> return $ Arg m an
+      Arg m q (PLocated l t) -> enterLoc l (argIsName (Arg m q t))
+      Arg m q (PName an) -> return $ Arg m q an
       _ -> elabError (PatMustBeHeadWithBinds p)
 
 ensurePatIsBind :: (Elab m) => PTm -> m Name
@@ -253,10 +253,10 @@ elabCtorRep te r = do
 
 elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
 elabCaseRep te dat info r = do
-  srcSubject <- Arg Explicit <$> ensurePatIsBind r.srcSubject
-  srcBranches <- S.fromList . map (Arg Explicit) <$> mapM (ensurePatIsBind . snd) r.srcBranches
+  srcSubject <- Arg Explicit Many <$> ensurePatIsBind r.srcSubject
+  srcBranches <- S.fromList . map (Arg Explicit Many) <$> mapM (ensurePatIsBind . snd) r.srcBranches
   ensurePatIsFullyApplied (length info.ctors) (length r.srcBranches)
-  elimTy <- Arg Explicit <$> maybe uniqueName ensurePatIsBind r.srcElim
+  elimTy <- Arg Explicit Zero <$> maybe uniqueName ensurePatIsBind r.srcElim
   tyIndices <- mapM (traverse (const uniqueName)) info.indexArity
   let target' =
         pLams

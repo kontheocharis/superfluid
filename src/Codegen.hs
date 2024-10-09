@@ -4,7 +4,7 @@
 module Codegen (Gen (..), generateProgram, renderJsProg, JsStat) where
 
 import Common
-  ( Arg (Arg),
+  ( Arg (..),
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
@@ -14,11 +14,12 @@ import Common
     Lit (CharLit, FinLit, NatLit, StringLit),
     Name (Name),
     PiMode (Explicit),
+    Param (..),
     PrimGlobal (..),
     Spine,
     mapSpineM,
     pattern Impossible,
-    pattern Possible, Qty,
+    pattern Possible, Qty (..), Tel, mapSpine,
   )
 import Control.Monad (zipWithM)
 import Data.Foldable (toList)
@@ -83,21 +84,25 @@ jsNewBind v = do
   l <- access (\(n :: [Name]) -> length n)
   return $ jsName v ++ show l
 
-jsLam :: (Gen m) => Name -> m JsExpr -> m JsExpr
-jsLam v b = do
+jsLam :: (Gen m) => Name -> Qty -> m JsExpr -> m JsExpr
+jsLam v q b = do
   v' <- jsNewBind v
   JsExpr b' <- enter (Name v' :) b
-  return . JsExpr $ "(" ++ v' ++ ") => " ++ b'
+  case q of
+    Many -> return . JsExpr $ "(" ++ v' ++ ") => " ++ b'
+    Zero -> return $ JsExpr b'
 
-jsLams :: (Gen m) => [Name] -> m JsExpr -> m JsExpr
-jsLams vs b = foldr jsLam b vs
+jsLams :: (Gen m) => Spine Name -> m JsExpr -> m JsExpr
+jsLams vs b = foldr (\t -> jsLam t.arg t.qty) b (toList vs)
 
-jsLet :: (Gen m) => Name -> m JsExpr -> m [JsStat] -> m [JsStat]
-jsLet v t ts = do
+jsLet :: (Gen m) => Name -> Qty -> m JsExpr -> m [JsStat] -> m [JsStat]
+jsLet v q t ts = do
   v' <- jsNewBind v
   t' <- t
   ts' <- enter (Name v' :) ts
-  return $ jsConst v' t' : ts'
+  case q of
+    Many -> return $ jsConst v' t' : ts'
+    Zero -> return ts'
 
 addDecl :: (Gen m) => JsStat -> m ()
 addDecl d = modify (++ [d])
@@ -123,22 +128,22 @@ generateDeclItem d = do
 
 generateDataItem :: (Gen m) => DataGlobalInfo -> m ()
 generateDataItem d = do
-  let total = length d.params + length d.indexArity
-  ns <- mapM (const uniqueName) [1 .. total]
-  body <- jsLams ns $ return jsNull
+  indices <- mapSpineM (const uniqueName) d.indexArity
+  let params = fmap (\s -> Arg s.mode s.qty s.name) d.params
+  body <- jsLams (params S.>< indices) $ return jsNull
   addDecl $ jsConst (jsName d.name) body
 
 generateCtorItem :: (Gen m) => CtorGlobalInfo -> m ()
 generateCtorItem c = do
   let total = length c.argArity
-  ns <- mapM (const uniqueName) [1 .. total]
+  ns <- mapSpineM (const uniqueName) c.argArity
   body <- jsLams ns $ do
     ns' <- mapM (jsVar . Idx) (reverse [0 .. total - 1])
     return $ jsArray (intToNat c.idx : ns')
   addDecl $ jsConst (jsName c.name) body
 
 generateLets :: (Gen m) => [(Qty, Name, STm, STm)] -> STm -> m [JsStat]
-generateLets ((_, n, _, t) : ts) ret = jsLet n (generateExpr t) (generateLets ts ret)
+generateLets ((q, n, _, t) : ts) ret = jsLet n q (generateExpr t) (generateLets ts ret)
 generateLets [] ret = do
   ret' <- generateExpr ret
   return [jsReturn ret']
@@ -146,7 +151,7 @@ generateLets [] ret = do
 generateExpr :: (Gen m) => STm -> m JsExpr
 generateExpr (SPi {}) = return jsNull
 generateExpr SU = return jsNull
-generateExpr (SLam _ _ v t) = jsLam v $ generateExpr t
+generateExpr (SLam _ q v t) = jsLam v q $ generateExpr t
 generateExpr ls@(SLet {}) = do
   let (xs, ret) = sGatherLets ls
   statements <- generateLets xs ret
@@ -154,7 +159,7 @@ generateExpr ls@(SLet {}) = do
 generateExpr t@((SApp {})) = do
   let (subject, args) = sGatherApps t
   a <- generateExpr subject
-  args' <- mapSpineM generateExpr args
+  args' <- mapSpineM generateExpr (S.filter (\ar -> ar.qty /= Zero) args)
   return $ jsApp a args'
 generateExpr (SPrim s) = return $ jsGlobal s.globalName
 generateExpr (SCtor (s, _)) = return $ jsGlobal s.globalName
@@ -169,14 +174,14 @@ generateExpr (SCase c) = do
           let (p, t) = case cl of
                 Possible a b -> (a, b)
                 Impossible _ -> error "Impossible case not supported"
-          ls <- jsLams p.binds $ generateExpr t
+          ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) p.binds) $ generateExpr t
           let tag = intToNat i
           let body =
                 jsApp
                   ls
                   ( S.fromList $
                       map
-                        (Arg Explicit . jsIndex sub . intToNat)
+                        (Arg Explicit Many . jsIndex sub . intToNat)
                         [1 .. length p.binds]
                   )
           return (tag, body)
@@ -204,7 +209,7 @@ jsReturn (JsExpr e) = JsStat $ "return " ++ e ++ ";"
 
 jsApp :: JsExpr -> Spine JsExpr -> JsExpr
 jsApp e Empty = e
-jsApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ")(" (map (\(Arg _ (JsExpr a)) -> a) (toList as)) ++ ")"
+jsApp (JsExpr f) as = JsExpr $ "(" ++ f ++ ")" ++ "(" ++ intercalate ")(" (map (\(Arg _ _ (JsExpr a)) -> a) (toList as)) ++ ")"
 
 jsBlockExpr :: [JsStat] -> JsExpr
 jsBlockExpr ss = JsExpr $ "(() => {\n" ++ indentedFst (intercalate "\n" (map (\(JsStat s) -> s) ss)) ++ "\n})()"
