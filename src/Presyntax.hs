@@ -157,6 +157,8 @@ data PTm
 pApp :: PTm -> [Arg PTm] -> PTm
 pApp = foldl (\g x -> PApp x.mode g x.arg)
 
+-- In all the above we don't care about the quantity
+
 toPSpine :: PTm -> (PTm, Spine PTm)
 toPSpine (PApp m t u) = let (t', sp) = toPSpine t in (t', sp :|> Arg m Many u)
 toPSpine t = (t, Empty)
