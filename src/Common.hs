@@ -128,20 +128,26 @@ composeZM 0 _ _ = return
 composeZM n f g = if n > 0 then f >=> composeZM (n - 1) f g else g >=> composeZM (n + 1) f g
 
 -- | A quantity
-data Qty = Zero | One | Many deriving (Eq)
+data Qty = Zero | Many deriving (Eq)
 
 instance Show Qty where
   show Zero = "0 "
-  show One = "1 "
+  -- show One = "1 "
   show Many = ""
 
+instance Ord Qty where
+  compare Zero Zero = EQ
+  compare Zero Many = LT
+  compare Many Zero = GT
+  compare Many Many = EQ
+
 instance Semiring Qty where
-  one = One
+  one = Many
   zero = Zero
 
   times Zero _ = Zero
   times _ Zero = Zero
-  times One One = One
+  -- times One One = One
   times _ _ = Many
 
   plus Zero n = n

@@ -47,6 +47,7 @@ import Common
     Glob (..),
     Name (..),
     PrimGlobal (..),
+    Qty,
     Spine,
     Tag,
     Tel,
@@ -61,6 +62,7 @@ data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
     ty :: Closure,
     idx :: Int,
+    qtySum :: Qty,
     dataGlobal :: DataGlobal,
     argArity :: Spine ()
   }
@@ -75,8 +77,10 @@ data DataGlobalInfo = DataGlobalInfo
     elimTy :: Maybe Closure,
     indexArity :: Spine () -- might not be set yet
   }
+
 data DefGlobalInfo = DefGlobalInfo
   { name :: Name,
+    qty :: Qty,
     ty :: VTy,
     vtm :: Maybe VTm,
     tm :: Maybe STm -- might not be set yet
@@ -253,7 +257,6 @@ knownData KnownList = DataGlobal (Name "List")
 knownData KnownString = DataGlobal (Name "String")
 knownData KnownUnit = DataGlobal (Name "Unit")
 knownData KnownBool = DataGlobal (Name "Bool")
-
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")

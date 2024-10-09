@@ -188,7 +188,7 @@ unelabSig = do
     unelabDef n d ts = do
       ty' <- unelabValue [] d.ty
       body' <- traverse (unelab []) d.tm
-      return $ MkPDef n ty' (fromMaybe PWild body') ts
+      return $ MkPDef n d.qty ty' (fromMaybe PWild body') ts
 
     unelabPrim :: (Unelab m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
     unelabPrim n p ts = do

@@ -248,7 +248,7 @@ prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
 
 prim unsafe-cast : [A : Type] -> (B : Type) -> A -> B
 
-prim unsafe-complete : [T : Type] -> (E : T -> Type) -> (t : T) -> [u : T] -> (h : E u) -> E t
+prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (t : T) -> [u : T] -> (h : E u) -> E t
 
 -- def from-js : [A : Type] -> JS -> A {
 --   \a => cast a
@@ -407,7 +407,7 @@ def length : [A : Type] -> List A -> Nat {
   }
 }
 
-def type : [A : Type] -> A -> Type {
+def 0 type : [A : Type] -> A -> Type {
   \[A] _ => A
 }
 
@@ -759,7 +759,7 @@ data ByteVec : Nat -> Type {
   bvcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
 }
 
-def byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
+def 0 byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
   \[n] b => n
 }
 
@@ -857,7 +857,7 @@ def panic : [A : Type] -> String -> A {
 
 -- REPR helpers
 
-def Reprs : Nat -> Type -> Type {
+def 0 Reprs : Nat -> Type -> Type {
   \l T => case l {
     z => T,
     s l' => repr (Reprs l' T)

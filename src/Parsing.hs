@@ -328,9 +328,10 @@ tags = do
 defItem :: Parser PDef
 defItem = do
   reserved "def"
+  q <- fromMaybe Many <$> qty
   (name, ty) <- defSig
   t <- lets
-  return $ MkPDef name (fromMaybe PWild ty) t mempty
+  return $ MkPDef name q (fromMaybe PWild ty) t mempty
 
 -- | Parse the type signature of a declaration.
 defSig :: Parser (Name, Maybe PTy)
@@ -474,7 +475,7 @@ tel =
 qty :: Parser (Maybe Qty)
 qty =
   try (reservedOp "0" >> return (Just Zero))
-    <|> try (reservedOp "1" >> return (Just One))
+    -- <|> try (reservedOp "1" >> return (Just One))
     <|> try (reservedOp "*" >> return (Just Many))
     <|> return Nothing
 

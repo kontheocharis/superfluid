@@ -47,7 +47,6 @@ import Common
     Logger (..),
     Lvl (..),
     MetaVar,
-    Name (..),
     PiMode (..),
     Spine,
     Tag (..),
@@ -58,7 +57,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, Qty (Many), Param (..), Tel,
+    pattern Possible, Qty (Many, Zero), Param (..), Tel,
   )
 import Control.Monad (foldM, (>=>))
 import Control.Monad.Extra (firstJustM)
@@ -116,6 +115,7 @@ import Syntax
     pattern VMeta,
     pattern VVar,
   )
+import Data.Semiring (Semiring(..))
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -338,17 +338,17 @@ mapDataGlobalInfoM f (DataGlobalInfo n params fullTy ty ctors motiveTy elimTy in
   return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy' indexArity
 
 mapCtorGlobalInfoM :: (Eval m) => (STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
-mapCtorGlobalInfoM f (CtorGlobalInfo n ty idx dataGlobal argArity) = do
+mapCtorGlobalInfoM f (CtorGlobalInfo n ty idx p dataGlobal argArity) = do
   ty' <- mapClosureM f ty
-  return $ CtorGlobalInfo n ty' idx dataGlobal argArity
+  return $ CtorGlobalInfo n ty' idx p dataGlobal argArity
 
 mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
-mapDefGlobalInfoM f (DefGlobalInfo n ty vtm tm) = do
+mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
   vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
   b <- normaliseProgram
   tm' <- if b then traverse (quote (Lvl 0)) vtm' else traverse f tm
-  return $ DefGlobalInfo n ty' vtm' tm'
+  return $ DefGlobalInfo n q ty' vtm' tm'
 
 mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
 mapPrimGlobalInfoM f (PrimGlobalInfo n ty) = do
@@ -518,7 +518,7 @@ eval env (SPi m q v ty1 ty2) = do
 eval env (SLam m q v t) = do
   c <- close 1 env t
   return $ VNorm (VLam m q v c)
-eval env (SLet q _ _ t1 t2) = do
+eval env (SLet _ _ _ t1 t2) = do
   t1' <- eval env t1
   eval (t1' : env) t2
 eval env (SApp m t1 t2) = do
@@ -703,14 +703,18 @@ isTypeFamily l t = do
     VNorm VU -> return True
     _ -> return False
 
-isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine ()))
+-- Returns the spine of the constructor type and sum of its quantities
+isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine (), Qty))
 isCtorTy l d t = do
   t' <- vUnfold l t
   case t' of
-    VNorm (VPi _ _ _ _ b) -> do
+    VNorm (VPi _ q _ _ b) -> do
       b' <- evalInOwnCtx l b
-      isCtorTy (nextLvl l) d b'
-    VNorm (VData (d', sp)) | d == d' -> return (Just (mapSpine (const ()) sp))
+      c <- isCtorTy (nextLvl l) d b'
+      case c of
+        Just (sp, q') -> return . Just $ (sp, q' `plus` q)
+        Nothing -> return Nothing
+    VNorm (VData (d', sp)) | d == d' -> return (Just (mapSpine (const ()) sp, Zero))
     _ -> return Nothing
 
 ifIsData :: (Eval m) => Lvl -> VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a

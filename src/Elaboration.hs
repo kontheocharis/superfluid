@@ -21,6 +21,7 @@ import Common
     Loc,
     Name (..),
     PiMode (..),
+    Qty (Many, Zero),
     Spine,
     Tel,
     mapSpine,
@@ -47,7 +48,7 @@ import Presyntax
     pApp,
     pGatherApps,
     pLams,
-    toPSpine,
+    toPSpine, pGatherPis,
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
@@ -79,6 +80,7 @@ import Typechecking
     unrepr,
     wildPat,
   )
+import Data.Semiring (Semiring(..))
 
 -- Presyntax exists below here
 
@@ -139,7 +141,7 @@ elab p mode = case (p, mode) of
   (t, Check (VNorm (VPi Implicit q x' a b))) -> insertLam q x' a b (elab t)
   (PUnit, Check ty@(VNorm VU)) -> elab (pKnownData KnownUnit []) (Check ty)
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
-  (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md
+  (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md -- @@Todo: sigma
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
   (PLet q x a t u, md) -> do
     case patAsVar x of
@@ -163,7 +165,14 @@ elab p mode = case (p, mode) of
     let (s, sp) = toPSpine p
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
-  (PPi m q x a b, Infer) -> piTy m q x (elab a) (elab b)
+  (PPi m q x a b, Infer) -> do
+    -- If something ends in Type, we use rig zero
+    let potentiallyZero a' = case (q, snd (pGatherPis a')) of
+            (Many, PU) -> Zero
+            (_, PLocated _ t) -> potentiallyZero t
+            _ -> q
+    let q' = potentiallyZero a `times` potentiallyZero b
+    piTy m q' x (elab a) (elab b)
   (PList ts rest, md) -> do
     let end = case rest of
           Just t -> t
@@ -181,7 +190,7 @@ elab p mode = case (p, mode) of
   (PParams _ _, Infer) -> error "impossible"
 
 elabDef :: (Elab m) => PDef -> m ()
-elabDef def = defItem def.name def.tags (elab def.ty) (elab def.tm)
+elabDef def = defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
 elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)

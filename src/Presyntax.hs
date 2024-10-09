@@ -18,6 +18,7 @@ module Presyntax
     tagged,
     pApp,
     pGatherApps,
+    pGatherPis,
     pLams,
     toPSpine,
   )
@@ -34,7 +35,7 @@ import Common
     Spine,
     Tag (..),
     Tel,
-    arg,
+    arg, Param (..),
   )
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -49,6 +50,7 @@ type PPat = PTm
 
 data PDef = MkPDef
   { name :: Name,
+    qty :: Qty,
     ty :: PTy,
     tm :: PTm,
     tags :: Set Tag
@@ -172,6 +174,10 @@ pGatherApps :: PTm -> (PTm, Spine PTm)
 pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m u)
 pGatherApps (PLocated _ t) = pGatherApps t
 pGatherApps t = (t, Empty)
+
+pGatherPis :: PTm -> (Tel PTy, PTm)
+pGatherPis (PPi m q n a b) = let (ns, b') = pGatherPis b in (Param m q n a :<| ns, b')
+pGatherPis t = (Empty, t)
 
 pLetToList :: PTm -> ([(Qty, PPat, PTy, PTm)], PTm)
 pLetToList (PLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, n, ty, t1) : binds, ret)
@@ -321,12 +327,12 @@ instance (Monad m) => Pretty m (Tel PTy) where
   pretty ps = intercalate " " <$> mapM pretty (toList ps)
 
 instance (Monad m) => Pretty m PDef where
-  pretty (MkPDef n ty tm ts) = do
+  pretty (MkPDef n q ty tm ts) = do
     pts <- pretty ts
     pn <- pretty n
     pty <- pretty ty
     ptm <- prettyLets (pLetToList tm)
-    return $ pts ++ "def " ++ pn ++ " : " ++ pty ++ " " ++ ptm
+    return $ pts ++ "def " ++ show q ++ pn ++ " : " ++ pty ++ " " ++ ptm
 
 instance (Monad m) => Pretty m PPrim where
   pretty (MkPPrim n ty ts) = do

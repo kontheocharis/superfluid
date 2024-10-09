@@ -5,8 +5,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Typechecking
   ( Tc (..),
@@ -61,6 +61,7 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
+    Logger (..),
     Lvl (..),
     MetaVar,
     Name (Name),
@@ -78,7 +79,7 @@ import Common
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible, Logger (..),
+    pattern Possible,
   )
 import Context
   ( Ctx (..),
@@ -102,6 +103,7 @@ import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
+import Data.Semiring (Semiring (times, one))
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -196,6 +198,7 @@ data TcError
   | ExpectedCtor VPatB CtorGlobal
   | UnexpectedPattern VPatB
   | MissingCtor CtorGlobal
+  | QtyMismatch Qty Qty
   | DuplicateItem Name
   | ImpossibleCasesNotSupported
   | Chain [TcError]
@@ -223,6 +226,8 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
         InvalidPattern -> do
           return "Invalid in pattern position"
+        QtyMismatch q1 q2 -> do
+          return $ "Quantity mismatch: (" <> show q1 <> " _ : _) and (" <> show q2 ++ "_ : _)"
         ImpossibleCaseIsPossible t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -283,7 +288,18 @@ instance Show InPat where
   show (InPossiblePat ns) = "in possible pat with " ++ show ns
   show InImpossiblePat = "in impossible pat"
 
-class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx, Has m SolveAttempts) => Tc m where
+class
+  ( Eval m,
+    Unelab m,
+    Has m Loc,
+    Has m Qty,
+    Has m (Seq Problem),
+    Has m InPat,
+    Has m Ctx,
+    Has m SolveAttempts
+  ) =>
+  Tc m
+  where
   addGoal :: Goal -> m ()
 
   getCtx :: m Ctx
@@ -300,6 +316,9 @@ class (Eval m, Unelab m, Has m Loc, Has m (Seq Problem), Has m InPat, Has m Ctx,
 
   enterCtx :: (Ctx -> Ctx) -> m a -> m a
   enterCtx = enter
+
+  qty :: m Qty
+  qty = view
 
   tcError :: TcError -> m a
 
@@ -345,6 +364,14 @@ ensureAllProblemsSolved = do
 
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
+
+satisfyQty :: (Tc m) => Qty -> m ()
+satisfyQty q = do
+  q' <- qty
+  unless (q >= q') $ tcError $ QtyMismatch q q'
+
+enterQty :: (Tc m) => Qty -> m a -> m a
+enterQty q = enter (`times` q)
 
 enterTel :: (Tc m) => Tel STy -> m a -> m a
 enterTel Empty f = f
@@ -495,7 +522,7 @@ ifForcePiType m ty the els = do
     _ -> do
       a <- freshMeta >>= evalHere
       x <- uniqueName
-      let q = Many
+      q <- qty
       b <- enterCtx (bind x q a) freshMeta >>= closeHere 1
       unifyHere ty (VNorm (VPi m q x a b))
       the m q x a b
@@ -510,7 +537,8 @@ inferPatBind x = do
 
 checkPatBind :: (Tc m) => Name -> VTy -> m (STm, VTy)
 checkPatBind x ty = do
-  modifyCtx (bind x Many ty)
+  q <- qty
+  modifyCtx (bind x q ty)
   whenInPat
     ( \case
         InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [x]))
@@ -529,18 +557,20 @@ name n = do
     ( do
         l <- access (lookupGlobal n)
         case l of
-          Just c@(CtorInfo _) -> globalInfoToTm n c
+          Just c@(CtorInfo _) -> global n c
           _ -> inferPatBind n
     )
     ( do
         r <- accessCtx (lookupName n)
         l <- getLvl
         case r of
-          Just e -> return (SVar $ lvlToIdx l e.lvl, assertIsNeeded e.ty)
+          Just e -> do
+            satisfyQty e.qty
+            return (SVar $ lvlToIdx l e.lvl, assertIsNeeded e.ty)
           Nothing -> do
             n' <- access (lookupGlobal n)
             case n' of
-              Just x -> globalInfoToTm n x
+              Just x -> global n x
               Nothing -> tcError $ UnresolvedVariable n
     )
 
@@ -594,9 +624,9 @@ insertLam q x' a b t = do
 letIn :: (Tc m) => Mode -> Qty -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
 letIn mode q x a t u = do
   forbidPat
-  (a', _) <- a (Check (VNorm VU))
+  (a', _) <- enterQty Zero $ a (Check (VNorm VU))
   va <- evalHere a'
-  (t', _) <- t (Check va)
+  (t', _) <- enterQty q $ t (Check va)
   vt <- evalHere t'
   (u', ty) <- enterCtx (define x q vt va) $ u mode
   return (SLet q x a' t' u', ty)
@@ -611,8 +641,8 @@ spine (t, ty) (Arg m u :<| sp) = do
   ifForcePiType
     m
     ty'
-    ( \_ _ _ a b -> do
-        (u', _) <- u (Check a)
+    ( \_ q _ a b -> do
+        (u', _) <- enterQty q $ u (Check a)
         uv <- evalHere u'
         b' <- b $$ [uv]
         spine (SApp m t' u', b') sp
@@ -627,11 +657,13 @@ app s sp = do
 univ :: (Tc m) => m (STm, VTy)
 univ = do
   forbidPat
-  return (SU, (VNorm VU))
+  satisfyQty Zero
+  return (SU, VNorm VU)
 
 piTy :: (Tc m) => PiMode -> Qty -> Name -> Child m -> Child m -> m (STm, VTy)
 piTy m q x a b = do
   forbidPat
+  satisfyQty Zero
   (a', _) <- a (Check (VNorm VU))
   av <- evalHere a'
   (b', _) <- enterCtx (bind x q av) $ b (Check (VNorm VU))
@@ -742,23 +774,32 @@ caseOf mode s r cs = do
     Check ty -> do
       (ss, ssTy) <- s Infer
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
+
+      -- subjectQty <- case di.ctors of
+      --       [c] -> access (getCtorGlobal c) >>= \c' -> return c'.qtySum
+      --       _ -> return one
+
       di <- access (getDataGlobal d)
       let motive = fromJust di.motiveTy
       motiveApplied <- motive $$ map (\a -> a.arg) (toList paramSp)
       rr <- case r of
-        Just r' -> fst <$> r' (Check motiveApplied)
+        Just r' -> enterQty Zero $ fst <$> r' (Check motiveApplied)
         Nothing -> constLamsForPis motiveApplied ty
       vrr <- evalHere rr
+
       scs <- caseClauses di wideTyM cs $ \vp sp pTy t -> do
         let pTySp = S.drop (length di.params) $ vGetSpine pTy
         branchTy <- vApp vrr (pTySp S.:|> Arg Explicit vp.vPat)
         (st, _) <- t (Check branchTy)
         return $ Possible sp st
+
       vs <- evalHere ss
       retTy <- vApp vrr (indexSp S.:|> Arg Explicit vs)
       unifyHere ty retTy
+
       sParamSp <- mapSpineM quoteHere paramSp
       sIndexSp <- mapSpineM quoteHere indexSp
+
       return (SCase (Case d sParamSp ss sIndexSp rr scs), ty)
 
 wildPat :: (Tc m) => Mode -> m (STm, VTy)
@@ -787,15 +828,15 @@ lit mode l = case mode of
         (bound', _) <- bound (Check (VNorm (VData (knownData KnownNat, Empty))))
         vbound' <- evalHere bound'
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit vbound'))
-    return (SLit l', (VNorm (VData (knownData ty, args))))
+    return (SLit l', VNorm (VData (knownData ty, args)))
 
-defItem :: (Tc m) => Name -> Set Tag -> Child m -> Child m -> m ()
-defItem n ts ty tm = do
+defItem :: (Tc m) => Qty -> Name -> Set Tag -> Child m -> Child m -> m ()
+defItem q n ts ty tm = do
   ensureNewName n
-  (ty', _) <- ty (Check (VNorm VU))
+  (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
-  modify (addItem n (DefInfo (DefGlobalInfo n vty Nothing Nothing)) ts)
-  (tm', _) <- tm (Check vty)
+  modify (addItem n (DefInfo (DefGlobalInfo n q vty Nothing Nothing)) ts)
+  (tm', _) <- enterQty q $ tm (Check vty)
   vtm <- evalHere tm'
   b <- normaliseProgram
   stm <- if b then quote (Lvl 0) vtm else return tm'
@@ -805,7 +846,7 @@ defItem n ts ty tm = do
 tel :: (Tc m) => Tel (Child m) -> m (Tel STy)
 tel Empty = return Empty
 tel (t :<| ts) = do
-  (t', _) <- t.ty (Check (VNorm VU))
+  (t', _) <- enterQty Zero $ t.ty (Check (VNorm VU))
   vt <- evalHere t'
   ts' <- enterCtx (bind t.name t.qty vt) $ tel ts
   return (Param t.mode t.qty t.name t' :<| ts')
@@ -815,7 +856,7 @@ dataItem n ts te ty = do
   ensureNewName n
   te' <- tel te
   ty' <- enterTel te' $ do
-    (ty', _) <- ty (Check (VNorm VU))
+    (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
     vty <- evalHere ty'
     i <- getLvl >>= (`isTypeFamily` vty)
     unless i (tcError $ InvalidDataFamily vty)
@@ -843,23 +884,23 @@ ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
 ctorItem dat n ts ty = do
   di <- access (getDataGlobal dat)
   idx <- access (\s -> length (getDataGlobal dat s).ctors)
-  (sp, ty') <- enterTel di.params $ do
+  (sp, ty', q) <- enterTel di.params $ do
     ensureNewName n
-    (ty', _) <- ty (Check (VNorm VU))
+    (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
     let sp = fmap (\p -> Arg p.mode ()) $ fst (sGatherPis ty')
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
     case i of
       Nothing -> tcError $ InvalidCtorType ty'
-      Just _ -> return (sp, ty')
+      Just (_, q) -> return (sp, ty', q)
   cty <- closeHere (length di.params) ty'
-  modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx dat sp)) ts)
+  modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx q dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
 primItem n ts ty = do
   ensureNewName n
-  (ty', _) <- ty (Check (VNorm VU))
+  (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
   modify (addItem n (PrimInfo (PrimGlobalInfo n vty)) ts)
 
@@ -875,12 +916,13 @@ reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m (Tel STm)
 reprDataItem dat ts c = do
   di <- access (getDataGlobal dat)
   tm <-
-    reprItem
-      Empty
-      (reprHere 1 di.fullTy)
-      (addDataRepr dat)
-      ts
-      c
+    enterQty Zero $
+      reprItem
+        Empty
+        (reprHere 1 di.fullTy)
+        (addDataRepr dat)
+        ts
+        c
   let (ls, _) = sGatherLams tm
   return (telWithNames di.params (fmap (\p -> Arg p.mode p.name) ls))
 
@@ -959,7 +1001,7 @@ buildElimTy dat = do
   subjectTyName <- uniqueName
   methodTys <- mapM (ctorMethodTy (length sTyParams)) datInfo.ctors
 
-  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit Many motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
+  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit Zero motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
   let subjSpToData = spToData (length mTyIndicesBinds + length methodTys + 1) 0
 
   let elimTy =
@@ -967,7 +1009,7 @@ buildElimTy dat = do
           ( foldr
               (><)
               Empty
-              [ S.singleton (Param Explicit Many elimTyName motiveTy),
+              [ S.singleton (Param Explicit Zero elimTyName motiveTy),
                 S.fromList
                   ( zipWith
                       (\i (methodTy, methodName) -> Param Explicit Many methodName (methodTy i))
@@ -996,9 +1038,7 @@ buildElimTy dat = do
             sAppSpine
               ( SCtor
                   ( ctor,
-                    ( toList . fmap (\a -> a.arg) $
-                        S.take sTyParamLen sTyRetSp
-                    )
+                    toList . fmap (\a -> a.arg) $ S.take sTyParamLen sTyRetSp
                   )
               )
               (spineForTel 0 sTyBinds)
@@ -1010,9 +1050,11 @@ buildElimTy dat = do
                 (S.drop sTyParamLen sTyRetSp S.|> Arg Explicit spToCtor)
          in sPis sTyBinds methodRetTy
 
-globalInfoToTm :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
-globalInfoToTm n i = case i of
-  DefInfo d -> return (SDef (DefGlobal n), d.ty)
+global :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
+global n i = case i of
+  DefInfo d -> do
+    satisfyQty d.qty
+    return (SDef (DefGlobal n), d.ty)
   DataInfo d -> do
     ty' <- evalHere $ sPis d.params d.ty.body
     return (SData (DataGlobal n), ty')
@@ -1126,6 +1168,7 @@ instance (Eval m) => Lattice (m CanUnify) where
 
 type SolveT = ExceptT SolveError
 
+-- Typeless and quantityless
 enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
 enterTypelessClosure c m = do
   ns <- uniqueNames c.numVars
@@ -1366,7 +1409,7 @@ unifyForced t1 t2 = case (t1, t2) of
 
 unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
 unifyNormRest n1 n2 = case (n1, n2) of
-  (VPi m _ _ t c, VPi m' _ _ t' c') | m == m' -> unify t t' /\ unifyClosure c c'
+  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' && q == q' -> unify t t' /\ unifyClosure c c'
   (VU, VU) -> return Yes
   (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
   (VCtor ((c, _), sp), VCtor ((c', _), sp'))
