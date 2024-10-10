@@ -1,0 +1,18 @@
+
+data Vec (T : Type) : Nat -> Type {
+  vec-nil : Vec T 0,
+  vec-cons : T -> [n : Nat] -> Vec T n -> Vec T (s n),
+}
+
+def vec-length : [T : Type] -> [* n : Nat] -> Vec T n -> Nat {
+  \[_] [n] _ => n
+}
+
+data Foo : Nat -> Type {
+  foo : [n : Nat] -> Foo n,
+}
+
+def boo : Nat {
+  let f:   Foo (add (s (s 0)) 1)= foo;
+  3
+}

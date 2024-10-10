@@ -159,6 +159,7 @@ data VLazyHead
   = VDef DefGlobal
   | VLit (Lit VTm)
   | VLazyCase VLazyCase
+  | VLet Qty Name VTy VTm Closure
   | VRepr VHead
   deriving (Show)
 

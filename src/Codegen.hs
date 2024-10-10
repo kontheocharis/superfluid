@@ -13,15 +13,18 @@ import Common
     Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
     Name (Name),
-    PiMode (Explicit),
     Param (..),
+    PiMode (Explicit),
     PrimGlobal (..),
+    Qty (..),
     Spine,
+    Tel,
     mapSpineM,
     pattern Impossible,
-    pattern Possible, Qty (..), Tel, mapSpine,
+    pattern Possible,
   )
 import Control.Monad (zipWithM)
+import Control.Monad.Extra (when)
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
@@ -37,7 +40,6 @@ import Globals
   )
 import Printing (indentedFst)
 import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
-import Control.Monad.Extra (when)
 
 newtype JsStat = JsStat String
 
@@ -122,6 +124,15 @@ generateItem (CtorInfo c) = generateCtorItem c
 generateItem (PrimInfo {}) = return () -- should be handled by the boot file
 generateItem (DefInfo d) = when (d.qty > Zero) $ generateDeclItem d
 
+onlyRelevantArgs :: Spine a -> Spine a
+onlyRelevantArgs = S.filter (\ar -> ar.qty /= Zero)
+
+onlyRelevantBinds :: [(Qty, Name)] -> [(Qty, Name)]
+onlyRelevantBinds = filter (\(q, _) -> q /= Zero)
+
+onlyRelevantParams :: Tel a -> Tel a
+onlyRelevantParams = S.filter (\ar -> ar.qty /= Zero)
+
 generateDeclItem :: (Gen m) => DefGlobalInfo -> m ()
 generateDeclItem d = do
   t <- generateExpr (fromJust d.tm)
@@ -129,15 +140,16 @@ generateDeclItem d = do
 
 generateDataItem :: (Gen m) => DataGlobalInfo -> m ()
 generateDataItem d = do
-  indices <- mapSpineM (const uniqueName) d.indexArity
-  let params = fmap (\s -> Arg s.mode s.qty s.name) d.params
+  indices <- mapSpineM (const uniqueName) (onlyRelevantArgs d.indexArity)
+  let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams d.params)
   body <- jsLams (params S.>< indices) $ return jsNull
   addDecl $ jsConst (jsName d.name) body
 
 generateCtorItem :: (Gen m) => CtorGlobalInfo -> m ()
 generateCtorItem c = do
-  let total = length c.argArity
-  ns <- mapSpineM (const uniqueName) c.argArity
+  let relevantArgArity = onlyRelevantArgs c.argArity
+  let total = length relevantArgArity
+  ns <- mapSpineM (const uniqueName) relevantArgArity
   body <- jsLams ns $ do
     ns' <- mapM (jsVar . Idx) (reverse [0 .. total - 1])
     return $ jsArray (intToNat c.idx : ns')
@@ -160,7 +172,7 @@ generateExpr ls@(SLet {}) = do
 generateExpr t@((SApp {})) = do
   let (subject, args) = sGatherApps t
   a <- generateExpr subject
-  args' <- mapSpineM generateExpr (S.filter (\ar -> ar.qty /= Zero) args)
+  args' <- mapSpineM generateExpr (onlyRelevantArgs args)
   return $ jsApp a args'
 generateExpr (SPrim s) = return $ jsGlobal s.globalName
 generateExpr (SCtor (s, _)) = return $ jsGlobal s.globalName
@@ -175,7 +187,8 @@ generateExpr (SCase c) = do
           let (p, t) = case cl of
                 Possible a b -> (a, b)
                 Impossible _ -> error "Impossible case not supported"
-          ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) p.binds) $ generateExpr t
+          let relevantBinds = onlyRelevantBinds p.binds
+          ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
           let tag = intToNat i
           let body =
                 jsApp
@@ -183,7 +196,7 @@ generateExpr (SCase c) = do
                   ( S.fromList $
                       map
                         (Arg Explicit Many . jsIndex sub . intToNat)
-                        [1 .. length p.binds]
+                        [1 .. length relevantBinds]
                   )
           return (tag, body)
       )
