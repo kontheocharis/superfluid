@@ -170,6 +170,7 @@ lookupName n ctx = case M.lookup n ctx.names of
 
 data Goal = Goal
   { ctx :: Ctx,
+    name :: Maybe Name,
     tm :: STm,
     ty :: VTy
   }

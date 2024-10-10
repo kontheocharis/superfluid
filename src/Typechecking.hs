@@ -63,7 +63,7 @@ import Common
     Loc,
     Lvl (..),
     MetaVar,
-    Name (Name),
+    Name (..),
     Param (..),
     PiMode (..),
     PrimGlobal (..),
@@ -101,7 +101,7 @@ import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
@@ -386,11 +386,10 @@ inferMeta n = do
   checkMeta n vty
 
 prettyGoal :: (Tc m) => Goal -> m String
-prettyGoal (Goal c n ty) = enterCtx (const c) $ do
+prettyGoal (Goal c n _ ty) = enterCtx (const c) $ do
   c' <- getCtx >>= pretty
-  n' <- pretty n
   ty' <- pretty ty
-  let g = n' ++ " : " ++ ty'
+  let g = maybe "_" (\n' -> "?" ++ n'.unName) n ++ " : " ++ ty'
   return $ indentedFst c' ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
 checkMeta :: (Tc m) => Maybe Name -> VTy -> m (STm, VTy)
@@ -398,7 +397,7 @@ checkMeta n ty = do
   m <- newMeta n
   c <- getCtx
   case n of
-    Just _ -> addGoal (Goal c m ty)
+    Just _ -> addGoal (Goal c n m ty)
     Nothing -> return ()
   return (m, ty)
 
