@@ -124,7 +124,8 @@ import Evaluation
     vRepr,
     vUnfold,
     vUnfoldLazy,
-    ($$), ($$>),
+    ($$),
+    ($$>),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -1230,6 +1231,11 @@ renameLazy m pren (n, sp) = case n of
     renameSp m pren (SLit t') sp
   VLazyCase c -> renameCaseSpine renameLazy m pren c sp
   VRepr n' -> renameReprSpine m pren 1 (headAsValue n') sp
+  VLet q x a t u -> do
+    a' <- rename m pren a
+    t' <- rename m pren t
+    u' <- renameClosure m pren u
+    return $ SLet q x a' t' u'
 
 renameNeu :: (Tc m) => MetaVar -> PRen -> VNeu -> SolveT m STm
 renameNeu m pren (n, sp) = case n of
@@ -1383,7 +1389,7 @@ etaConvert t m q c = do
 
 unifyForced :: (Tc m) => VTm -> VTm -> m CanUnify
 unifyForced t1 t2 = case (t1, t2) of
-  (VNorm (VLam m _ _ c), VNorm (VLam m' _ _ c')) | m == m' -> unifyClosure c c'
+  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' && q == q' -> unifyClosure c c'
   (t, VNorm (VLam m' q' _ c')) -> etaConvert t m' q' c'
   (VNorm (VLam m q _ c), t) -> etaConvert t m q c
   (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
@@ -1417,12 +1423,15 @@ unifyNormRest n1 n2 = case (n1, n2) of
 
 unifyLazy :: (Tc m) => VLazy -> VLazy -> m CanUnify
 unifyLazy (n1, sp1) (n2, sp2) =
-  ( case (n1, n2) of
-      (VDef d1, VDef d2) | d1 == d2 -> unifySpines sp1 sp2
-      (VLit l1, VLit l2) -> unifyLit l1 l2 /\ unifySpines sp1 sp2
-      (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2 /\ unifySpines sp1 sp2
-      (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2') /\ unifySpines sp1 sp2
-      _ -> iDontKnow
+  ( ( case (n1, n2) of
+        (VDef d1, VDef d2) | d1 == d2 -> return Yes
+        (VLit l1, VLit l2) -> unifyLit l1 l2
+        (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2
+        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> unify a1 a2 /\ unify t1 t2 /\ unifyClosure u1 u2
+        (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2')
+        _ -> iDontKnow
+    )
+      /\ unifySpines sp1 sp2
   )
     \/ tryUnfold
   where

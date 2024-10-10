@@ -209,6 +209,9 @@ vUnfoldLazyHead l = \case
     case s of
       Just s' -> Just <$> vCase (c {subject = s'})
       Nothing -> return Nothing
+  VLet _ _ _ t b -> do
+    b' <- b $$ [t]
+    return $ Just b'
   VRepr h -> do
     h' <- vWhnf l (headAsValue h)
     case h' of
@@ -238,6 +241,9 @@ vWhnfReprHead l i h = case h of
       VLazyCase c -> vWhnfReprCase vLazyCaseToSpine c
       VDef d -> vWhnfReprGlob (DefGlob d) Empty
       VRepr _ -> return Nothing
+      VLet q x ty t b -> do
+        let b' = reprClosure i b
+        return $ Just $ VLazy (VLet q x ty t b', Empty)
 
     vWhnfReprCase ::
       (Eval m) =>
@@ -522,9 +528,11 @@ eval env (SPi m q v ty1 ty2) = do
 eval env (SLam m q v t) = do
   c <- close 1 env t
   return $ VNorm (VLam m q v c)
-eval env (SLet _ _ _ t1 t2) = do
+eval env (SLet q x ty t1 t2) = do
   t1' <- eval env t1
-  eval (t1' : env) t2
+  ty' <- eval env ty
+  t2' <- close 1 env t2
+  return $ VLazy (VLet q x ty' t1' t2', Empty)
 eval env (SApp m q t1 t2) = do
   t1' <- eval env t1
   t2' <- eval env t2
@@ -650,6 +658,11 @@ quoteLazy l (n, sp) = do
     VLit t -> do
       t' <- traverse (quote l) t
       quoteSpine l (SLit t') sp
+    VLet q x ty t b -> do
+      ty' <- quote l ty
+      t' <- quote l t
+      b' <- quoteClosure l b
+      quoteSpine l (SLet q x ty' t' b') sp
     VLazyCase c -> quoteCaseSpine quoteLazy l c sp
     VRepr n' -> quoteReprSpine l 1 (headAsValue n') sp
 

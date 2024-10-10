@@ -83,7 +83,7 @@ data Flags = Flags
     -- | Whether to be verbose.
     verbose :: Bool,
     -- | Normalise the program in the end.
-    normalise :: Bool,
+    noNormalise :: Bool,
     -- | Amount of solve attempts for metas.
     attempts :: Int
   }
@@ -108,7 +108,7 @@ parseFlags =
   Flags
     <$> switch (long "dump" <> short 'd' <> help "Print the parsed program")
     <*> switch (long "verbose" <> short 'v' <> help "Be verbose")
-    <*> switch (long "normalise" <> short 'n' <> help "Normalise the program")
+    <*> switch (long "no-normalise" <> short 'n' <> help "Do not normalise the program (might cause weird things to happen)")
     <*> option auto (long "attempts" <> short 'a' <> help "Amount of solve attempts for metas" <> value 1)
 
 -- | Parse the mode to run in.
@@ -252,7 +252,7 @@ emptyCompiler =
       sig = emptySig,
       currentLoc = NoLoc,
       inPat = NotInPat,
-      normaliseProgram = False,
+      normaliseProgram = True,
       lastNameIdx = 0,
       reduceUnfoldDefs = False,
       goals = [],
@@ -279,7 +279,7 @@ showGoals = do
 parseAnd :: Args -> (PProgram -> Comp ()) -> Comp ()
 parseAnd args task = do
   ST.modify (\s -> s {solveAttempts = SolveAttempts args.flags.attempts})
-  when args.flags.normalise $ setNormaliseProgram True
+  when args.flags.noNormalise $ setNormaliseProgram False
   parseAndCheckPrelude
   parsed <- parseFile (argsFile args)
   task parsed
