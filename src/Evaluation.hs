@@ -182,7 +182,7 @@ vUnfold :: (Eval m) => Lvl -> VTm -> m VTm
 vUnfold l x = do
   x' <- vWhnf l x
   case x' of
-    Just x'' -> return x''
+    Just x'' -> vUnfold l x''
     Nothing -> force x
 
 vWhnf :: (Eval m) => Lvl -> VTm -> m (Maybe VTm)

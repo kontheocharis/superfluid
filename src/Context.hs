@@ -57,7 +57,7 @@ instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
     tm' <- case bound of
       Defined -> (" = " ++) <$> pretty tm
       Bound -> return ""
-    return $ name' ++ " : " ++ show qty ++ " " ++ ty' ++ tm'
+    return $ show qty ++ name' ++ " : " ++ ty' ++ tm'
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =

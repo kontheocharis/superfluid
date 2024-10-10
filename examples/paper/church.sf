@@ -4,15 +4,44 @@ data Vec (T : Type) : Nat -> Type {
   vec-cons : T -> [n : Nat] -> Vec T n -> Vec T (s n),
 }
 
+def 0 VecChurch : (0 T : Type) -> Nat -> Type {
+  \T n => (R : Nat -> Type) -> R z -> ((x : T) -> [k : Nat] -> R k -> R (s k)) -> R n
+}
+
+def vec-church-nil : [T : Type] -> VecChurch T 0 {
+  \R n c => n
+}
+
+def vec-church-cons : [T : Type] -> T -> [n : Nat] -> VecChurch T n -> VecChurch T (s n) {
+  \x xs R n c => c x (xs R n c)
+}
+
+repr data Vec T n as VecChurch T n {
+  vec-nil as vec-church-nil,
+  vec-cons x xs as vec-church-cons x (repr xs),
+
+  case v to E {
+    vec-nil => n,
+    vec-cons => c
+  } as {
+    -- let v' = (repr v) (\n => (v : VecChurch T n) -> E n (unrepr v));
+    let v' = (repr v) (\n => (v : VecChurch T n) -> E n (unrepr v));
+    ?h1
+    --  E ?h1 ?h2
+  }
+}
+
 def vec-length : [T : Type] -> [* n : Nat] -> Vec T n -> Nat {
   \[_] [n] _ => n
 }
 
-data Foo : Nat -> Type {
-  foo : [n : Nat] -> Foo n,
+def boo : IO () {
+  let v = vec-cons "a" (vec-cons "b" vec-nil);
+  let n = vec-length v;
+  io-return ()
 }
 
-def boo : Nat {
-  let f:   Foo (add (s (s 0)) 1)= foo;
-  3
-}
+  -- v (\k -> (v : Vec a k) -> p k v)
+  --   nilCase
+  --   (\x, k, ih, v -> consCase x k v (ih v))
+  --   v
