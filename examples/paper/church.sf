@@ -8,12 +8,19 @@ def 0 VecChurch : (0 T : Type) -> Nat -> Type {
   \T n => (R : Nat -> Type) -> R z -> ((x : T) -> [k : Nat] -> R k -> R (s k)) -> R n
 }
 
+#unfold
 def vec-church-nil : [T : Type] -> VecChurch T 0 {
   \R n c => n
 }
 
+#unfold
 def vec-church-cons : [T : Type] -> T -> [n : Nat] -> VecChurch T n -> VecChurch T (s n) {
   \x xs R n c => c x (xs R n c)
+}
+
+#unfold
+def vec-length : [T : Type] -> [* n : Nat] -> Vec T n -> Nat {
+  \[_] [n] _ => n
 }
 
 repr data Vec T n as VecChurch T n {
@@ -24,22 +31,57 @@ repr data Vec T n as VecChurch T n {
     vec-nil => n,
     vec-cons => c
   } as {
-    -- let v' = (repr v) (\n => (v : VecChurch T n) -> E n (unrepr v));
-    let v' = (repr v) (\n => (v : VecChurch T n) -> E n (unrepr v));
-    ?h1
-    --  E ?h1 ?h2
+    let v-len = vec-length v;
+    (repr v)
+      (\l => (v' : VecChurch T l) -> E l (unrepr v'))
+      (\n' => ?h1)
+      (\x xs c' => ?h2)
+      (repr v)
   }
 }
 
-def vec-length : [T : Type] -> [* n : Nat] -> Vec T n -> Nat {
-  \[_] [n] _ => n
+data Array (T : Type) : Type {
+  array-nil : Array T,
+  array-cons : T -> Array T -> Array T,
 }
 
-def boo : IO () {
-  let v = vec-cons "a" (vec-cons "b" vec-nil);
-  let n = vec-length v;
-  io-return ()
+def 0 ArrayChurch : Type -> Type {
+  \T => (R : Type) -> R -> (T -> R -> R) -> R
 }
+
+#unfold
+def array-church-nil : [T : Type] -> ArrayChurch T {
+  \R n c => n
+}
+
+#unfold
+def array-church-cons : [T : Type] -> T -> ArrayChurch T -> ArrayChurch T {
+  \x xs R n c => c x (xs R n c)
+}
+
+repr data Array T as ArrayChurch T {
+  array-nil as array-church-nil,
+  array-cons x xs as array-church-cons x (repr xs),
+
+  case v to E {
+    array-nil => n,
+    array-cons => c
+  } as {
+    -- This is not possible!
+    (repr v)
+      ((v' : ArrayChurch T) -> Equal v' (repr v) -> E (unrepr v'))
+      (\n' p => ?a1)
+      (\x xs c' p => ?a2)
+      (repr v)
+      refl
+  }
+}
+
+-- def boo : IO () {
+--   let v = vec-cons "a" (vec-cons "b" vec-nil);
+--   let n = vec-length v;
+--   io-return ()
+-- }
 
   -- v (\k -> (v : Vec a k) -> p k v)
   --   nilCase

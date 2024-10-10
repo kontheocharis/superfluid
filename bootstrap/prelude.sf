@@ -285,7 +285,7 @@ data List (A : Type) : Type {
   cons : A -> List A -> List A
 }
 
-data Fin : (0 _ : Nat) -> Type {
+data Fin : Nat -> Type {
   fz : [n : Nat] -> Fin (s n),
   fs : [n : Nat] -> Fin n -> Fin (s n)
 }
@@ -445,6 +445,7 @@ def index : [A : Type] -> Nat -> List A -> Maybe A {
   }
 }
 
+-- Try combinator!
 def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
   \P e => case e to (\x y _ => P x -> P y) {
     refl => id

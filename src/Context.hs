@@ -61,7 +61,7 @@ instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =
-    intercalate "\n" <$> mapM pretty (reverse (ctxEntries c))
+    intercalate "\n" <$> mapM pretty (ctxEntries c)
 
 assertIsNeeded :: CtxTy -> VTy
 assertIsNeeded (CtxTy t) = t
