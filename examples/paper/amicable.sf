@@ -1,4 +1,3 @@
--- Tail recursion!
 def nat-fold-range : [A : Type] -> (Nat * Nat) -> A -> (Nat -> A -> A) -> A {
   \(start, end) init f => {
     if lt start end {

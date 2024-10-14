@@ -177,7 +177,7 @@ const trust_me = null;
 var Unit = null;
 var tt = [0];
 var Sigma = (A0) => (B1) => null;
-var pair = (x18590) => (x18601) => [0, x18590, x18601];
+var pair = (x18610) => (x18621) => [0, x18610, x18621];
 var dup = (a1) => (pair)(a1)(a1);
 var fst = (x322) => (() => {
   switch ((x322)[0]) {
@@ -194,7 +194,7 @@ var if_then_else = (b1) => (t2) => (f3) => (js_if_dep)(b1)((_4) => (t2)(tt))((_4
 var debug_print = (a2) => (b3) => (unsafe_io)((io_bind)((js_console_log)(a2))((_4) => (io_return)(b3)));
 var Maybe = (A0) => null;
 var nothing = [0];
-var just = (x18610) => [1, x18610];
+var just = (x18630) => [1, x18630];
 var is_just = (x1311) => (() => {
   switch ((x1311)[0]) {
     case 0: return js_false;
@@ -202,8 +202,8 @@ var is_just = (x1311) => (() => {
   }
 })();
 var Either = (L0) => (R1) => null;
-var left = (x18620) => [0, x18620];
-var right = (x18630) => [1, x18630];
+var left = (x18640) => [0, x18640];
+var right = (x18650) => [1, x18650];
 var Empty = null;
 var VOID = (m1) => (() => {
   switch ((m1)[0]) {
@@ -211,8 +211,8 @@ var VOID = (m1) => (() => {
   }
 })();
 var Dec = (A0) => null;
-var yes = (x18640) => [0, x18640];
-var no = (x18650) => [1, x18650];
+var yes = (x18660) => [0, x18660];
+var no = (x18670) => [1, x18670];
 var sub = (m0) => (n1) => (js_zero_or_pos)((_2) => m0)((x2) => (js_zero_or_pos)((_3) => js_uint_zero)((x3) => (sub)(x3)(x2))(m0))(n1);
 var upgrade = (k1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (x3) => (js_bounded_uint_inc)((upgrade)(x2)(x3)))(k1);
 var find = (p1) => (xs2) => (js_array_switch_l)((_3) => nothing)((a3) => (xs4) => (js_if_dep)((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(p1)(a3)))(xs2);
@@ -234,7 +234,7 @@ var lte = (m0) => (n1) => (js_zero_or_pos)((_2) => js_true)((x2) => (js_zero_or_
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(m0)(n1)))((lte)(m0)(n1));
 var bool_eq = (a0) => (b1) => (js_if_dep)(a0)((_2) => (js_if_dep)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)(b1)((_3) => js_false)((_3) => js_true));
 var Char = null;
-var utf32_code = (x18660) => [0, x18660];
+var utf32_code = (x18680) => [0, x18680];
 var char_eq = (c10) => (c21) => (() => {
   switch ((c10)[0]) {
     case 0: return ((f12) => (() => {
@@ -246,7 +246,7 @@ var char_eq = (c10) => (c21) => (() => {
 })();
 var STRING = null;
 var snil = [0];
-var scons = (x18670) => (x18681) => [1, x18670, x18681];
+var scons = (x18690) => (x18701) => [1, x18690, x18701];
 var string_eq = (s10) => (s21) => (() => {
   switch ((s10)[0]) {
     case 0: return (() => {
@@ -284,28 +284,28 @@ var repr_subst = subst_type;
 var repr_subst_p_ = (p2) => (subst_type)((sym)(p2));
 var ReprBy = (Sigma)(JsUint)(JsUndefined);
 var reprs_subst = (r2) => (a3) => (() => {
-  var x17154 = r2;
+  var x17174 = r2;
   return (() => {
-    switch ((x17154)[0]) {
-      case 0: return ((l5) => (p6) => (subst_type)(p6)((reprs)(l5)(a3)))((x17154)[1])((x17154)[2]);
+    switch ((x17174)[0]) {
+      case 0: return ((l5) => (p6) => (subst_type)(p6)((reprs)(l5)(a3)))((x17174)[1])((x17174)[2]);
     }
   })();
 })();
 var reprs_subst_p_ = (r2) => (b3) => (() => {
-  var x17584 = r2;
+  var x17604 = r2;
   return (() => {
-    switch ((x17584)[0]) {
-      case 0: return ((l5) => (p6) => (unreprs)(l5)((subst_type)((sym)(p6))(b3)))((x17584)[1])((x17584)[2]);
+    switch ((x17604)[0]) {
+      case 0: return ((l5) => (p6) => (unreprs)(l5)((subst_type)((sym)(p6))(b3)))((x17604)[1])((x17604)[2]);
     }
   })();
 })();
 var Vec = (T0) => null;
 var vec_nil = [0];
-var vec_cons = (x18690) => (x18701) => [1, x18690, x18701];
+var vec_cons = (x18710) => (x18721) => [1, x18710, x18721];
 var vec_length = (n1) => (_2) => n1;
 var boo = (() => {
   var v0 = (vec_cons)("a")((vec_cons)("b")(vec_nil));
-  var n1 = (vec_length)((js_uint_plus)(js_uint_one)((js_uint_plus)(js_uint_one)(0)))(v0);
+  var n1 = (js_uint_plus)(js_uint_one)((js_uint_plus)(js_uint_one)(0));
   return (io_return)(tt);
 })();
 (main)()
