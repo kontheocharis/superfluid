@@ -174,10 +174,9 @@ const conjure = null;
 
 const trust_me = null;
 
-var Unit = null;
 var tt = [0];
-var Sigma = (A0) => (B1) => null;
-var pair = (x18610) => (x18621) => [0, x18610, x18621];
+var pair = (x18280) => (x18291) => [0, x18280, x18291];
+var refl = [0];
 var dup = (a1) => (pair)(a1)(a1);
 var fst = (x322) => (() => {
   switch ((x322)[0]) {
@@ -192,38 +191,30 @@ var snd = (p2) => (() => {
 var id = (a1) => a1;
 var if_then_else = (b1) => (t2) => (f3) => (js_if_dep)(b1)((_4) => (t2)(tt))((_4) => (f3)(tt));
 var debug_print = (a2) => (b3) => (unsafe_io)((io_bind)((js_console_log)(a2))((_4) => (io_return)(b3)));
-var Maybe = (A0) => null;
 var nothing = [0];
-var just = (x18630) => [1, x18630];
+var just = (x18300) => [1, x18300];
 var is_just = (x1311) => (() => {
   switch ((x1311)[0]) {
     case 0: return js_false;
     case 1: return ((x1352) => js_true)((x1311)[1]);
   }
 })();
-var Either = (L0) => (R1) => null;
-var left = (x18640) => [0, x18640];
-var right = (x18650) => [1, x18650];
-var Empty = null;
-var VOID = (m1) => (() => {
-  switch ((m1)[0]) {
-    
-  }
-})();
-var Dec = (A0) => null;
-var yes = (x18660) => [0, x18660];
-var no = (x18670) => [1, x18670];
+var left = (x18310) => [0, x18310];
+var right = (x18320) => [1, x18320];
+var VOID = (m1) => null;
+var yes = (x18330) => [0, x18330];
+var no = (x18340) => [1, x18340];
 var sub = (m0) => (n1) => (js_zero_or_pos)((_2) => m0)((x2) => (js_zero_or_pos)((_3) => js_uint_zero)((x3) => (sub)(x3)(x2))(m0))(n1);
 var upgrade = (k1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (x3) => (js_bounded_uint_inc)((upgrade)(x2)(x3)))(k1);
 var find = (p1) => (xs2) => (js_array_switch_l)((_3) => nothing)((a3) => (xs4) => (js_if_dep)((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(p1)(a3)))(xs2);
-var subst = (e4) => (unsafe_cast)((a5) => a5);
+var subst = (a5) => a5;
 var subst_type = subst;
-var cong = (f4) => (e5) => (unsafe_cast)(js_undefined);
-var sym = (e3) => (unsafe_cast)(js_undefined);
-var z_neq_s = (p1) => (subst)(p1)(tt);
-var co_sym = (m3) => (p4) => (m3)((sym)(p4));
-var s_inj = (e2) => (subst)(e2)(js_undefined);
-var s_co_cong = (m2) => (p3) => (m2)((s_inj)(p3));
+var cong = refl;
+var sym = refl;
+var z_neq_s = (subst)(tt);
+var co_sym = (m3) => m3;
+var s_inj = (subst)(refl);
+var s_co_cong = (m2) => m2;
 var dec_to_bool = (x8261) => (() => {
   switch ((x8261)[0]) {
     case 0: return ((x8282) => js_true)((x8261)[1]);
@@ -233,8 +224,7 @@ var dec_to_bool = (x8261) => (() => {
 var lte = (m0) => (n1) => (js_zero_or_pos)((_2) => js_true)((x2) => (js_zero_or_pos)((_3) => js_false)((x3) => (lte)(x2)(x3))(n1))(m0);
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(m0)(n1)))((lte)(m0)(n1));
 var bool_eq = (a0) => (b1) => (js_if_dep)(a0)((_2) => (js_if_dep)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)(b1)((_3) => js_false)((_3) => js_true));
-var Char = null;
-var utf32_code = (x18680) => [0, x18680];
+var utf32_code = (x18350) => [0, x18350];
 var char_eq = (c10) => (c21) => (() => {
   switch ((c10)[0]) {
     case 0: return ((f12) => (() => {
@@ -244,15 +234,14 @@ var char_eq = (c10) => (c21) => (() => {
     })())((c10)[1]);
   }
 })();
-var STRING = null;
 var snil = [0];
-var scons = (x18690) => (x18701) => [1, x18690, x18701];
+var scons = (x18360) => (x18371) => [1, x18360, x18371];
 var string_eq = (s10) => (s21) => (() => {
   switch ((s10)[0]) {
     case 0: return (() => {
       switch ((s21)[0]) {
         case 0: return js_true;
-        case 1: return ((x10152) => (x10163) => js_false)((s21)[1])((s21)[2]);
+        case 1: return ((x9952) => (x9963) => js_false)((s21)[1])((s21)[2]);
       }
     })();
     case 1: return ((c12) => (s1_p_3) => (() => {
@@ -267,13 +256,13 @@ var Word = JsBoundedUint;
 var Byte = JsBoundedUint;
 var ascii_eq = (a10) => (a21) => (unsafe_complete)((unsafe_complete)((js_eqq)(a10)(a21)));
 var word_to_nat = (n0) => (js_forget_bound)(n0);
-var Holds = JsUndefined;
-var determine = (x0) => (js_if_dep)(x0)((_1) => (just)(js_undefined))((_1) => nothing);
+var Holds = Equal;
+var determine = (x0) => (js_if_dep)(x0)((_1) => (just)(refl))((_1) => nothing);
 var byte_vec_lookup = (s2) => (l3) => (d4) => (js_array_switch_l)((_5) => (d4)(tt))((a5) => (xs6) => (() => {
-  var x12277 = xs6;
+  var x12077 = xs6;
   return (() => {
-    switch ((x12277)[0]) {
-      case 0: return ((k8) => (v9) => (if_then_else)((js_buffer_eq)((fst)(s2))((fst)(k8)))((_10) => (v9)(tt))((_10) => (byte_vec_lookup)(s2)(a5)(d4)))((x12277)[1])((x12277)[2]);
+    switch ((x12077)[0]) {
+      case 0: return ((k8) => (v9) => (if_then_else)((js_buffer_eq)((fst)(s2))((fst)(k8)))((_10) => (v9)(tt))((_10) => (byte_vec_lookup)(s2)(a5)(d4)))((x12077)[1])((x12077)[2]);
     }
   })();
 })())(l3);
@@ -281,27 +270,26 @@ var panic = (a1) => (unsafe_io)((io_bind)((js_console_log)(a1))((_2) => (js_exit
 var reprs = (l1) => (t2) => (js_zero_or_pos)((_3) => t2)((x3) => (reprs)(x3)(t2))(l1);
 var unreprs = (l1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (r3) => (unreprs)(x2)(r3))(l1);
 var repr_subst = subst_type;
-var repr_subst_p_ = (p2) => (subst_type)((sym)(p2));
-var ReprBy = (Sigma)(JsUint)(JsUndefined);
+var repr_subst_p_ = subst_type;
+var ReprBy = (Sigma)(JsUint)(Equal);
 var reprs_subst = (r2) => (a3) => (() => {
-  var x17174 = r2;
+  var x16974 = r2;
   return (() => {
-    switch ((x17174)[0]) {
-      case 0: return ((l5) => (p6) => (subst_type)(p6)((reprs)(l5)(a3)))((x17174)[1])((x17174)[2]);
+    switch ((x16974)[0]) {
+      case 0: return ((l5) => (p6) => (subst_type)((reprs)(l5)(a3)))((x16974)[1])((x16974)[2]);
     }
   })();
 })();
 var reprs_subst_p_ = (r2) => (b3) => (() => {
-  var x17604 = r2;
+  var x17404 = r2;
   return (() => {
-    switch ((x17604)[0]) {
-      case 0: return ((l5) => (p6) => (unreprs)(l5)((subst_type)((sym)(p6))(b3)))((x17604)[1])((x17604)[2]);
+    switch ((x17404)[0]) {
+      case 0: return ((l5) => (p6) => (unreprs)(l5)((subst_type)(b3)))((x17404)[1])((x17404)[2]);
     }
   })();
 })();
-var Vec = (T0) => null;
 var vec_nil = [0];
-var vec_cons = (x18710) => (x18721) => [1, x18710, x18721];
+var vec_cons = (x18380) => (x18391) => [1, x18380, x18391];
 var vec_length = (n1) => (_2) => n1;
 var boo = (() => {
   var v0 = (vec_cons)("a")((vec_cons)("b")(vec_nil));

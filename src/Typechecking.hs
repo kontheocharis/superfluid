@@ -150,7 +150,7 @@ import Globals
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem,
+    modifyDefItem, dataIsIrrelevant,
   )
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
@@ -782,17 +782,10 @@ caseSubject s = do
         l
         ssTy
         ( \d _ -> do
-            -- Here we want to allow no- or single- constructor data types
-            -- where all the fields are irrelevant.
-            di <- access (getDataGlobal d)
-            case di.ctors of
-              [] -> return ()
-              [c] -> do
-                ci <- access (getCtorGlobal c)
-                if ci.qtySum == Zero
-                  then return ()
-                  else giveUp e
-              _ -> giveUp e
+            i <- access (dataIsIrrelevant d)
+            if i then
+              return ()
+              else giveUp e
         )
         (return ()) -- Handled later
       return (ss, ssTy)

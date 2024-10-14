@@ -37,6 +37,7 @@ module Globals
     addCtorRepr,
     addDataRepr,
     addDefRepr,
+    dataIsIrrelevant,
   )
 where
 
@@ -47,7 +48,7 @@ import Common
     Glob (..),
     Name (..),
     PrimGlobal (..),
-    Qty,
+    Qty (..),
     Spine,
     Tag,
     Tel,
@@ -218,6 +219,16 @@ getGlobalRepr (DataGlob g) = getDataRepr g
 getGlobalRepr (CtorGlob g) = getCtorRepr g
 getGlobalRepr (DefGlob g) = getDefRepr g
 getGlobalRepr (PrimGlob g) = getPrimRepr g
+
+dataIsIrrelevant :: DataGlobal -> Sig -> Bool
+dataIsIrrelevant g sig =
+  let di = getDataGlobal g sig
+   in case di.ctors of
+        [] -> True
+        [c] ->
+          let ci = getCtorGlobal c sig
+           in ci.qtySum == Zero
+        _ -> False
 
 data KnownGlobal a where
   KnownSigma :: KnownGlobal DataGlobal

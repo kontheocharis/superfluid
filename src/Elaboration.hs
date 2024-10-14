@@ -30,6 +30,7 @@ import Common
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
+import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
 import Presyntax
@@ -47,8 +48,9 @@ import Presyntax
     PTm (..),
     pApp,
     pGatherApps,
+    pGatherPis,
     pLams,
-    toPSpine, pGatherPis,
+    toPSpine,
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
@@ -80,7 +82,6 @@ import Typechecking
     unrepr,
     wildPat,
   )
-import Data.Semiring (Semiring(..))
 
 -- Presyntax exists below here
 
@@ -168,10 +169,10 @@ elab p mode = case (p, mode) of
   (PPi m q x a b, Infer) -> do
     -- If something ends in Type or equals, we use rig zero
     let potentiallyZero a' = case (q, fst . pGatherApps . snd . pGatherPis $ a') of
-            (Many, PU) -> Zero
-            (Many, PName (Name "Equal")) -> Zero
-            (_, PLocated _ t) -> potentiallyZero t
-            _ -> q
+          (Many, PU) -> Zero
+          (Many, PName (Name "Equal")) -> Zero
+          (_, PLocated _ t) -> potentiallyZero t
+          _ -> q
     let q' = potentiallyZero a `times` potentiallyZero b
     piTy m q' x (elab a) (elab b)
   (PList ts rest, md) -> do

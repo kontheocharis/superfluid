@@ -36,7 +36,7 @@ import Globals
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
-    mapSigContentsM_,
+    mapSigContentsM_, dataIsIrrelevant,
   )
 import Printing (indentedFst)
 import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
@@ -119,7 +119,8 @@ generateProgram = do
   return $ jsProgFromStats boot ds
 
 generateItem :: (Gen m) => GlobalInfo -> m ()
-generateItem (DataInfo d) = generateDataItem d
+-- generateItem (DataInfo d) = generateDataItem d
+generateItem (DataInfo _) = return ()
 generateItem (CtorInfo c) = generateCtorItem c
 generateItem (PrimInfo {}) = return () -- should be handled by the boot file
 generateItem (DefInfo d) = when (d.qty > Zero) $ generateDeclItem d
@@ -130,20 +131,20 @@ onlyRelevantArgs = S.filter (\ar -> ar.qty /= Zero)
 onlyRelevantBinds :: [(Qty, Name)] -> [(Qty, Name)]
 onlyRelevantBinds = filter (\(q, _) -> q /= Zero)
 
-onlyRelevantParams :: Tel a -> Tel a
-onlyRelevantParams = S.filter (\ar -> ar.qty /= Zero)
+-- onlyRelevantParams :: Tel a -> Tel a
+-- onlyRelevantParams = S.filter (\ar -> ar.qty /= Zero)
 
 generateDeclItem :: (Gen m) => DefGlobalInfo -> m ()
 generateDeclItem d = do
   t <- generateExpr (fromJust d.tm)
   addDecl $ jsConst (jsName d.name) t
 
-generateDataItem :: (Gen m) => DataGlobalInfo -> m ()
-generateDataItem d = do
-  indices <- mapSpineM (const uniqueName) (onlyRelevantArgs d.indexArity)
-  let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams d.params)
-  body <- jsLams (params S.>< indices) $ return jsNull
-  addDecl $ jsConst (jsName d.name) body
+-- generateDataItem :: (Gen m) => DataGlobalInfo -> m ()
+-- generateDataItem d = do
+--   indices <- mapSpineM (const uniqueName) (onlyRelevantArgs d.indexArity)
+--   let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams d.params)
+--   body <- jsLams (params S.>< indices) $ return jsNull
+--   addDecl $ jsConst (jsName d.name) body
 
 generateCtorItem :: (Gen m) => CtorGlobalInfo -> m ()
 generateCtorItem c = do
@@ -180,30 +181,37 @@ generateExpr (SData s) = return $ jsGlobal s.globalName
 generateExpr (SDef s) = return $ jsGlobal s.globalName
 generateExpr (SVar v) = jsVar v
 generateExpr (SCase c) = do
-  sub <- generateExpr c.subject
-  cs' <-
-    zipWithM
-      ( \i cl -> do
-          let (p, t) = case cl of
-                Possible a b -> (a, b)
-                Impossible _ -> error "Impossible case not supported"
-          let relevantBinds = onlyRelevantBinds p.binds
-          ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
-          let tag = intToNat i
-          let body =
-                jsApp
-                  ls
-                  ( S.fromList $
-                      map
-                        (Arg Explicit Many . jsIndex sub . intToNat)
-                        [1 .. length relevantBinds]
-                  )
-          return (tag, body)
-      )
-      [0 ..]
-      c.clauses
-  let subTag = jsIndex sub (intToNat 0)
-  return $ jsSwitch subTag cs'
+  irr <- access (dataIsIrrelevant c.dat)
+  if irr then
+    case c.clauses of
+      [] -> return jsNull -- @@Enhancement: emit a `throw new Error("unreachable")` here
+      [Possible _ t] -> generateExpr t
+      _ -> error "Found irrelevant data with more than one case"
+    else do
+      sub <- generateExpr c.subject
+      cs' <-
+        zipWithM
+          ( \i cl -> do
+              let (p, t) = case cl of
+                    Possible a b -> (a, b)
+                    Impossible _ -> error "Impossible case not supported"
+              let relevantBinds = onlyRelevantBinds p.binds
+              ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
+              let tag = intToNat i
+              let body =
+                    jsApp
+                      ls
+                      ( S.fromList $
+                          map
+                            (Arg Explicit Many . jsIndex sub . intToNat)
+                            [1 .. length relevantBinds]
+                      )
+              return (tag, body)
+          )
+          [0 ..]
+          c.clauses
+      let subTag = jsIndex sub (intToNat 0)
+      return $ jsSwitch subTag cs'
 generateExpr ((SMeta _ _)) = return jsNull
 generateExpr ((SLit (StringLit s))) = return $ jsStringLit s
 generateExpr ((SLit (NatLit i))) = return $ jsIntLit (fromIntegral i)
