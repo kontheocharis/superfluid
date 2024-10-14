@@ -179,6 +179,7 @@ pGatherApps t = (t, Empty)
 
 pGatherPis :: PTm -> (Tel PTy, PTm)
 pGatherPis (PPi m q n a b) = let (ns, b') = pGatherPis b in (Param m q n a :<| ns, b')
+pGatherPis (PLocated _ t) = pGatherPis t
 pGatherPis t = (Empty, t)
 
 pLetToList :: PTm -> ([(Qty, PPat, PTy, PTm)], PTm)

@@ -1,5 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Common
   ( Name (..),
@@ -46,22 +48,24 @@ module Common
     HasNameSupply (..),
     HasProjectFiles (..),
     Has (..),
+    Try (..),
   )
 where
 
+import Control.Monad ((>=>))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
 import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
 import Data.List (intercalate)
+import Data.Semiring (Semiring (..))
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
-import Control.Monad ((>=>))
-import Data.Semiring (Semiring (..))
+import Data.Kind (Type)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -316,7 +320,11 @@ class (Monad m) => Has m a where
     modify (\(_ :: a) -> c)
     return a
 
--- instance () => Has (With a m) a
+-- | A typeclass for backtracking try
+class Try m where
+  type E m :: Type
+  try :: m a -> m (Either (E m) a)
+  giveUp :: E m -> m a
 
 -- Printing
 

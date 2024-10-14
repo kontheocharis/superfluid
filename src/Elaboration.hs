@@ -166,9 +166,10 @@ elab p mode = case (p, mode) of
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m q x a b, Infer) -> do
-    -- If something ends in Type, we use rig zero
-    let potentiallyZero a' = case (q, snd (pGatherPis a')) of
+    -- If something ends in Type or equals, we use rig zero
+    let potentiallyZero a' = case (q, fst . pGatherApps . snd . pGatherPis $ a') of
             (Many, PU) -> Zero
+            (Many, PName (Name "Equal")) -> Zero
             (_, PLocated _ t) -> potentiallyZero t
             _ -> q
     let q' = potentiallyZero a `times` potentiallyZero b

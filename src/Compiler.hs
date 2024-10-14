@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Compiler (runCli) where
 
@@ -11,13 +13,15 @@ import Common
     HasProjectFiles (getProjectFileContents),
     Loc (..),
     Logger (..),
-    Name (..), Qty (Many),
+    Name (..),
+    Qty (Many),
+    Try (..),
   )
 import Control.Monad (void, when)
-import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT, tryError)
 import Control.Monad.Extra (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.State (MonadState (..), StateT (..))
+import Control.Monad.State (MonadState (..), MonadTrans (lift), StateT (..))
 import Control.Monad.State.Class (gets)
 import qualified Control.Monad.State.Class as ST
 import Data.Map (Map)
@@ -230,6 +234,20 @@ instance Has Comp InPat where
 instance Has Comp Loc where
   view = gets (\c -> c.currentLoc)
   modify f = ST.modify (\s -> s {currentLoc = f s.currentLoc})
+
+instance Try Comp where
+  type E Comp = CompilerError
+  try f = do
+    c <- get
+    x <- tryError f
+    case x of
+      Left e -> do
+        put c
+        return $ Left e
+      Right a -> return $ Right a
+
+  giveUp :: E Comp -> Comp a
+  giveUp = throwError
 
 instance HasProjectFiles Comp where
   getProjectFileContents f = do

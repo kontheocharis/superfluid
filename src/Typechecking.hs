@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -61,6 +62,7 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
+    Logger (..),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -71,6 +73,7 @@ import Common
     Spine,
     Tag,
     Tel,
+    Try (..),
     composeZ,
     lvlToIdx,
     mapSpineM,
@@ -101,7 +104,7 @@ import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust)
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
@@ -292,6 +295,7 @@ class
   ( Eval m,
     Unelab m,
     Has m Loc,
+    Try m,
     Has m Qty,
     Has m (Seq Problem),
     Has m InPat,
@@ -372,6 +376,9 @@ satisfyQty q = do
 
 enterQty :: (Tc m) => Qty -> m a -> m a
 enterQty q = enter (`times` q)
+
+replaceQty :: (Tc m) => Qty -> m a -> m a
+replaceQty q = enter (const q)
 
 enterTel :: (Tc m) => Tel STy -> m a -> m a
 enterTel Empty f = f
@@ -763,6 +770,33 @@ ensureDataAndGetWide ssTy f = do
     )
     f
 
+caseSubject :: (Tc m) => Child m -> m (STm, VTy)
+caseSubject s = do
+  sRes <- try $ s Infer
+  case sRes of
+    Right r -> return r
+    Left e -> do
+      (ss, ssTy) <- replaceQty Zero $ s Infer
+      l <- getLvl
+      ifIsData
+        l
+        ssTy
+        ( \d _ -> do
+            -- Here we want to allow no- or single- constructor data types
+            -- where all the fields are irrelevant.
+            di <- access (getDataGlobal d)
+            case di.ctors of
+              [] -> return ()
+              [c] -> do
+                ci <- access (getCtorGlobal c)
+                if ci.qtySum == Zero
+                  then return ()
+                  else giveUp e
+              _ -> giveUp e
+        )
+        (return ()) -- Handled later
+      return (ss, ssTy)
+
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
   forbidPat
@@ -771,12 +805,8 @@ caseOf mode s r cs = do
       retTy <- freshMeta >>= evalHere
       caseOf (Check retTy) s r cs
     Check ty -> do
-      (ss, ssTy) <- s Infer
+      (ss, ssTy) <- caseSubject s
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
-
-      -- subjectQty <- case di.ctors of
-      --       [c] -> access (getCtorGlobal c) >>= \c' -> return c'.qtySum
-      --       _ -> return one
 
       di <- access (getDataGlobal d)
       let motive = fromJust di.motiveTy
@@ -836,9 +866,11 @@ defItem q n ts ty tm = do
   vty <- evalHere ty'
   modify (addItem n (DefInfo (DefGlobalInfo n q vty Nothing Nothing)) ts)
   (tm', _) <- enterQty q $ tm (Check vty)
+
   vtm <- evalHere tm'
   b <- normaliseProgram
   stm <- if b then quote (Lvl 0) vtm else return tm'
+
   modify (modifyDefItem (DefGlobal n) (\d -> d {tm = Just stm, vtm = Just vtm}))
   return ()
 

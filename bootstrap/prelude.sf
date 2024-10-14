@@ -298,7 +298,7 @@ def void : [A : Type] -> Empty -> A {
 
 data Dec (A : Type) : Type {
   yes : A -> Dec A,
-  no : (A -> Empty) -> Dec A
+  no : ((0 _ : A) -> Empty) -> Dec A
 }
 
 def add : Nat -> Nat -> Nat {
