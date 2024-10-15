@@ -197,8 +197,8 @@ isCompound (PApp {}) = True
 isCompound (PRepr {}) = True
 isCompound (PUnrepr {}) = True
 isCompound (PLocated _ t) = isCompound t
-isCompound (PParams t []) = isCompound t
-isCompound (PParams _ _) = True
+isCompound (PParams t _) = isCompound t
+-- isCompound (PParams _ _) = True
 isCompound _ = False
 
 prettyLets :: (Monad m) => ([(Qty, PPat, PTy, PTm)], PTm) -> m String
@@ -292,10 +292,10 @@ instance (Monad m) => Pretty m PTm where
   pretty (PLocated _ t) = pretty t
   pretty PUnit = return "()"
   pretty (PParams t []) = pretty t
-  pretty (PParams t ps) = do
-    pt <- singlePretty t
-    pps <- mapM pretty ps
-    return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
+  pretty (PParams t _) = pretty t
+    -- pt <- singlePretty t
+    -- pps <- mapM pretty ps
+    -- return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
   pretty (PList ts rest) = do
     pts <- mapM pretty ts
     rest' <- case rest of

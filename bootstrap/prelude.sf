@@ -468,6 +468,20 @@ def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
   }
 }
 
+-- We cannot currently prove UIP because we don't have dependent pattern
+-- matching with the deletion rule.
+def uip : [A : Type, x : A] -> (p : Equal x x) -> Equal p refl {
+  \p => trust-me
+}
+
+def equality-is-prop : [A : Type, x : A, y : A] -> (p q : Equal x y) -> Equal p q {
+  \p q => {
+    (case q to (\x y q => (p : Equal x y) -> Equal p q) {
+      refl => uip
+    }) p
+  }
+}
+
 def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
   \p => subst [Nat] (\n => case n {
     z => Unit,
