@@ -3,46 +3,68 @@ data Vec (T : Type) : Nat -> Type {
   vec-cons : [n : Nat] -> T -> Vec T n -> Vec T (s n)
 }
 
-def vec-length : [T : Type, n : Nat] -> Vec T n -> Nat {
+def vec-length : [T : Type, * n : Nat] -> Vec T n -> Nat {
   \[_] [n] _ => n
 }
 
-repr data Vec T n as (l : List T) * Equal (length l) n {
-  vec-nil as (nil, refl),
+data RISigma (A : Type) (B : A -> Type) : Type {
+  ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
+}
+
+def uip : [A : Type, x : A] -> (p : Equal x x) -> Equal p refl {
+  ?uip
+}
+
+-- def sigma-eq : [A : Type, x : A, y : A] -> Equal x y ->  -> Equal ()
+
+repr data Vec T n as RISigma (List T) (\l => Equal (length l) n) {
+  vec-nil as ri-pair nil refl,
   vec-cons x xs as {
-    let (xs', p) = repr xs;
-    (cons x xs', cong s p)
+    let (ri-pair xs' p) = repr xs;
+    ri-pair (cons x xs') (cong s p)
   },
 
   case b to E {
     vec-nil => ni,
     vec-cons => co
   } as {
-    let b' = repr b;
+    let (ri-pair l p) = repr b;
+    let q : Equal (ri-pair l p) (repr b) = trust-me;
     let n = vec-length b;
-    let E' = \n => repr (E n);
-    let len-eq : Equal (length (fst b')) n = trust-me;
-
-    case (repr b) to (\pr => E' n pr) {
-      (l, p) => (case l to (\l => (p : Equal (length l) n) -> E' n (l, p)) {
-        nil => \p => {
-          let p1 : Equal (vec-length b) z = trust-me;
-          subst [Nat] (\n => (repr E) (repr n) _) p1 ni
+    subst
+      (\t => E n (unrepr t)) q
+      ((case l to (\l => (p : Equal (length l) n) -> E n (unrepr (ri-pair l p))) {
+        nil => case n to (\n' => (p : Equal z n') -> E n' (unrepr (ri-pair nil p))) {
+          z => \p => subst (\p' => E z (unrepr (ri-pair nil p'))) (sym (uip p)) ni,
+          s n' => \p => case z-neq-s p {},
         },
-        cons x xs => \p => ?co
-      }) p
-    }
+        cons x xs => case n to (\n' => (p : Equal (s (length xs)) n') -> E n' (unrepr (ri-pair (cons x xs) p))) {
+          z => \p => case z-neq-s (sym p) {},
+          s n'' => \p => {
+            let q = s-inj p;
+            let xs' : RISigma (List T) (\l => Equal (length l) n'') = ri-pair xs q;
+            subst (\p' => E (s n'') (unrepr (ri-pair (cons x xs) (cong s p'))))
+              (uip q)
+              (co x (unrepr xs'))
+          }
+        },
+      }) p)
   }
 }
 
-def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
-  \case {
-    vec-nil => nil,
-    vec-cons x xs => cons x (vec-to-list xs),
-  }
-}
+  -- \p => {
+  --         let _ = ?ni;
+  --         subst (\n => E n (unrepr (ri-pair nil p))) p ni
+  --       }
 
-repr def vec-to-list as \v => fst (repr v)
+-- def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
+--   \case {
+--     vec-nil => nil,
+--     vec-cons x xs => cons x (vec-to-list xs),
+--   }
+-- }
+
+-- repr def vec-to-list as \v => fst (repr v)
 
 -- (repr E) (repr (vec-length [T] [x1928] b)) ((pair@[List T, \x2084 => Equal [Nat] (length [T] x2084) (vec-length [T] [x1928] b)]) (nil@[T]) p)
 -- (repr E) js-uint-zero ((pair@[List T, \x1850 => Equal [Nat] (length [T] x1850) z]) (nil@[T]) ((refl@[Nat]) [length [T] (nil@[T])]))
