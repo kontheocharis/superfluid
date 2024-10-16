@@ -175,22 +175,22 @@ const conjure = null;
 const trust_me = null;
 
 var tt = [0];
-var pair = (x32190) => (x32201) => [0, x32190, x32201];
+var pair = (x32140) => (x32151) => [0, x32140, x32151];
 var refl = [0];
 var debug_print = (a2) => (b3) => (unsafe_io)((io_bind)((js_console_log)(a2))((_4) => (io_return)(b3)));
 var nothing = [0];
-var just = (x32210) => [1, x32210];
+var just = (x32160) => [1, x32160];
 var is_just = (x1311) => (() => {
   switch ((x1311)[0]) {
     case 0: return js_false;
     case 1: return ((x1352) => js_true)((x1311)[1]);
   }
 })();
-var left = (x32220) => [0, x32220];
-var right = (x32230) => [1, x32230];
+var left = (x32170) => [0, x32170];
+var right = (x32180) => [1, x32180];
 var VOID = (m1) => null;
-var yes = (x32240) => [0, x32240];
-var no = (x32250) => [1, x32250];
+var yes = (x32190) => [0, x32190];
+var no = (x32200) => [1, x32200];
 var sub = (m0) => (n1) => (js_zero_or_pos)((_2) => m0)((x2) => (js_zero_or_pos)((_3) => js_uint_zero)((x3) => (sub)(x3)(x2))(m0))(n1);
 var upgrade = (k1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (x3) => (js_bounded_uint_inc)((upgrade)(x2)(x3)))(k1);
 var find = (p1) => (xs2) => (js_array_switch_l)((_3) => nothing)((a3) => (xs4) => (js_if_dep)((p1)(xs4))((_5) => (just)(xs4))((_5) => (find)(p1)(a3)))(xs2);
@@ -211,7 +211,7 @@ var dec_to_bool = (x9111) => (() => {
 var lte = (m0) => (n1) => (js_zero_or_pos)((_2) => js_true)((x2) => (js_zero_or_pos)((_3) => js_false)((x3) => (lte)(x2)(x3))(n1))(m0);
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(m0)(n1)))((lte)(m0)(n1));
 var bool_eq = (a0) => (b1) => (js_if_dep)(a0)((_2) => (js_if_dep)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)(b1)((_3) => js_false)((_3) => js_true));
-var utf32_code = (x32260) => [0, x32260];
+var utf32_code = (x32210) => [0, x32210];
 var char_eq = (c10) => (c21) => (() => {
   switch ((c10)[0]) {
     case 0: return ((f12) => (() => {
@@ -222,7 +222,7 @@ var char_eq = (c10) => (c21) => (() => {
   }
 })();
 var snil = [0];
-var scons = (x32270) => (x32281) => [1, x32270, x32281];
+var scons = (x32220) => (x32231) => [1, x32220, x32231];
 var string_eq = (s10) => (s21) => (() => {
   switch ((s10)[0]) {
     case 0: return (() => {
@@ -284,7 +284,7 @@ var reprs_subst_p_ = (r2) => (b3) => (() => {
   })();
 })();
 var vec_length = (n1) => (_2) => n1;
-var ri_pair = (x32290) => [0, x32290];
+var ri_pair = (x32240) => [0, x32240];
 var vec_index = (v2) => (() => {
   var l3 = (() => {
     switch ((v2)[0]) {
@@ -298,8 +298,12 @@ var vec_index = (v2) => (() => {
 })();
 var safe_index = (l2) => (i4) => (vec_index)((ri_pair)(l2))(i4);
 var main = (() => {
-  var v0 = (ri_pair)((js_array_extend_l)(1)(cong));
-  var n1 = (vec_index)(v0)(2);
-  return (js_console_log)(n1);
+  var v0 = (ri_pair)(1);
+  var u1 = (() => {
+    switch ((v0)[0]) {
+      case 0: return ((a1) => v0)((v0)[1]);
+    }
+  })();
+  return (js_console_log)(u1);
 })();
 (main)()

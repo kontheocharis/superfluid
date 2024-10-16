@@ -11,7 +11,7 @@ data RISigma (A : Type) (B : A -> Type) : Type {
   ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
 }
 
--- #unfold
+#unfold
 def ri-fst : [A : Type, B : A -> Type] -> (x : RISigma A B) -> A {
   \x => case x {
     ri-pair a b => a
@@ -142,8 +142,16 @@ def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
 
 repr def vec-to-list as \v => ri-fst (repr v)
 
-def main : IO () {
-  let v = vec-cons 1 vec-nil;
-  let n = vec-index v 0n;
-  js-console-log n
+#unfold
+def the : (T : Type) -> T -> T {
+  \T x => x
 }
+
+def main : IO () {
+  let u = ri-fst (the (RISigma Nat (\_ => Nat * Nat)) (ri-pair 1 (2, 2)));
+  -- let n = vec-index v 0n;
+  js-console-log u
+}
+
+
+  -- ri-pair (js-array-extend-l 1 (ri-fst  (ri-pair (js-empty-array ) (refl)))) (cong (\n => js-uint-plus js-uint-one n) (js-empty-array))

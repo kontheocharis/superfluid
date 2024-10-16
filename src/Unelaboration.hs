@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Unelaboration
@@ -14,20 +14,21 @@ import Common
   ( Arg (..),
     Clause (..),
     CtorGlobal (..),
+    DataGlobal (..),
+    DefGlobal (..),
     Has (..),
     Idx (..),
     Lvl (..),
     MetaVar,
     Name (..),
-    DefGlobal (..),
-    DataGlobal (..),
-    CtorGlobal (..),
-    PrimGlobal (..),
     Param (..),
     PiMode (..),
+    PrimGlobal (..),
+    Qty (..),
     Tag,
     Tel,
-    unMetaVar, Qty (..), mapSpineM,
+    mapSpineM,
+    unMetaVar,
   )
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT (..))
@@ -55,9 +56,13 @@ import Globals
 import Meta (lookupMetaVar, lookupMetaVarName)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
-import Syntax (BoundState (..), Bounds, SPat (..), STm (..), Case (..))
 import Syntax
-  ( Closure (..),
+  ( BoundState (..),
+    Bounds,
+    Case (..),
+    Closure (..),
+    SPat (..),
+    STm (..),
     Sub (..),
     VPatB (..),
     VTm (..),
@@ -145,7 +150,6 @@ unelab ns = \case
   SLit l -> PLit <$> traverse (traverse (unelab ns) . Just) l
   SRepr t -> PRepr <$> unelab ns t
   SUnrepr t -> PUnrepr <$> unelab ns t
-
 
 unelabTel :: (Unelab m) => [Name] -> Tel STm -> m (Tel PTm)
 unelabTel _ Empty = return Empty

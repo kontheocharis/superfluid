@@ -48,6 +48,7 @@ import Common
     Logger (..),
     Lvl (..),
     MetaVar,
+    Name,
     Param (..),
     PiMode (..),
     Qty (Many, Zero),
@@ -86,7 +87,6 @@ import Globals
     mapSigContentsM,
     removeRepresentedItems,
     unfoldDef,
-    unfoldDefSyntax,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
@@ -121,7 +121,6 @@ import Syntax
     pattern VMeta,
     pattern VVar,
   )
-import Debug.Trace (traceM)
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -425,82 +424,89 @@ reprInfSig :: (Eval m) => m ()
 reprInfSig = do
   s <- view
   let s' = removeRepresentedItems s
-  s'' <- mapSigContentsM (mapGlobalInfoM sReprInf) s'
+  s'' <- mapSigContentsM (mapGlobalInfoM $ sReprInf (Lvl 0)) s'
   modify (const s'')
 
-sReprInfGlob :: (Eval m) => Glob -> Spine STm -> m STm
-sReprInfGlob g xs = do
+sReprInfGlob :: (Eval m) => Lvl -> Glob -> Spine STm -> m STm
+sReprInfGlob l g xs = do
   d' <- access (getGlobalRepr g)
   case d' of
     Just r' -> do
       r'' <- closureToLam r'
       let res = sAppSpine r'' xs
-      sReprInf res
+      sReprInf l res
     Nothing -> do
-      xs' <- mapSpineM sReprInf xs
+      xs' <- mapSpineM (sReprInf l) xs
       return $ sGlobWithParams g xs'
 
-sReprInfCase :: (Eval m) => SCase -> m STm
-sReprInfCase c = do
+sReprInfCase :: (Eval m) => Lvl -> SCase -> m STm
+sReprInfCase l c = do
   r <- access (getCaseRepr c.dat)
   case r of
     Just r' -> do
       r'' <- closureToLam r'
       sp <- sCaseToSpine c
       let res = sAppSpine r'' sp
-      sReprInf res
+      sReprInf l res
     Nothing -> do
-      datParams' <- mapSpineM sReprInf c.datParams
-      subject' <- sReprInf c.subject
-      subjectIndices' <- mapSpineM sReprInf c.subjectIndices
-      elimTy' <- sReprInf c.elimTy
-      clauses' <- traverse (bitraverse return sReprInf) c.clauses
+      datParams' <- mapSpineM (sReprInf l) c.datParams
+      subject' <- sReprInf l c.subject
+      subjectIndices' <- mapSpineM (sReprInf l) c.subjectIndices
+      elimTy' <- sReprInf l c.elimTy
+      clauses' <-
+        traverse
+          ( \case
+              Clause p t -> do
+                t' <- traverse (sReprInf (nextLvls l (length p.binds))) t
+                return $ Clause p t'
+          )
+          c.clauses
       return $ SCase (Case c.dat datParams' subject' subjectIndices' elimTy' clauses')
 
-sReprInf :: (Eval m) => STm -> m STm
-sReprInf (SPi m q x a b) = do
-  a' <- sReprInf a
-  b' <- sReprInf b
+sReprInf :: (Eval m) => Lvl -> STm -> m STm
+sReprInf l (SPi m q x a b) = do
+  a' <- sReprInf l a
+  b' <- sReprInf (nextLvl l) b
   return $ SPi m q x a' b'
-sReprInf (SLam m q x t) = do
-  t' <- sReprInf t
+sReprInf l (SLam m q x t) = do
+  t' <- sReprInf (nextLvl l) t
   return $ SLam m q x t'
-sReprInf SU = return SU
-sReprInf (SLit t) = SLit <$> traverse sReprInf t
-sReprInf (SApp m q a b) = do
-  a' <- sReprInf a
-  b' <- sReprInf b
+sReprInf _ SU = return SU
+sReprInf l (SLit t) = SLit <$> traverse (sReprInf l) t
+sReprInf l (SApp m q a b) = do
+  a' <- sReprInf l a
+  b' <- sReprInf l b
   return $ SApp m q a' b'
-sReprInf (SData d) = sReprInfGlob (DataGlob d) Empty
-sReprInf (SCtor (c, xs)) = sReprInfGlob (CtorGlob c) xs
-sReprInf (SDef d) = do
+sReprInf l (SData d) = sReprInfGlob l (DataGlob d) Empty
+sReprInf l (SCtor (c, xs)) = sReprInfGlob l (CtorGlob c) xs
+sReprInf l (SDef d) = do
   ts <- access (getGlobalTags d.globalName)
   if UnfoldTag `elem` ts
     then do
-      g' <- access (unfoldDefSyntax d)
+      g' <- access (unfoldDef d)
       case g' of
-        Just t -> sReprInf t
+        Just t -> quote l t >>= sReprInf l
         Nothing -> error "Found UnfoldTag but no syntax for def"
-    else sReprInfGlob (DefGlob d) Empty
-sReprInf (SPrim p) = sReprInfGlob (PrimGlob p) Empty
-sReprInf (SCase c) = sReprInfCase c
-sReprInf (SRepr x) = sReprInf x
-sReprInf (SUnrepr x) = sReprInf x
-sReprInf (SMeta m bs) = do
+    else sReprInfGlob l (DefGlob d) Empty
+sReprInf l (SPrim p) = sReprInfGlob l (PrimGlob p) Empty
+sReprInf l (SCase c) = sReprInfCase l c
+sReprInf l (SRepr x) = sReprInf l x
+sReprInf l (SUnrepr x) = sReprInf l x
+sReprInf _ (SMeta m bs) = do
   warnMsg $ "found metavariable while representing program: " ++ show m
   return $ SMeta m bs
-sReprInf (SLet q x ty t y) = do
-  ty' <- sReprInf ty
-  t' <- sReprInf t
-  y' <- sReprInf y
+sReprInf l (SLet q x ty t y) = do
+  ty' <- sReprInf l ty
+  t' <- sReprInf l t
+  y' <- sReprInf (nextLvl l) y
   return $ SLet q x ty' t' y'
-sReprInf (SVar i) = return $ SVar i
+sReprInf _ (SVar i) = return $ SVar i
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t
 
 closureArgs :: Int -> Int -> [VTm]
-closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) (reverse [0 .. n - 1])
+closureArgs n envLen = map (VNeu . VVar . Lvl . (+ envLen)) [0 .. n - 1]
 
 extendEnvByNVars :: Int -> Env VTm -> Env VTm
 extendEnvByNVars numVars env = closureArgs numVars (length env) ++ env
