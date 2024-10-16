@@ -11,6 +11,22 @@ data RISigma (A : Type) (B : A -> Type) : Type {
   ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
 }
 
+def ri-fst : [A : Type, B : A -> Type] -> (x : RISigma A B) -> A {
+  \(ri-pair x _) => x
+}
+
+def 0 ri-snd : [A : Type, B : A -> Type] -> (x : RISigma A B) -> B (ri-fst x) {
+  \[_] [B] p => case p to (\p => B (ri-fst p)) {
+    (ri-pair a b) => b
+  }
+}
+
+def 0 ri-sigma-eta : [A : Type, B : A -> Type] -> [x : RISigma A B] -> Equal x (ri-pair (ri-fst x) (ri-snd x)) {
+  \[x] => case x to (\x => Equal x (ri-pair (ri-fst x) (ri-snd x))) {
+    (ri-pair a b) => refl
+  }
+}
+
 repr data Vec T n as RISigma (List T) (\l => Equal (length l) n) {
   vec-nil as ri-pair nil refl,
   vec-cons x xs as {
@@ -22,11 +38,13 @@ repr data Vec T n as RISigma (List T) (\l => Equal (length l) n) {
     vec-nil => ni,
     vec-cons => co
   } as {
-    let (ri-pair l p) = repr b;
-    let q : Equal (ri-pair l p) (repr b) = trust-me;
+    let b' = repr b;
+    let l = ri-fst b';
+    let 0 p = ri-snd b';
     let n = vec-length b;
+
     subst
-      (\t => E n (unrepr t)) q
+      (\t => E n (unrepr t)) (sym ri-sigma-eta)
       ((case l to (\l => (p : Equal (length l) n) -> E n (unrepr (ri-pair l p))) {
         nil => case n to (\n' => (p : Equal z n') -> E n' (unrepr (ri-pair nil p))) {
           z => \p => subst (\p' => E z (unrepr (ri-pair nil p'))) (sym (uip p)) ni,
