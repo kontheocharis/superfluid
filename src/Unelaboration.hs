@@ -142,7 +142,7 @@ unelab ns = \case
   SDef g -> return $ PName g.globalName
   SData g -> return $ PName g.globalName
   SPrim g -> return $ PName g.globalName
-  SLit l -> PLit <$> traverse (unelab ns) l
+  SLit l -> PLit <$> traverse (traverse (unelab ns) . Just) l
   SRepr t -> PRepr <$> unelab ns t
   SUnrepr t -> PUnrepr <$> unelab ns t
 

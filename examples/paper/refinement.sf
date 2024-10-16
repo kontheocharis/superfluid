@@ -11,9 +11,11 @@ data RISigma (A : Type) (B : A -> Type) : Type {
   ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
 }
 
-#unfold
+-- #unfold
 def ri-fst : [A : Type, B : A -> Type] -> (x : RISigma A B) -> A {
-  \(ri-pair x _) => x
+  \x => case x {
+    ri-pair a b => a
+  }
 }
 
 #unfold
@@ -42,8 +44,7 @@ def vec-nil' : [T : Type] -> Vec' T 0 {
 #unfold
 def vec-cons' : [T : Type, n : Nat] -> T -> Vec' T n -> Vec' T (s n) {
   \[T] [n] x xs => {
-    let (ri-pair xs' p) = xs;
-    ri-pair (cons x xs') (cong s p)
+    ri-pair (cons x (ri-fst xs)) (cong s (ri-snd xs))
   }
 }
 
@@ -76,13 +77,24 @@ def vec-ind' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
   }
 }
 
--- def vec-ind-nil' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
---     -> [ni : E 0 vec-nil']
---     -> [co : ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))]
---     -> Equal (vec-ind E ni co vec-nil') ni
--- {
---   ?h1
--- }
+-- these are almost refl, but blocked by annoying things
+
+def 0 vec-ind-nil' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
+    -> [ni : E 0 vec-nil']
+    -> [co : ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))]
+    -> Equal (vec-ind' E ni co vec-nil') ni
+{
+  ?vec-ind-nil'
+}
+
+def 0 vec-ind-cons' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
+    -> [ni : E 0 vec-nil']
+    -> [co : ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))]
+    -> [* n : Nat] -> (x : T) -> (xs : Vec' T n)
+    -> Equal (vec-ind' E ni co (vec-cons' x xs)) (co x xs)
+{
+  \x xs => ?vec-ind-cons'
+}
 
 
 repr data Vec T n as Vec' T n {
@@ -130,3 +142,8 @@ def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
 
 repr def vec-to-list as \v => ri-fst (repr v)
 
+def main : IO () {
+  let v = vec-cons 1 vec-nil;
+  let n = vec-index v 0n;
+  js-console-log n
+}

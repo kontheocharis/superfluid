@@ -150,7 +150,7 @@ import Globals
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem, dataIsIrrelevant,
+    modifyDefItem, dataIsIrrelevant, knownDef,
   )
 import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)

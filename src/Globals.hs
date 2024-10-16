@@ -259,6 +259,7 @@ data KnownGlobal a where
   KnownFalse :: KnownGlobal CtorGlobal
   KnownJsImpossible :: KnownGlobal PrimGlobal
   KnownJsIndex :: KnownGlobal PrimGlobal
+  KnownAdd :: KnownGlobal DefGlobal
   KnownSub :: KnownGlobal DefGlobal
 
 deriving instance Show (KnownGlobal a)
@@ -295,3 +296,4 @@ knownPrim KnownJsIndex = PrimGlobal (Name "js-index")
 
 knownDef :: KnownGlobal DefGlobal -> DefGlobal
 knownDef KnownSub = DefGlobal (Name "sub")
+knownDef KnownAdd = DefGlobal (Name "add")

@@ -408,7 +408,7 @@ literal = locatedTerm $ do
           endingN <- optionMaybe (try (char 'n') >> optionMaybe singleTerm)
           anyWhite
           case endingN of
-            Just i -> return $ PLit (FinLit (read n) (fromMaybe PWild i))
+            Just i -> return $ PLit (FinLit (read n) i)
             Nothing -> return $ PLit (NatLit (read n))
       )
   where

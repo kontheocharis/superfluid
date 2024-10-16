@@ -121,6 +121,7 @@ import Syntax
     pattern VMeta,
     pattern VVar,
   )
+import Debug.Trace (traceM)
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
