@@ -17,14 +17,17 @@ data Equal [A : Type] : A -> A -> Type {
   refl : [x : A] -> Equal x x
 }
 
+#unfold
 def dup : [A : Type] -> A -> A * A {
   \a => (a, a)
 }
 
+#unfold
 def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
   \(a, _) => a
 }
 
+#unfold
 def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
   \[_] [B] p => case p to (\p => B (fst p)) {
     (a, b) => b
@@ -36,6 +39,7 @@ def id : [A : Type] -> A -> A {
   \a => a
 }
 
+#unfold
 def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   \[A] b t f => case b {
     true => t tt,
@@ -446,12 +450,14 @@ def index : [A : Type] -> Nat -> List A -> Maybe A {
 }
 
 -- Try combinator!
+#unfold
 def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
   \P e => case e to (\x y _ => P x -> P y) {
     refl => id
   }
 }
 
+#unfold
 def subst-type : [A B : Type] -> Equal A B -> A -> B {
   subst [Type] (\X => X)
 }

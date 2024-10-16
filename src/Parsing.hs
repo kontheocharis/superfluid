@@ -448,8 +448,9 @@ tel =
       located
         (\(q, n, t) l -> singleton (Param Explicit q n t, l))
         ( do
+            q <- qty
             t <- app
-            return (Many, Name "_", t)
+            return (fromMaybe Many q, Name "_", t)
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))

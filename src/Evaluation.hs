@@ -48,9 +48,12 @@ import Common
     Logger (..),
     Lvl (..),
     MetaVar,
+    Param (..),
     PiMode (..),
+    Qty (Many, Zero),
     Spine,
     Tag (..),
+    Tel,
     composeZ,
     lvlToIdx,
     mapSpine,
@@ -58,7 +61,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, Qty (Many, Zero), Param (..), Tel,
+    pattern Possible,
   )
 import Control.Monad (foldM, (>=>))
 import Control.Monad.Extra (firstJustM)
@@ -67,6 +70,7 @@ import Control.Monad.State.Class (MonadState (..))
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (toList)
+import Data.Semiring (Semiring (..))
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
@@ -82,6 +86,7 @@ import Globals
     mapSigContentsM,
     removeRepresentedItems,
     unfoldDef,
+    unfoldDefSyntax,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
@@ -116,7 +121,6 @@ import Syntax
     pattern VMeta,
     pattern VVar,
   )
-import Data.Semiring (Semiring(..))
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -468,7 +472,15 @@ sReprInf (SApp m q a b) = do
   return $ SApp m q a' b'
 sReprInf (SData d) = sReprInfGlob (DataGlob d) Empty
 sReprInf (SCtor (c, xs)) = sReprInfGlob (CtorGlob c) xs
-sReprInf (SDef d) = sReprInfGlob (DefGlob d) Empty
+sReprInf (SDef d) = do
+  ts <- access (getGlobalTags d.globalName)
+  if UnfoldTag `elem` ts
+    then do
+      g' <- access (unfoldDefSyntax d)
+      case g' of
+        Just t -> sReprInf t
+        Nothing -> error "Found UnfoldTag but no syntax for def"
+    else sReprInfGlob (DefGlob d) Empty
 sReprInf (SPrim p) = sReprInfGlob (PrimGlob p) Empty
 sReprInf (SCase c) = sReprInfCase c
 sReprInf (SRepr x) = sReprInf x
@@ -644,17 +656,7 @@ quoteReprSpine l t n sp = do
 quoteLazy :: (Eval m) => Lvl -> VLazy -> m STm
 quoteLazy l (n, sp) = do
   case n of
-    VDef d -> do
-      ts <- access (getGlobalTags d.globalName)
-      if UnfoldTag `elem` ts
-        then do
-          g' <- access (unfoldDef d)
-          case g' of
-            Just t -> do
-              res <- vApp t sp
-              quote l res
-            _ -> quoteSpine l (SDef d) sp
-        else quoteSpine l (SDef d) sp
+    VDef d -> quoteSpine l (SDef d) sp
     VLit t -> do
       t' <- traverse (quote l) t
       quoteSpine l (SLit t') sp
