@@ -897,7 +897,7 @@ def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
   \p => subst-type (sym p)
 }
 
-def ReprBy : Type -> Type -> Type {
+def 0 ReprBy : Type -> Type -> Type {
   \T U => (l : Nat) * Equal (Reprs l T) U
 }
 

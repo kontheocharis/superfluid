@@ -32,7 +32,7 @@ const js_if_dep = (b) => (thenBranch) => (elseBranch) =>
   b ? thenBranch() : elseBranch();
 
 // Array operations
-const js_empty_array = () => [];
+const js_empty_array = [];
 const js_array_extend_l = (x) => (arr) => [x, ...arr];
 const js_array_extend_r = (arr) => (x) => [...arr, x];
 const js_array_switch_l = (emptyCase) => (nonEmptyCase) => (arr) =>
@@ -266,7 +266,6 @@ var reprs = (l1) => (t2) => (js_zero_or_pos)((_3) => t2)((x3) => (reprs)(x3)(t2)
 var unreprs = (l1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (r3) => (unreprs)(x2)(r3))(l1);
 var repr_subst = (a3) => a3;
 var repr_subst_p_ = (a3) => a3;
-var ReprBy = (Sigma)(JsUint)(Equal);
 var reprs_subst = (r2) => (a3) => (() => {
   var x17824 = r2;
   return (() => {
