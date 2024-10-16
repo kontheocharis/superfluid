@@ -23,7 +23,7 @@ repr data Vec T n as RISigma (List T) (\l => Equal (length l) n) {
     vec-cons => co
   } as {
     let (ri-pair l p) = repr b;
-    let q : Equal (ri-pair l p) (repr b) = trust-me;
+    let q : Equal (ri-pair l p) (repr b) = trust-me; -- Eta!
     let n = vec-length b;
     subst
       (\t => E n (unrepr t)) q
@@ -34,8 +34,8 @@ repr data Vec T n as RISigma (List T) (\l => Equal (length l) n) {
         },
         cons x xs => case n to (\n' => (p : Equal (s (length xs)) n') -> E n' (unrepr (ri-pair (cons x xs) p))) {
           z => \p => case z-neq-s (sym p) {},
-          s n'' => \p => {
-            subst (\p' => E (s n'') (unrepr (ri-pair (cons x xs) p')))
+          s n' => \p => {
+            subst (\p' => E (s n') (unrepr (ri-pair (cons x xs) p')))
               (equality-is-prop (cong s (s-inj p)) p)
               (co x (unrepr (ri-pair xs (s-inj p))))
           }

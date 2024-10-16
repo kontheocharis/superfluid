@@ -63,8 +63,6 @@ prim JsBigInt : Type
 
 prim JsUint : Type
 
--- Extra conditions : make sure this index is computationally irrelevant
-
 prim JsBoundedUint : (0 _ : JsUint) -> Type
 
 prim JsNumber : Type
@@ -139,7 +137,7 @@ prim js-bounded-uint-zero : [n : JsUint] -> JsBoundedUint (js-uint-plus js-uint-
 
 prim js-bounded-uint-inc : [n : JsUint] -> JsBoundedUint n -> JsBoundedUint (js-uint-plus js-uint-one n)
 
-prim js-bounded-zero-or-pos : [A : (n : JsUint) -> JsBoundedUint n -> Type]
+prim js-bounded-zero-or-pos : [A : (0 n : JsUint) -> JsBoundedUint n -> Type]
   -> ([n : JsUint] -> A (js-uint-plus js-uint-one n) (js-bounded-uint-zero [n]))
   -> ([n : JsUint] -> (n' : JsBoundedUint n) -> A (js-uint-plus js-uint-one n) (js-bounded-uint-inc n'))
   -> [n : JsUint]
@@ -255,7 +253,11 @@ prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -
 -- }
 
 def debug-print : [A B : Type] -> A -> B -> B {
-  \a b => unsafe-io (io-bind (js-console-log a) (\_ => io-return b))
+  \[A] [B] a b => {
+    let c = js-console-log;
+    ?debug-print
+    -- unsafe-io (io-bind (c a) (\_ => io-return b))
+  }
 }
 
 data Maybe (A : Type) : Type {

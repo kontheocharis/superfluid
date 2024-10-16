@@ -80,7 +80,7 @@ import Typechecking
     reprDefItem,
     univ,
     unrepr,
-    wildPat,
+    wild,
   )
 
 -- Presyntax exists below here
@@ -153,15 +153,15 @@ elab p mode = case (p, mode) of
   (PRepr t, md) -> repr md (elab t)
   (PUnrepr t, md) -> unrepr md (elab t)
   (PHole n, md) -> meta md (Just n)
-  (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
+  (PWild, md) -> wild md
   (PLambdaCase r cs, md) -> do
     n <- uniqueName
     elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
   (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
   (PLit l, md) -> lit md (fmap elab l)
+  (PName x, md) -> name md x
   (te, Check ty) -> checkByInfer (elab te Infer) ty
   -- Only infer:
-  (PName x, Infer) -> name x
   (PApp {}, Infer) -> do
     let (s, sp) = toPSpine p
     app (elab s) (mapSpine elab sp)
