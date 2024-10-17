@@ -1,0 +1,65 @@
+data Ty : Type {
+  fn : Ty -> Ty -> Ty,
+  one : Ty,
+}
+
+data Ctx : Type {
+  empty-ctx : Ctx,
+  cons-ctx : Ctx -> Ty -> Ctx,
+}
+
+data Var : Ctx -> Ty -> Type {
+  here : [g : Ctx, a : Ty] -> Var (cons-ctx g a) a,
+  there : [g : Ctx, a b : Ty] -> Var g a -> Var (cons-ctx g b) a,
+}
+
+data Tm : Ctx -> Ty -> Type {
+  var : [g : Ctx, a : Ty] -> Var g a -> Tm g a,
+  lam : [g : Ctx, a b : Ty] -> Tm (cons-ctx g a) b -> Tm g (fn a b),
+  app : [g : Ctx, a b : Ty] -> Tm g (fn a b) -> Tm g a -> Tm g b,
+  unit : [g : Ctx] -> Tm g one,
+}
+
+data Env' (0 Val' : Ctx -> Ty -> Type) : Ctx -> Type {
+  empty-env : Env' Val' empty-ctx,
+  cons-env : [g : Ctx, a : Ty] -> Env' Val' g -> Val' g a -> Env' Val' (cons-ctx g a),
+}
+
+data Closure (0 Val' : Ctx -> Ty -> Type, 0 g : Ctx, 0 a b : Ty) : Type {
+  close : Env' Val' g -> Tm (cons-ctx g a) b -> Closure Val' g a b,
+}
+
+data Val : Ctx -> Ty -> Type {
+  vlam : [g : Ctx, a b : Ty] -> Closure Val g a b -> Val g (fn a b),
+  vunit : [g : Ctx] -> Val g one,
+}
+
+def Env : Ctx -> Type {
+  \g => Env' Val g
+}
+
+def access : [g : Ctx, a : Ty] -> Env g -> Var g a -> Val g a {
+  \e v => (case v to (\g a _ => Env g -> Val g a) {
+    here => \e => case e to (\g _ => Val g a) {
+      empty-env => ?a,
+      cons-env e' v => v,
+    },
+    there => \e => ?there,
+  }) e
+}
+
+def eval : [g : Ctx, a : Ty] -> Env g -> Tm g a -> Val g a {
+  \e t => (case t to (\g a _ => Env g -> Val g a) {
+    var v => \e => access e v,
+    lam t => \e => vlam (close e t),
+    app u v => \e => {
+      let u' = eval e u;
+      case u' {
+        vlam t => ?alam,
+        vunit => ?aunit,
+      }
+    },
+    unit => \e => vunit,
+  }) e
+}
+

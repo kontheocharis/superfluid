@@ -1,7 +1,7 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Common
   ( Name (..),
@@ -58,6 +58,7 @@ import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
 import Data.Foldable (toList)
 import Data.Generics (Data, Typeable)
+import Data.Kind (Type)
 import Data.List (intercalate)
 import Data.Semiring (Semiring (..))
 import Data.Sequence (Seq (..))
@@ -65,7 +66,6 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
-import Data.Kind (Type)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -378,15 +378,15 @@ instance (Pretty m t) => Pretty m (Param t) where
   pretty (Param Explicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "(" ++ n' ++ " : " ++ show q ++ t' ++ ")"
+    return $ "(" ++ show q ++ n' ++ " : " ++ t' ++ ")"
   pretty (Param Implicit q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[" ++ n' ++ " : " ++ show q ++ t' ++ "]"
+    return $ "[" ++ show q ++ n' ++ " : " ++ t' ++ "]"
   pretty (Param Instance q n t) = do
     n' <- pretty n
     t' <- pretty t
-    return $ "[[" ++ n' ++ " : " ++ show q ++ t' ++ "]]"
+    return $ "[[" ++ show q ++ n' ++ " : " ++ t' ++ "]]"
 
 -- Files
 
