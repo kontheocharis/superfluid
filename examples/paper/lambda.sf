@@ -8,48 +8,73 @@ data Ctx : Type {
   cons-ctx : Ctx -> Ty -> Ctx,
 }
 
-data Var : Ctx -> Ty -> Type {
-  here : [g : Ctx, a : Ty] -> Var (cons-ctx g a) a,
-  there : [g : Ctx, a b : Ty] -> Var g a -> Var (cons-ctx g b) a,
+data Size : Ctx -> Type {
+  empty-size : Size empty-ctx,
+  cons-size : [g : Ctx, a : Ty] -> Size g -> Size (cons-ctx g a),
+}
+
+def snoc-ctx : Ty -> Ctx -> Ctx {
+  ?snoc-ctx
+}
+
+data Idx : Ctx -> Ty -> Type {
+  here : [g : Ctx, a : Ty] -> Idx (cons-ctx g a) a,
+  there : [g : Ctx, a b : Ty] -> Idx g a -> Idx (cons-ctx g b) a,
 }
 
 data Tm : Ctx -> Ty -> Type {
-  var : [g : Ctx, a : Ty] -> Var g a -> Tm g a,
+  var : [g : Ctx, a : Ty] -> Idx g a -> Tm g a,
   lam : [g : Ctx, a b : Ty] -> Tm (cons-ctx g a) b -> Tm g (fn a b),
   app : [g : Ctx, a b : Ty] -> Tm g (fn a b) -> Tm g a -> Tm g b,
   unit : [g : Ctx] -> Tm g one,
 }
 
-data Env' (0 Val' : Ctx -> Ty -> Type) : Ctx -> Type {
-  empty-env : Env' Val' empty-ctx,
-  cons-env : [g : Ctx, a : Ty] -> Env' Val' g -> Val' g a -> Env' Val' (cons-ctx g a),
+data Env' (0 Val' : Ctx -> Ty -> Type) : Ctx -> Ctx -> Type {
+  empty-env : [g : Ctx] -> Env' Val' g empty-ctx,
+  cons-env : [g h : Ctx, a : Ty] -> Env' Val' g h -> Val' g a -> Env' Val' g (cons-ctx h a),
 }
 
 data Closure (0 Val' : Ctx -> Ty -> Type, 0 g : Ctx, 0 a b : Ty) : Type {
-  close : Env' Val' g -> Tm (cons-ctx g a) b -> Closure Val' g a b,
+  close : [h : Ctx] -> Env' Val' g h -> Tm (cons-ctx h a) b -> Closure Val' g a b,
+}
+
+data Spine' (0 Val' : Ctx -> Ty -> Type, 0 g : Ctx) : Ty -> Type {
+  empty-spine : [b : Ty] -> Spine' Val' g b,
+  cons-spine : [a b : Ty] -> Spine' Val' g (fn a b) -> Val' g a -> Spine' Val' g b,
+}
+
+data Lvl : Ctx -> Ty -> Type {
+  top : [g : Ctx, a : Ty] -> Lvl (snoc-ctx a g) a,
+  below : [g : Ctx, a b : Ty] -> Lvl g a -> Lvl (snoc-ctx b g) a,
 }
 
 data Val : Ctx -> Ty -> Type {
   vlam : [g : Ctx, a b : Ty] -> Closure Val g a b -> Val g (fn a b),
   vunit : [g : Ctx] -> Val g one,
+  vrigid : [g : Ctx, a : Ty] -> Lvl g a -> Spine' Val g a -> Val g a,
 }
 
-def Env : Ctx -> Type {
-  \g => Env' Val g
+def Env : Ctx -> Ctx -> Type {
+  Env' Val
 }
 
-def access : [g : Ctx, a : Ty] -> Env g -> Var g a -> Val g a {
-  \e v => (case v to (\g a _ => Env g -> Val g a) {
-    here => \e => case e to (\g _ => Val g a) {
-      empty-env => ?a,
-      cons-env e' v => v,
-    },
-    there => \e => ?there,
-  }) e
+def Spine : Ctx -> Ty -> Type {
+  Spine' Val
 }
 
-def eval : [g : Ctx, a : Ty] -> Env g -> Tm g a -> Val g a {
-  \e t => (case t to (\g a _ => Env g -> Val g a) {
+def no-var-in-empty : [A : Type, a : Ty] -> Idx empty-ctx a -> A {
+  ?no-var-in-empty
+}
+
+def access : [g h : Ctx, a : Ty] -> Env g h -> Idx h a -> Val g a {
+  \[g] [h] [a] e => case e to (\g h _ => Idx h a -> Val g a) {
+    empty-env => no-var-in-empty,
+    cons-env e' t => ?cons-env,
+  }
+}
+
+def eval : [g h : Ctx, a : Ty] -> Env g h -> Tm h a -> Val g a {
+  \[g] [h] e t => (case t to (\h a _ => Env g h -> Val g a) {
     var v => \e => access e v,
     lam t => \e => vlam (close e t),
     app u v => \e => {
@@ -57,9 +82,25 @@ def eval : [g : Ctx, a : Ty] -> Env g -> Tm g a -> Val g a {
       case u' {
         vlam t => ?alam,
         vunit => ?aunit,
+        vrigid v' u => ?arigid,
       }
     },
     unit => \e => vunit,
   }) e
 }
 
+def quote-spine : [g : Ctx, a : Ty] -> Tm g a -> Spine g a -> Tm g a {
+  ?quote-spine
+}
+
+def lvl-to-idx : [g h : Ctx, a : Ty] -> Size g -> Lvl g a -> Idx g a {
+  ?lvl-to-idx
+}
+
+def quote : [g : Ctx, a : Ty] -> Size g -> Val g a -> Tm g a {
+  \[g] [a] s v => case v to (\g a _ => Tm g a) {
+    vlam c => ?vlam,
+    vunit => unit,
+    vrigid l sp => quote-spine (var (lvl-to-idx l)) sp,
+  }
+}
