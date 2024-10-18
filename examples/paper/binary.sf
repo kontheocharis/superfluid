@@ -1,0 +1,114 @@
+def BOARD_SIZE : Nat {
+  250
+}
+
+def MAX_INVENTORY : Nat {
+  200
+}
+
+data Coord : Type {
+  coord : (f : Fin BOARD_SIZE) -> Coord, -- represented as a js number
+}
+
+data Item : Type {
+  pickaxe : Item,
+  axe : Item,
+  sword : Item,
+  bow : Item,
+  arrow : Item,
+}
+
+data Inventory : Nat -> Type {
+  empty : Inventory 0,
+  add-item : [n : Nat] -> (i : Item, inv : Inventory n) -> Inventory (s n),
+}
+
+data Position : Type {
+  position : (x : Coord, y : Coord) -> Position,
+}
+
+data Direction : Type {
+  north : Direction,
+  east : Direction,
+  south : Direction,
+  west : Direction,
+}
+
+data Player : Type {
+  player : (
+    pos : Position,
+    dir : Direction,
+    inventory-size : Fin MAX_INVENTORY,
+    inventory : Inventory (fin-to-nat inventory-size),
+  ) -> Player,
+}
+
+-- REPRESENTATIONS:
+
+-- We want to represent player as:
+
+--  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-- |  X coordinate | Y coordinate  |
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-- |   Direction   | Inventory size|
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-- |             Item 1            |
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-- |              ...              |
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+-- |             Item n            |
+-- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+repr data Item as Fin 5 { -- this should be automatic?
+  pickaxe as 0n,
+  axe as 1n,
+  sword as 2n,
+  bow as 3n,
+  arrow as 4n,
+
+  case i to E {
+    pickaxe => pi,
+    axe => ax,
+    sword => sw,
+    bow => bo,
+    arrow => ar,
+  } as {
+    ?item-ind
+  }
+}
+
+data AllBytes (A : Byte -> Type) : [n : Nat] -> (b : ByteVec n) -> Type {
+  all-bvnil : AllBytes A bvnil,
+  all-bvcons : [n : Nat, b : Byte, bs : ByteVec n] -> A b -> AllBytes A bs -> AllBytes A (bvcons b bs),
+}
+
+data FinLeq : [n : Nat] -> Fin n -> Fin n -> Type {
+  fin-leq-z : [n : Nat] -> [a : Fin (s n)] -> FinLeq 0n a,
+  fin-leq-s : [n : Nat] -> [a : Fin n, b : Fin n] -> FinLeq a b -> FinLeq (fs a) (fs b),
+}
+
+repr data Inventory n as RISigma (ByteVec n) (AllBytes (\i => FinLeq i 4n)) {
+  empty as ri-pair bvnil all-bvnil,
+  add-item i inv as ?add-item,
+
+  case i to E {
+    empty => em,
+    add-item => ad,
+  } as {
+    ?inv-ind
+  }
+}
+
+def IsValidPlayer : ByteList -> Type {
+  ?is-valid-player
+}
+
+repr data Player as RISigma ByteList IsValidPlayer {
+  player pos dir size inv as ?player,
+  case i to E {
+    player => pl,
+  } as {
+    ?player-ind
+  }
+}

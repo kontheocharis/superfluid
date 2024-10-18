@@ -18,6 +18,7 @@ import Common
     Has (..),
     HasNameSupply (uniqueName),
     HasProjectFiles,
+    Lit (..),
     Loc,
     Name (..),
     PiMode (..),
@@ -32,7 +33,7 @@ import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
-import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal)
+import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal, knownDef)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -122,6 +123,9 @@ pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit Many)
 pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
 pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit Many) ts)
 
+pKnownDef :: KnownGlobal DefGlobal -> [PTm] -> PTm
+pKnownDef d ts = pApp (PName (knownDef d).globalName) (map (Arg Explicit Many) ts)
+
 patAsVar :: PPat -> Either Name PPat
 patAsVar (PName n) = Left n
 patAsVar PWild = Left (Name "_")
@@ -158,7 +162,13 @@ elab p mode = case (p, mode) of
     n <- uniqueName
     elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
   (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
-  (PLit l, md) -> lit md (fmap elab l)
+  (PLit l, md) -> case l of
+    StringLit s -> lit md (StringLit s)
+    CharLit c -> lit md (CharLit c)
+    NatLit n -> lit md (NatLit n)
+    FinLit f bound -> case bound of
+      Just b -> lit md (FinLit f (elab b))
+      Nothing -> lit md (FinLit f (elab (pKnownDef KnownAdd [pKnownCtor KnownSucc [PLit (NatLit f)], PWild])))
   (PName x, md) -> name md x
   (te, Check ty) -> checkByInfer (elab te Infer) ty
   -- Only infer:

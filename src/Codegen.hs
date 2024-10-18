@@ -12,6 +12,7 @@ import Common
     HasNameSupply (uniqueName),
     Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
+    Logger (warnMsg),
     Name (Name),
     Param (..),
     PiMode (Explicit),
@@ -20,10 +21,12 @@ import Common
     Spine,
     Tel,
     mapSpineM,
+    spineValues,
+    unName,
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (zipWithM)
+import Control.Monad (replicateM, zipWithM)
 import Control.Monad.Extra (when)
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -36,10 +39,13 @@ import Globals
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
-    mapSigContentsM_, dataIsIrrelevant,
+    dataIsIrrelevant,
+    getCtorGlobal,
+    getDataGlobal,
+    mapSigContentsM_,
   )
 import Printing (indentedFst)
-import Syntax (Case (..), SPat (..), STm (..), sGatherApps, sGatherLets)
+import Syntax (Case (..), SCase, SPat (..), STm (..), sGatherApps, sGatherLets)
 
 newtype JsStat = JsStat String
 
@@ -121,7 +127,7 @@ generateProgram = do
 generateItem :: (Gen m) => GlobalInfo -> m ()
 -- generateItem (DataInfo d) = generateDataItem d
 generateItem (DataInfo _) = return ()
-generateItem (CtorInfo c) = generateCtorItem c
+generateItem (CtorInfo _) = return ()
 generateItem (PrimInfo {}) = return () -- should be handled by the boot file
 generateItem (DefInfo d) = when (d.qty > Zero) $ generateDeclItem d
 
@@ -131,30 +137,78 @@ onlyRelevantArgs = S.filter (\ar -> ar.qty /= Zero)
 onlyRelevantBinds :: [(Qty, Name)] -> [(Qty, Name)]
 onlyRelevantBinds = filter (\(q, _) -> q /= Zero)
 
--- onlyRelevantParams :: Tel a -> Tel a
--- onlyRelevantParams = S.filter (\ar -> ar.qty /= Zero)
+onlyRelevantParams :: Tel a -> Tel a
+onlyRelevantParams = S.filter (\ar -> ar.qty /= Zero)
 
 generateDeclItem :: (Gen m) => DefGlobalInfo -> m ()
 generateDeclItem d = do
   t <- generateExpr (fromJust d.tm)
   addDecl $ jsConst (jsName d.name) t
 
--- generateDataItem :: (Gen m) => DataGlobalInfo -> m ()
--- generateDataItem d = do
---   indices <- mapSpineM (const uniqueName) (onlyRelevantArgs d.indexArity)
---   let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams d.params)
---   body <- jsLams (params S.>< indices) $ return jsNull
---   addDecl $ jsConst (jsName d.name) body
+jsLamsForSpine :: (Gen m) => Spine Name -> Spine JsExpr -> ([JsExpr] -> m JsExpr) -> m JsExpr
+jsLamsForSpine ns sp f = do
+  jsLams (S.drop (length sp) ns) $ do
+    sp2 <- mapM (jsVar . Idx) [length sp .. length ns - 1]
+    f (spineValues sp ++ sp2)
 
-generateCtorItem :: (Gen m) => CtorGlobalInfo -> m ()
-generateCtorItem c = do
-  let relevantArgArity = onlyRelevantArgs c.argArity
-  let total = length relevantArgArity
+generateData :: (Gen m) => DataGlobal -> Spine JsExpr -> m JsExpr
+generateData d sp = do
+  di <- access (getDataGlobal d)
+  indices <- mapSpineM (const uniqueName) (onlyRelevantArgs di.indexArity)
+  let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams di.params)
+  jsLamsForSpine (params S.>< indices) sp $ \_ -> return jsNull
+
+generateCtor :: (Gen m) => CtorGlobal -> Spine JsExpr -> m JsExpr
+generateCtor c sp = do
+  ci <- access (getCtorGlobal c)
+  di <- access (getDataGlobal ci.dataGlobal)
+  let relevantArgArity = onlyRelevantArgs ci.argArity
   ns <- mapSpineM (const uniqueName) relevantArgArity
-  body <- jsLams ns $ do
-    ns' <- mapM (jsVar . Idx) (reverse [0 .. total - 1])
-    return $ jsArray (intToNat c.idx : ns')
-  addDecl $ jsConst (jsName c.name) body
+  jsLamsForSpine ns sp $ \ps -> do
+    let args = [jsStringLit ci.name.unName | length di.ctors > 1] ++ ps
+    case args of
+      [a] -> return a
+      _ -> return $ jsArray args
+
+generateCase :: (Gen m) => SCase -> m JsExpr
+generateCase c = do
+  di <- access (getDataGlobal c.dat)
+  irr <- access (dataIsIrrelevant c.dat)
+  if irr
+    then case c.clauses of
+      [] -> return jsNull -- @@Enhancement: emit a `throw new Error("unreachable")` here
+      [Possible _ t] -> generateExpr t
+      _ -> error "Found irrelevant data with more than one case"
+    else do
+      sub <- generateExpr c.subject
+      cs' <-
+        mapM
+          ( \cl -> do
+              (ci, p, t) <- case cl of
+                Possible p b -> case fst (sGatherApps p.asTm) of
+                  SCtor (ct, _) -> (,p,b) <$> access (getCtorGlobal ct)
+                  _ -> error "Case not supported"
+                _ -> error "Case not supported"
+              let relevantBinds = onlyRelevantBinds p.binds
+              ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
+              let tag = jsStringLit ci.name.unName
+              let offset = if length di.ctors <= 1 then 0 else 1
+
+              let clauseArgs =
+                    if length relevantBinds == 1
+                      then S.singleton $ Arg Explicit Many sub
+                      else
+                        S.fromList $
+                          map
+                            (Arg Explicit Many . jsIndex sub . intToNat . (+ offset))
+                            [0 .. length relevantBinds - 1]
+
+              let body = jsApp ls clauseArgs
+              return (tag, body)
+          )
+          c.clauses
+      let subTag = jsIndex sub (intToNat 0)
+      return $ jsSwitch subTag cs'
 
 generateLets :: (Gen m) => [(Qty, Name, STm, STm)] -> STm -> m [JsStat]
 generateLets ((q, n, _, t) : ts) ret = jsLet n q (generateExpr t) (generateLets ts ret)
@@ -172,47 +226,20 @@ generateExpr ls@(SLet {}) = do
   return $ jsBlockExpr statements
 generateExpr t@((SApp {})) = do
   let (subject, args) = sGatherApps t
-  a <- generateExpr subject
   args' <- mapSpineM generateExpr (onlyRelevantArgs args)
-  return $ jsApp a args'
+  case subject of
+    SCtor (c, _) -> generateCtor c args'
+    SData d -> generateData d args'
+    _ -> do
+      a <- generateExpr subject
+      return $ jsApp a args'
 generateExpr (SPrim s) = return $ jsGlobal s.globalName
-generateExpr (SCtor (s, _)) = return $ jsGlobal s.globalName
-generateExpr (SData s) = return $ jsGlobal s.globalName
+generateExpr (SCtor (s, _)) = generateCtor s Empty
+generateExpr (SData s) = generateData s Empty
 generateExpr (SDef s) = return $ jsGlobal s.globalName
 generateExpr (SVar v) = jsVar v
-generateExpr (SCase c) = do
-  irr <- access (dataIsIrrelevant c.dat)
-  if irr then
-    case c.clauses of
-      [] -> return jsNull -- @@Enhancement: emit a `throw new Error("unreachable")` here
-      [Possible _ t] -> generateExpr t
-      _ -> error "Found irrelevant data with more than one case"
-    else do
-      sub <- generateExpr c.subject
-      cs' <-
-        zipWithM
-          ( \i cl -> do
-              let (p, t) = case cl of
-                    Possible a b -> (a, b)
-                    Impossible _ -> error "Impossible case not supported"
-              let relevantBinds = onlyRelevantBinds p.binds
-              ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
-              let tag = intToNat i
-              let body =
-                    jsApp
-                      ls
-                      ( S.fromList $
-                          map
-                            (Arg Explicit Many . jsIndex sub . intToNat)
-                            [1 .. length relevantBinds]
-                      )
-              return (tag, body)
-          )
-          [0 ..]
-          c.clauses
-      let subTag = jsIndex sub (intToNat 0)
-      return $ jsSwitch subTag cs'
-generateExpr ((SMeta _ _)) = return jsNull
+generateExpr (SCase c) = generateCase c
+generateExpr ((SMeta _ _)) = warnMsg "Found meta in generateExpr" >> return jsNull
 generateExpr ((SLit (StringLit s))) = return $ jsStringLit s
 generateExpr ((SLit (NatLit i))) = return $ jsIntLit (fromIntegral i)
 generateExpr ((SLit (FinLit i _))) = return $ jsIntLit (fromIntegral i)
@@ -246,6 +273,7 @@ jsCharLit :: Char -> JsExpr
 jsCharLit c = JsExpr $ show c
 
 jsSwitch :: JsExpr -> [(JsExpr, JsExpr)] -> JsExpr
+jsSwitch (JsExpr _) [(JsExpr _, s)] = s
 jsSwitch (JsExpr e) cs =
   let switch =
         JsStat $

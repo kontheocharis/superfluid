@@ -151,7 +151,7 @@ import Globals
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem,
+    modifyDefItem, dataIsIrrelevant,
   )
 import Meta (freshMetaVar, lookupMetaVarQty, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
@@ -868,7 +868,7 @@ lit mode l = case mode of
       CharLit c -> return (CharLit c, KnownChar, Empty)
       NatLit n -> return (NatLit n, KnownNat, Empty)
       FinLit f bound -> do
-        (bound', _) <- bound (Check (VNorm (VData (knownData KnownNat, Empty))))
+        (bound', _) <- bound (Check (VNorm (VData (knownData KnownNat, Empty)))) -- @@TODO: Check that bound is valid!
         vbound' <- evalHere bound'
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))

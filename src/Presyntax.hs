@@ -27,7 +27,7 @@ where
 import Common
   ( Arg (..),
     Clause (..),
-    Lit,
+    Lit (..),
     Loc,
     Name (..),
     PiMode (..),
@@ -144,7 +144,7 @@ data PTm
   | PLambdaCase (Maybe PTm) [Clause PPat PTm]
   | PU
   | PName Name
-  | PLit (Lit PTm)
+  | PLit (Lit (Maybe PTm))
   | PHole Name
   | PRepr PTm
   | PUnrepr PTm
@@ -215,6 +215,13 @@ prettyLets (binds, ret) = do
   pret <- pretty ret
   return $ curlies $ intercalate "\n" (pbinds ++ [pret])
 
+prettyMaybeLit :: (Monad m) => Lit (Maybe PTm) -> m String
+prettyMaybeLit (FinLit n Nothing) = return $ show n
+prettyMaybeLit (FinLit n (Just t)) = pretty (FinLit n t :: Lit PTm)
+prettyMaybeLit (StringLit s) = pretty (StringLit s :: Lit PTm)
+prettyMaybeLit (CharLit c) = pretty (CharLit c :: Lit PTm)
+prettyMaybeLit (NatLit n) = return $ show n
+
 instance (Monad m) => Pretty m PTm where
   -- \| Show a term value, with parentheses if it is compound.
   singlePretty v | isCompound v = pretty v >>= \p -> return $ "(" ++ p ++ ")"
@@ -279,7 +286,7 @@ instance (Monad m) => Pretty m PTm where
   pretty PU = return "Type"
   pretty PWild = return "_"
   pretty (PName n) = pretty n
-  pretty (PLit l) = pretty l
+  pretty (PLit l) = prettyMaybeLit l
   pretty (PHole i) = do
     pi' <- pretty i
     return $ "?" ++ pi'

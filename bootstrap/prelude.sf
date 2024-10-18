@@ -9,6 +9,8 @@ data Bool : Type {
   false : Bool
 }
 
+-- Relevant sigma
+
 data Sigma (A : Type, B : A -> Type) : Type {
   pair : (a : A) -> B a -> Sigma A B
 }
@@ -17,17 +19,47 @@ data Equal [A : Type] : A -> A -> Type {
   refl : [x : A] -> Equal x x
 }
 
+#unfold
 def dup : [A : Type] -> A -> A * A {
   \a => (a, a)
 }
 
+#unfold
 def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
   \(a, _) => a
 }
 
+#unfold
 def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
   \[_] [B] p => case p to (\p => B (fst p)) {
     (a, b) => b
+  }
+}
+
+-- Right-irrelevant sigma
+
+data RISigma (A : Type) (B : A -> Type) : Type {
+  ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
+}
+
+#unfold
+def ri-fst : [A : Type, B : A -> Type] -> (x : RISigma A B) -> A {
+  \x => case x {
+    ri-pair a b => a
+  }
+}
+
+#unfold
+def 0 ri-snd : [A : Type, B : A -> Type] -> (x : RISigma A B) -> B (ri-fst x) {
+  \[_] [B] p => case p to (\p => B (ri-fst p)) {
+    (ri-pair a b) => b
+  }
+}
+
+#unfold
+def 0 ri-sigma-eta : [A : Type, B : A -> Type] -> [x : RISigma A B] -> Equal x (ri-pair (ri-fst x) (ri-snd x)) {
+  \[x] => case x to (\x => Equal x (ri-pair (ri-fst x) (ri-snd x))) {
+    (ri-pair a b) => refl
   }
 }
 
@@ -36,6 +68,7 @@ def id : [A : Type] -> A -> A {
   \a => a
 }
 
+#unfold
 def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   \[A] b t f => case b {
     true => t tt,
@@ -448,12 +481,14 @@ def index : [A : Type] -> Nat -> List A -> Maybe A {
 }
 
 -- Try combinator!
+#unfold
 def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
   \P e => case e to (\x y _ => P x -> P y) {
     refl => id
   }
 }
 
+#unfold
 def subst-type : [A B : Type] -> Equal A B -> A -> B {
   subst [Type] (\X => X)
 }
@@ -824,11 +859,11 @@ repr data ByteList as JsBuffer {
 }
 
 -- The `n` can be computed from the data structure!!
-repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
-  bvnil as (bnil, refl),
+repr data ByteVec n as RISigma ByteList (\l => Equal (byte-list-length l) n) {
+  bvnil as ri-pair bnil refl,
   bvcons x xs as {
-    let (l, p) = repr xs;
-    (bcons x l, cong s p)
+    let (ri-pair l p) = repr xs;
+    ri-pair (bcons x l) (cong s p)
   },
 
   case b to E {
@@ -836,10 +871,10 @@ repr data ByteVec n as (l : ByteList) * Equal (byte-list-length l) n {
     bvcons => c
   } as {
     let b' = repr b;
-    let res = case b' to (\p => E (byte-list-length (fst p)) (unrepr (fst p, refl))) {
-      (l, p) => case l to (\l => E (byte-list-length l) (unrepr (l, refl))) {
+    let res = case b' to (\p => E (byte-list-length (ri-fst p)) (unrepr (ri-pair (ri-fst p) refl))) {
+      ri-pair l p => case l to (\l => E (byte-list-length l) (unrepr (ri-pair l refl))) {
         bnil => n,
-        bcons x xs => c [byte-list-length xs] x (unrepr (xs, refl)),
+        bcons x xs => c [byte-list-length xs] x (unrepr (ri-pair xs refl)),
       }
     };
     -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
@@ -853,7 +888,7 @@ repr def byte-list-length as \l => {
 }
 
 repr def byte-vec-eq as \b b' => {
-  unrepr (js-buffer-eq (repr (fst (repr b))) (repr (fst (repr b'))))
+  unrepr (js-buffer-eq (repr (ri-fst (repr b))) (repr (ri-fst (repr b'))))
 }
 
 -- Panic
@@ -893,7 +928,7 @@ def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
   \p => subst-type (sym p)
 }
 
-def ReprBy : Type -> Type -> Type {
+def 0 ReprBy : Type -> Type -> Type {
   \T U => (l : Nat) * Equal (Reprs l T) U
 }
 

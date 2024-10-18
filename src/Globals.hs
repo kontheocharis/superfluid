@@ -38,6 +38,7 @@ module Globals
     addDataRepr,
     addDefRepr,
     dataIsIrrelevant,
+    unfoldDefSyntax,
   )
 where
 
@@ -50,13 +51,14 @@ import Common
     PrimGlobal (..),
     Qty (..),
     Spine,
-    Tag,
+    Tag (UnfoldTag),
     Tel,
     globalName,
   )
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
+import qualified Data.Set as S
 import Syntax (Closure, STm (..), STy, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
@@ -123,15 +125,16 @@ mapSigContentsM_ f s = do
 
 removeRepresentedItems :: Sig -> Sig
 removeRepresentedItems s =
-  s
-    { contents =
+  let contents' =
         M.filterWithKey
-          (\k _ -> not (M.member k s.repr || M.member k s.reprCase))
-          s.contents,
-      repr = M.empty,
-      reprCase = M.empty,
-      nameOrder = filter (\n -> not (M.member n s.repr || M.member n s.reprCase)) s.nameOrder
-    }
+          (\k _ -> not (M.member k s.repr || M.member k s.reprCase || S.member UnfoldTag (s.tags M.! k)))
+          s.contents
+   in s
+        { contents = contents',
+          repr = M.empty,
+          reprCase = M.empty,
+          nameOrder = filter (`M.member` contents') s.nameOrder
+        }
 
 emptySig :: Sig
 emptySig = Sig M.empty [] M.empty M.empty M.empty
@@ -199,6 +202,9 @@ lookupGlobal n sig = M.lookup n sig.contents
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).vtm
 
+unfoldDefSyntax :: DefGlobal -> Sig -> Maybe STm
+unfoldDefSyntax g sig = (getDefGlobal g sig).tm
+
 getDataRepr :: DataGlobal -> Sig -> Maybe Closure
 getDataRepr g sig = fst <$> M.lookup g.globalName sig.repr
 
@@ -253,6 +259,7 @@ data KnownGlobal a where
   KnownFalse :: KnownGlobal CtorGlobal
   KnownJsImpossible :: KnownGlobal PrimGlobal
   KnownJsIndex :: KnownGlobal PrimGlobal
+  KnownAdd :: KnownGlobal DefGlobal
   KnownSub :: KnownGlobal DefGlobal
 
 deriving instance Show (KnownGlobal a)
@@ -289,3 +296,4 @@ knownPrim KnownJsIndex = PrimGlobal (Name "js-index")
 
 knownDef :: KnownGlobal DefGlobal -> DefGlobal
 knownDef KnownSub = DefGlobal (Name "sub")
+knownDef KnownAdd = DefGlobal (Name "add")

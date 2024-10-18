@@ -408,7 +408,7 @@ literal = locatedTerm $ do
           endingN <- optionMaybe (try (char 'n') >> optionMaybe singleTerm)
           anyWhite
           case endingN of
-            Just i -> return $ PLit (FinLit (read n) (fromMaybe PWild i))
+            Just i -> return $ PLit (FinLit (read n) i)
             Nothing -> return $ PLit (NatLit (read n))
       )
   where
@@ -448,8 +448,9 @@ tel =
       located
         (\(q, n, t) l -> singleton (Param Explicit q n t, l))
         ( do
+            q <- qty
             t <- app
-            return (Many, Name "_", t)
+            return (fromMaybe Many q, Name "_", t)
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))

@@ -32,7 +32,7 @@ const js_if_dep = (b) => (thenBranch) => (elseBranch) =>
   b ? thenBranch() : elseBranch();
 
 // Array operations
-const js_empty_array = () => [];
+const js_empty_array = [];
 const js_array_extend_l = (x) => (arr) => [x, ...arr];
 const js_array_extend_r = (arr) => (x) => [...arr, x];
 const js_array_switch_l = (emptyCase) => (nonEmptyCase) => (arr) =>
