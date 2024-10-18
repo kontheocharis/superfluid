@@ -20,14 +20,18 @@ data Tm : Ctx -> Ty -> Type {
   unit : [g : Ctx] -> Tm g one,
 }
 
-data Val : Ty -> Type {
-  vone : Val one,
-  vlam : [a : Ty, b : Ty] -> (Val a -> Val b) -> Val (fn a b),
+data Env' (0 Val' : Ty -> Type) : Ctx -> Type {
+  empty-env : Env' Val' empty-ctx,
+  cons-env : [g : Ctx, a : Ty] -> Env' Val' g -> Val' a -> Env' Val' (cons-ctx g a),
 }
 
-data Env : Ctx -> Type {
-  empty-env : Env empty-ctx,
-  cons-env : [g : Ctx, a : Ty] -> Env g -> Val a -> Env (cons-ctx g a),
+data Val : Ty -> Type {
+  vone : Val one,
+  vlam : [g : Ctx, a : Ty, b : Ty] -> Env' Val g -> Tm (cons-ctx g a) b -> Val (fn a b),
+}
+
+def Env : Ctx -> Type {
+  Env' Val
 }
 
 def no-var-in-empty : [A : Type, a : Ty] -> Var empty-ctx a -> A {
@@ -44,14 +48,14 @@ def access : [g : Ctx, a : Ty] -> Env g -> Var g a -> Val a {
 def eval : [g : Ctx, a : Ty] -> Env g -> Tm g a -> Val a {
   \[a] e t => (case t to (\g a _ => Env g -> Val a) {
     var v => \e => access e v,
-    lam t => \e => vlam (\v => eval (cons-env e v) t),
+    lam t => \e => vlam e t,
     app u v => \e => {
-      let u' = eval e u;
       let v' = eval e v;
-      (case u' to (\_ u'' => Equal u'' u' -> Val a) {
+      let u' = eval e u;
+      case u' {
         vone => ?vone,
-        vlam t => t v',
-      }) refl
+        vlam e t => eval (cons-env e u') t,
+      }
     },
     unit => \e => vone,
   }) e
