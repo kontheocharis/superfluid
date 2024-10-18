@@ -7,31 +7,6 @@ def vec-length : [T : Type, * n : Nat] -> Vec T n -> Nat {
   \[_] [n] _ => n
 }
 
-data RISigma (A : Type) (B : A -> Type) : Type {
-  ri-pair : (a : A) -> (0 _ : B a) -> RISigma A B
-}
-
-#unfold
-def ri-fst : [A : Type, B : A -> Type] -> (x : RISigma A B) -> A {
-  \x => case x {
-    ri-pair a b => a
-  }
-}
-
-#unfold
-def 0 ri-snd : [A : Type, B : A -> Type] -> (x : RISigma A B) -> B (ri-fst x) {
-  \[_] [B] p => case p to (\p => B (ri-fst p)) {
-    (ri-pair a b) => b
-  }
-}
-
-#unfold
-def 0 ri-sigma-eta : [A : Type, B : A -> Type] -> [x : RISigma A B] -> Equal x (ri-pair (ri-fst x) (ri-snd x)) {
-  \[x] => case x to (\x => Equal x (ri-pair (ri-fst x) (ri-snd x))) {
-    (ri-pair a b) => refl
-  }
-}
-
 def 0 Vec' : Type -> Nat -> Type {
   \T n => RISigma (List T) (\l => Equal (length l) n)
 }
