@@ -49,6 +49,7 @@ module Common
     HasProjectFiles (..),
     Has (..),
     Try (..),
+    spineValues,
   )
 where
 
@@ -251,6 +252,9 @@ mapSpine f = fmap (fmap f)
 
 mapSpineM :: (Monad m) => (t -> m t') -> Spine t -> m (Spine t')
 mapSpineM f = traverse (traverse f)
+
+spineValues :: Spine t -> [t]
+spineValues = toList . fmap (\a -> a.arg)
 
 data Param t = Param {mode :: PiMode, qty :: Qty, name :: Name, ty :: t}
   deriving

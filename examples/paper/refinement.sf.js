@@ -174,67 +174,47 @@ const conjure = null;
 
 const trust_me = null;
 
-var tt = [0];
-var pair = (x32190) => (x32201) => [0, x32190, x32201];
-var refl = [0];
 var debug_print = (a2) => (b3) => (unsafe_io)((io_bind)((js_console_log)(a2))((_4) => (io_return)(b3)));
-var nothing = [0];
-var just = (x32210) => [1, x32210];
 var is_just = (x1311) => (() => {
   switch ((x1311)[0]) {
-    case 0: return js_false;
-    case 1: return ((x1352) => js_true)((x1311)[1]);
+    case "nothing": return js_false;
+    case "just": return ((x1352) => js_true)(x1311);
   }
 })();
-var left = (x32220) => [0, x32220];
-var right = (x32230) => [1, x32230];
 var VOID = (m1) => null;
-var yes = (x32240) => [0, x32240];
-var no = (x32250) => [1, x32250];
 var sub = (m0) => (n1) => (js_zero_or_pos)((_2) => m0)((x2) => (js_zero_or_pos)((_3) => js_uint_zero)((x3) => (sub)(x3)(x2))(m0))(n1);
 var upgrade = (k1) => (js_zero_or_pos)((_2) => (a3) => a3)((x2) => (x3) => (js_bounded_uint_inc)((upgrade)(x2)(x3)))(k1);
-var find = (p1) => (xs2) => (js_array_switch_l)((_3) => nothing)((a3) => (xs4) => (js_if_dep)((p1)(a3))((_5) => (just)(a3))((_5) => (find)(p1)(xs4)))(xs2);
-var cong = refl;
-var sym = refl;
+var find = (p1) => (xs2) => (js_array_switch_l)((_3) => "nothing")((a3) => (xs4) => (js_if_dep)((p1)(a3))((_5) => ["just", a3])((_5) => (find)(p1)(xs4)))(xs2);
+var cong = [];
+var sym = [];
 var uip = trust_me;
 var equality_is_prop = uip;
-var z_neq_s = ((a2) => a2)(tt);
+var z_neq_s = ((a2) => a2)([]);
 var co_sym = (m3) => m3;
-var s_inj = ((a3) => a3)(refl);
+var s_inj = ((a3) => a3)([]);
 var s_co_cong = (m2) => m2;
 var dec_to_bool = (x9111) => (() => {
   switch ((x9111)[0]) {
-    case 0: return ((x9132) => js_true)((x9111)[1]);
-    case 1: return ((x9162) => js_false)((x9111)[1]);
+    case "yes": return ((x9132) => js_true)(x9111);
+    case "no": return ((x9162) => js_false)(x9111);
   }
 })();
 var lte = (m0) => (n1) => (js_zero_or_pos)((_2) => js_true)((x2) => (js_zero_or_pos)((_3) => js_false)((x3) => (lte)(x2)(x3))(n1))(m0);
 var lt = (m0) => (n1) => (js_and)((js_not)((js_eqq)(m0)(n1)))((lte)(m0)(n1));
 var bool_eq = (a0) => (b1) => (js_if_dep)(a0)((_2) => (js_if_dep)(b1)((_3) => js_true)((_3) => js_false))((_2) => (js_if_dep)(b1)((_3) => js_false)((_3) => js_true));
-var utf32_code = (x32260) => [0, x32260];
-var char_eq = (c10) => (c21) => (() => {
-  switch ((c10)[0]) {
-    case 0: return ((f12) => (() => {
-      switch ((c21)[0]) {
-        case 0: return ((f23) => (js_eqq)(f12)(f23))((c21)[1]);
-      }
-    })())((c10)[1]);
-  }
-})();
-var snil = [0];
-var scons = (x32270) => (x32281) => [1, x32270, x32281];
+var char_eq = (c10) => (c21) => ((f12) => ((f23) => (js_eqq)(f12)(f23))(c21))(c10);
 var string_eq = (s10) => (s21) => (() => {
   switch ((s10)[0]) {
-    case 0: return (() => {
+    case "snil": return (() => {
       switch ((s21)[0]) {
-        case 0: return js_true;
-        case 1: return ((x10802) => (x10813) => js_false)((s21)[1])((s21)[2]);
+        case "snil": return js_true;
+        case "scons": return ((x10802) => (x10813) => js_false)((s21)[1])((s21)[2]);
       }
     })();
-    case 1: return ((c12) => (s1_p_3) => (() => {
+    case "scons": return ((c12) => (s1_p_3) => (() => {
       switch ((s21)[0]) {
-        case 0: return js_false;
-        case 1: return ((c24) => (s2_p_5) => (js_and)((char_eq)(c12)(c24))((string_eq)(s1_p_3)(s2_p_5)))((s21)[1])((s21)[2]);
+        case "snil": return js_false;
+        case "scons": return ((c24) => (s2_p_5) => (js_and)((char_eq)(c12)(c24))((string_eq)(s1_p_3)(s2_p_5)))((s21)[1])((s21)[2]);
       }
     })())((s10)[1])((s10)[2]);
   }
@@ -243,23 +223,11 @@ var Word = JsBoundedUint;
 var Byte = JsBoundedUint;
 var ascii_eq = (a10) => (a21) => (unsafe_complete)((unsafe_complete)((js_eqq)(a10)(a21)));
 var word_to_nat = (n0) => (js_forget_bound)(n0);
-var Holds = Equal;
-var determine = (x0) => (js_if_dep)(x0)((_1) => (just)(refl))((_1) => nothing);
-var byte_vec_lookup = (s2) => (l3) => (d4) => (js_array_switch_l)((_5) => (d4)(tt))((a5) => (xs6) => (() => {
+var Holds = null;
+var determine = (x0) => (js_if_dep)(x0)((_1) => ["just", []])((_1) => "nothing");
+var byte_vec_lookup = (s2) => (l3) => (d4) => (js_array_switch_l)((_5) => (d4)([]))((a5) => (xs6) => (() => {
   var x12927 = a5;
-  return (() => {
-    switch ((x12927)[0]) {
-      case 0: return ((k8) => (v9) => (js_if_dep)((js_buffer_eq)((() => {
-        switch ((s2)[0]) {
-          case 0: return ((a10) => (x3711) => a10)((s2)[1])((s2)[2]);
-        }
-      })())((() => {
-        switch ((k8)[0]) {
-          case 0: return ((a10) => (x3711) => a10)((k8)[1])((k8)[2]);
-        }
-      })()))((_10) => (v9)(tt))((_10) => (byte_vec_lookup)(s2)(xs6)(d4)))((x12927)[1])((x12927)[2]);
-    }
-  })();
+  return ((k8) => (v9) => (js_if_dep)((js_buffer_eq)(((a10) => (x3711) => a10)((s2)[0])((s2)[1]))(((a10) => (x3711) => a10)((k8)[0])((k8)[1])))((_10) => (v9)([]))((_10) => (byte_vec_lookup)(s2)(xs6)(d4)))((x12927)[0])((x12927)[1]);
 })())(l3);
 var panic = (a1) => (unsafe_io)((io_bind)((js_console_log)(a1))((_2) => (js_exit)(js_one)));
 var reprs = (l1) => (t2) => (js_zero_or_pos)((_3) => t2)((x3) => (reprs)(x3)(t2))(l1);
@@ -268,36 +236,23 @@ var repr_subst = (a3) => a3;
 var repr_subst_p_ = (a3) => a3;
 var reprs_subst = (r2) => (a3) => (() => {
   var x17824 = r2;
-  return (() => {
-    switch ((x17824)[0]) {
-      case 0: return ((l5) => (p6) => ((a7) => a7)((reprs)(l5)(a3)))((x17824)[1])((x17824)[2]);
-    }
-  })();
+  return ((l5) => (p6) => ((a7) => a7)((reprs)(l5)(a3)))((x17824)[0])((x17824)[1]);
 })();
 var reprs_subst_p_ = (r2) => (b3) => (() => {
   var x18254 = r2;
-  return (() => {
-    switch ((x18254)[0]) {
-      case 0: return ((l5) => (p6) => (unreprs)(l5)(((a7) => a7)(b3)))((x18254)[1])((x18254)[2]);
-    }
-  })();
+  return ((l5) => (p6) => (unreprs)(l5)(((a7) => a7)(b3)))((x18254)[0])((x18254)[1]);
 })();
 var vec_length = (n1) => (_2) => n1;
-var ri_pair = (x32290) => [0, x32290];
 var vec_index = (v2) => (() => {
-  var l3 = (() => {
-    switch ((v2)[0]) {
-      case 0: return ((a3) => v2)((v2)[1]);
-    }
-  })();
+  var l3 = ((a3) => v2)(v2);
   return ((a5) => a5)((js_array_switch_l)((_5) => (js_zero_or_pos)((_6) => ((a8) => a8)((i8) => null))((x6) => null)(n1))((a5) => (xs6) => (js_zero_or_pos)((_7) => null)((x7) => ((a9) => a9)((i9) => (js_bounded_zero_or_pos)(a5)((f11) => (() => {
     var p_p_13 = s_inj;
-    return (vec_index)((ri_pair)(xs6))(((a14) => a14)(f11));
+    return (vec_index)(xs6)(((a14) => a14)(f11));
   })())(i9)))(n1))(l3));
 })();
-var safe_index = (l2) => (i4) => (vec_index)((ri_pair)(l2))(i4);
+var safe_index = (l2) => (i4) => (vec_index)(l2)(i4);
 var main = (() => {
-  var v0 = (ri_pair)((js_array_extend_l)(1)((js_array_extend_l)(2)((js_array_extend_l)(3)(js_empty_array))));
+  var v0 = (js_array_extend_l)(1)((js_array_extend_l)(2)((js_array_extend_l)(3)(js_empty_array)));
   var n1 = (vec_index)(v0)(2);
   return (js_console_log)(n1);
 })();
