@@ -30,12 +30,13 @@ import Common
     Lit (..),
     Loc,
     Name (..),
+    Param (..),
     PiMode (..),
     Qty (..),
     Spine,
     Tag (..),
     Tel,
-    arg, Param (..),
+    arg,
   )
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -115,6 +116,7 @@ data PDefRep = MkPDefRep
 
 data PPrim = MkPPrim
   { name :: Name,
+    qty :: Qty,
     ty :: PTy,
     tags :: Set Tag
   }
@@ -300,9 +302,9 @@ instance (Monad m) => Pretty m PTm where
   pretty PUnit = return "()"
   pretty (PParams t []) = pretty t
   pretty (PParams t _) = pretty t
-    -- pt <- singlePretty t
-    -- pps <- mapM pretty ps
-    -- return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
+  -- pt <- singlePretty t
+  -- pps <- mapM pretty ps
+  -- return $ pt ++ "@[" ++ intercalate ", " pps ++ "]"
   pretty (PList ts rest) = do
     pts <- mapM pretty ts
     rest' <- case rest of
@@ -345,11 +347,11 @@ instance (Monad m) => Pretty m PDef where
     return $ pts ++ "def " ++ show q ++ pn ++ " : " ++ pty ++ " " ++ ptm
 
 instance (Monad m) => Pretty m PPrim where
-  pretty (MkPPrim n ty ts) = do
+  pretty (MkPPrim n q ty ts) = do
     pts <- pretty ts
     pn <- pretty n
     pty <- pretty ty
-    return $ pts ++ "prim " ++ pn ++ " : " ++ pty
+    return $ pts ++ "prim " ++ show q ++ pn ++ " : " ++ pty
 
 instance (Monad m) => Pretty m PCtorRep where
   pretty (MkPCtorRep src target ts) = do

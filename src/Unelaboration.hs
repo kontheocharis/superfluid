@@ -198,7 +198,7 @@ unelabSig = do
     unelabPrim :: (Unelab m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
     unelabPrim n p ts = do
       ty' <- unelabValue [] p.ty
-      return $ MkPPrim n ty' ts
+      return $ MkPPrim n p.qty ty' ts
 
     unelabSig' :: (Unelab m) => Sig -> m PProgram
     unelabSig' s =

@@ -27,7 +27,7 @@ import Common
     Tel,
     mapSpine,
     unName,
-    pattern Possible,
+    pattern Possible, enterLoc,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
@@ -215,7 +215,7 @@ elabData dat = do
   endDataItem d
 
 elabPrim :: (Elab m) => PPrim -> m ()
-elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
+elabPrim prim = primItem prim.name prim.qty prim.tags (elab prim.ty)
 
 ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =

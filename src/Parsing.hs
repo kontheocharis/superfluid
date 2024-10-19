@@ -307,10 +307,11 @@ dataItem = do
 primItem :: Parser PPrim
 primItem = do
   reserved "prim"
+  q <- fromMaybe Many <$> qty
   (name, ty) <- defSig
   case ty of
     Nothing -> fail "Primitive items must have a type signature"
-    Just ty' -> return $ MkPPrim name ty' mempty
+    Just ty' -> return $ MkPPrim name q ty' mempty
 
 tags :: Parser (Set Tag)
 tags = do

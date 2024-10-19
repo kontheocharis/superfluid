@@ -7,27 +7,46 @@ module Context
     emptyCtx,
     Goal (..),
     bind,
+    coindexCtx,
+    indexCtx,
     insertedBind,
     CtxEntry (..),
     assertIsNeeded,
     define,
+    getCtx,
     typelessBind,
     typelessBinds,
+    quoteHere,
     lookupName,
+    enterQty,
+    replaceQty,
+    qty,
+    enterCtx,
+    accessCtx,
+    modifyCtx,
+    setCtx,
+    evalHere,
+    evalPatHere,
+    enterTel,
   )
 where
 
-import Common (Lvl (..), Name, Qty, nextLvl, members, lvlToIdx, Idx (unIdx))
+import Common (Has (..), Idx (..), Lvl (..), Name, Param (..), Qty, Tel, idxToLvl, lvlToIdx, members, nextLvl)
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Evaluation ()
+import Data.Semiring (Semiring (times))
+import Data.Sequence (Seq (..))
+import Evaluation (Eval, eval, evalPat, quote)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (Bound, Defined),
     Bounds,
     Env,
+    SPat,
     STm (..),
+    STy,
+    VPatB,
     VTm (..),
     VTy,
     pattern VVar,
@@ -51,13 +70,13 @@ instance (Monad m, Pretty m VTm) => Pretty m CtxTy where
   pretty TyUnneeded = return "_"
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
-  pretty (CtxEntry name ty tm _ qty bound) = do
+  pretty (CtxEntry name ty tm _ q bound) = do
     name' <- pretty name
     ty' <- pretty ty
     tm' <- case bound of
       Defined -> (" = " ++) <$> pretty tm
       Bound -> return ""
-    return $ show qty ++ name' ++ " : " ++ ty' ++ tm'
+    return $ show q ++ name' ++ " : " ++ ty' ++ tm'
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =
@@ -145,27 +164,29 @@ addCtxEntry e ctx =
       nameList = e.name : ctx.nameList
     }
 
-typelessBinds :: [(Name, Qty)] -> Ctx -> Ctx
-typelessBinds ns ctx = foldr (uncurry typelessBind) ctx (reverse ns)
+typelessBinds :: [(Qty, Name)] -> Ctx -> Ctx
+typelessBinds ns ctx = foldr (uncurry . flip $ typelessBind) ctx (reverse ns)
 
 ctxEntries :: Ctx -> [CtxEntry]
-ctxEntries ctx = map (indexCtx ctx) (members ctx.lvl )
+ctxEntries ctx = map (coindexCtx ctx) (members ctx.lvl)
 
-indexCtx :: Ctx -> Lvl -> CtxEntry
-indexCtx ctx l = do
-  let i = (lvlToIdx ctx.lvl l).unIdx
+indexCtx :: Ctx -> Idx -> CtxEntry
+indexCtx ctx idx@(Idx i) = do
   CtxEntry
     { name = ctx.nameList !! i,
       ty = ctx.types !! i,
       tm = ctx.env !! i,
-      lvl = l,
+      lvl = idxToLvl ctx.lvl idx,
       qty = ctx.qtys !! i,
       bound = ctx.bounds !! i
     }
 
+coindexCtx :: Ctx -> Lvl -> CtxEntry
+coindexCtx ctx l = indexCtx ctx (lvlToIdx ctx.lvl l)
+
 lookupName :: Name -> Ctx -> Maybe CtxEntry
 lookupName n ctx = case M.lookup n ctx.names of
-  Just l -> Just $ indexCtx ctx l
+  Just l -> Just $ coindexCtx ctx l
   Nothing -> Nothing
 
 data Goal = Goal
@@ -174,3 +195,48 @@ data Goal = Goal
     tm :: STm,
     ty :: VTy
   }
+
+getCtx :: (Has m Ctx) => m Ctx
+getCtx = view
+
+setCtx :: (Has m Ctx) => Ctx -> m ()
+setCtx = modify . const
+
+modifyCtx :: (Has m Ctx) => (Ctx -> Ctx) -> m ()
+modifyCtx = modify
+
+accessCtx :: (Has m Ctx) => (Ctx -> a) -> m a
+accessCtx f = f <$> getCtx
+
+enterCtx :: (Has m Ctx) => (Ctx -> Ctx) -> m a -> m a
+enterCtx = enter
+
+qty :: (Has m Qty) => m Qty
+qty = view
+
+enterQty :: (Has m Qty) => Qty -> m a -> m a
+enterQty q = enter (`times` q)
+
+replaceQty :: (Has m Qty) => Qty -> m a -> m a
+replaceQty q = enter (const q)
+
+evalHere :: (Eval m, Has m Ctx) => STm -> m VTm
+evalHere t = do
+  e <- accessCtx (\c -> c.env)
+  eval e t
+
+evalPatHere :: (Eval m, Has m Ctx) => SPat -> m VPatB
+evalPatHere t = do
+  e <- accessCtx (\c -> c.env)
+  evalPat e t
+
+enterTel :: (Eval m, Has m Ctx) => Tel STy -> m a -> m a
+enterTel Empty f = f
+enterTel (t :<| ts) f = do
+  t' <- evalHere t.ty
+  enterCtx (bind t.name t.qty t') (enterTel ts f)
+
+quoteHere :: (Eval m, Has m Ctx) => VTm -> m STm
+quoteHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  quote l t

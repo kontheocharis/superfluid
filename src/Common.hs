@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Common
   ( Name (..),
@@ -50,6 +51,8 @@ module Common
     Has (..),
     Try (..),
     spineValues,
+    idxToLvl,
+    enterLoc,
   )
 where
 
@@ -184,6 +187,9 @@ type Filename = String
 -- end (exclusive) position.
 data Loc = NoLoc | Loc Filename Pos Pos deriving (Eq, Show)
 
+enterLoc :: (Has m Loc) => Loc -> m a -> m a
+enterLoc = enter . const
+
 instance Semigroup Loc where
   NoLoc <> NoLoc = NoLoc
   NoLoc <> Loc f s e = Loc f s e
@@ -237,6 +243,9 @@ nextLvls (Lvl l) n = Lvl (l + n)
 
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
+
+idxToLvl :: Lvl -> Idx -> Lvl
+idxToLvl (Lvl l) (Idx i) = Lvl (l - i - 1)
 
 -- Members of a context (represented as a level)
 members :: Lvl -> [Lvl]

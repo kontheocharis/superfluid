@@ -81,27 +81,18 @@ import Common
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, enterLoc,
   )
 import Context
-  ( Ctx (..),
-    CtxEntry (..),
-    Goal (Goal),
-    assertIsNeeded,
-    bind,
-    define,
-    emptyCtx,
-    insertedBind,
-    lookupName,
-    typelessBinds,
-  )
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
+import Control.Monad.Identity (IdentityT (IdentityT, runIdentityT))
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
+import Data.Functor.Identity (Identity (..))
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
@@ -147,6 +138,7 @@ import Globals
     getCtorGlobal,
     getDataGlobal,
     getDefGlobal,
+    getPrimGlobal,
     hasName,
     knownData,
     lookupGlobal,
@@ -185,8 +177,6 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
-import Data.Functor.Identity (Identity(..))
-import Control.Monad.Identity (IdentityT(IdentityT, runIdentityT))
 
 data TcError
   = Mismatch [UnifyError]
@@ -204,7 +194,6 @@ data TcError
   | ExpectedCtor VPatB CtorGlobal
   | UnexpectedPattern VPatB
   | MissingCtor CtorGlobal
-  | QtyMismatch Qty Qty
   | DuplicateItem Name
   | ImpossibleCasesNotSupported
   | Chain [TcError]
@@ -232,8 +221,6 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
         InvalidPattern -> do
           return "Invalid in pattern position"
-        QtyMismatch q1 q2 -> do
-          return $ "Quantity mismatch: (" <> show q1 <> " _ : _) and (" <> show q2 ++ "_ : _)"
         ImpossibleCaseIsPossible t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -309,31 +296,10 @@ class
   where
   addGoal :: Goal -> m ()
 
-  getCtx :: m Ctx
-  getCtx = view
-
-  setCtx :: Ctx -> m ()
-  setCtx = modify . const
-
-  modifyCtx :: (Ctx -> Ctx) -> m ()
-  modifyCtx = modify
-
-  accessCtx :: (Ctx -> a) -> m a
-  accessCtx f = f <$> getCtx
-
-  enterCtx :: (Ctx -> Ctx) -> m a -> m a
-  enterCtx = enter
-
-  qty :: m Qty
-  qty = view
-
   tcError :: TcError -> m a
 
   inPat :: m InPat
   inPat = view
-
-  enterLoc :: Loc -> m a -> m a
-  enterLoc = enter . const
 
   enterPat :: InPat -> m a -> m a
   enterPat = enter . const
@@ -371,26 +337,6 @@ ensureAllProblemsSolved = do
 
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
-
-satisfyQty :: (Tc m) => Qty -> m ()
-satisfyQty q = do
-  q' <- qty
-  unless (q >= q') $ tcError $ QtyMismatch q q'
-
-enterQtyLifted :: (MonadTrans t, Tc m) => Qty -> t m a -> t m a
-enterQtyLifted q = enterLifted (`times` q)
-
-enterQty :: (Tc m) => Qty -> m a -> m a
-enterQty q m = runIdentityT $ enterQtyLifted q (IdentityT m)
-
-replaceQty :: (Tc m) => Qty -> m a -> m a
-replaceQty q = enter (const q)
-
-enterTel :: (Tc m) => Tel STy -> m a -> m a
-enterTel Empty f = f
-enterTel (t :<| ts) f = do
-  t' <- evalHere t.ty
-  enterCtx (bind t.name t.qty t') (enterTel ts f)
 
 inferMeta :: (Tc m) => Maybe Name -> Qty -> m (STm, VTy)
 inferMeta n q = do
@@ -453,16 +399,6 @@ insert :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insert (tm, ty) = case tm of
   SLam Implicit _ _ _ -> return (tm, ty)
   _ -> insertFull (tm, ty)
-
-evalHere :: (Tc m) => STm -> m VTm
-evalHere t = do
-  e <- accessCtx (\c -> c.env)
-  eval e t
-
-evalPatHere :: (Tc m) => SPat -> m VPatB
-evalPatHere t = do
-  e <- accessCtx (\c -> c.env)
-  evalPat e t
 
 handleUnification :: (Tc m) => VTm -> VTm -> CanUnify -> m ()
 handleUnification t1 t2 r = do
@@ -584,7 +520,6 @@ name md n = do
         l <- getLvl
         case r of
           Just e -> do
-            satisfyQty e.qty
             inferOnly (return (SVar $ lvlToIdx l e.lvl, assertIsNeeded e.ty)) md
           Nothing -> do
             n' <- access (lookupGlobal n)
@@ -676,13 +611,11 @@ app s sp = do
 univ :: (Tc m) => m (STm, VTy)
 univ = do
   forbidPat
-  satisfyQty Zero
   return (SU, VNorm VU)
 
 piTy :: (Tc m) => PiMode -> Qty -> Name -> Child m -> Child m -> m (STm, VTy)
 piTy m q x a b = do
   forbidPat
-  satisfyQty Zero
   (a', _) <- a (Check (VNorm VU))
   av <- evalHere a'
   (b', _) <- enterCtx (bind x q av) $ b (Check (VNorm VU))
@@ -947,12 +880,12 @@ ctorItem dat n ts ty = do
   modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx q dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
-primItem :: (Tc m) => Name -> Set Tag -> Child m -> m ()
-primItem n ts ty = do
+primItem :: (Tc m) => Name -> Qty -> Set Tag -> Child m -> m ()
+primItem n q ts ty = do
   ensureNewName n
   (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
-  modify (addItem n (PrimInfo (PrimGlobalInfo n vty)) ts)
+  modify (addItem n (PrimInfo (PrimGlobalInfo n q vty)) ts)
 
 reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
 reprItem te getGlob addGlob ts r = do
@@ -1103,7 +1036,6 @@ buildElimTy dat = do
 global :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
 global n i = case i of
   DefInfo d -> do
-    satisfyQty d.qty
     return (SDef (DefGlobal n), d.ty)
   DataInfo d -> do
     ty' <- evalHere $ sPis d.params d.ty.body
@@ -1222,7 +1154,7 @@ type SolveT = ExceptT SolveError
 enterTypelessClosure :: (Tc m) => [Qty] -> Closure -> m a -> m a
 enterTypelessClosure qs c m = do
   ns <- uniqueNames c.numVars
-  enterCtx (typelessBinds (zip ns qs)) m
+  enterCtx (typelessBinds (zip qs ns)) m
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
@@ -1239,7 +1171,7 @@ renameSp :: (Tc m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
 renameSp _ _ t Empty = return t
 renameSp m pren t (sp :|> Arg i q u) = do
   xs <- renameSp m pren t sp
-  ys <- enterQtyLifted q $ rename m pren u
+  ys <- rename m pren u
   return $ SApp i q xs ys
 
 renameClosure :: (Tc m) => MetaVar -> PRen -> [Qty] -> Closure -> SolveT m STm
@@ -1289,8 +1221,8 @@ renameLazy m pren (n, sp) = case n of
   VLazyCase c -> renameCaseSpine renameLazy m pren c sp
   VRepr n' -> renameReprSpine m pren 1 (headAsValue n') sp
   VLet q x a t u -> do
-    a' <- enterQtyLifted Zero $ rename m pren a
-    t' <- enterQtyLifted q $ rename m pren t
+    a' <- rename m pren a
+    t' <- rename m pren t
     u' <- renameClosure m pren [q] u
     return $ SLet q x a' t' u'
 
@@ -1301,9 +1233,7 @@ renameNeu m pren (n, sp) = case n of
     | otherwise -> renameSp m pren (SMeta m' []) sp
   VRigid (Lvl l) -> case IM.lookup l pren.vars of
     Nothing -> throwError EscapingVariable
-    Just (x', q) -> do
-      lift $ satisfyQty q
-      renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
+    Just (x', _) -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
   VBlockedCase c -> renameCaseSpine renameNeu m pren c sp
   VPrim p -> renameSp m pren (SPrim p) sp
   VUnrepr n' -> renameReprSpine m pren (-1) (headAsValue n') sp
@@ -1424,14 +1354,13 @@ unifyFlex m sp t = runSolveT m sp t $ do
   sp' <- lift $ pretty sp
   t' <- lift $ pretty t
   lift . msg $ "Solving meta " ++ m' ++ " whose qty is " ++ show mq ++ " with body " ++ t' ++ " and spine " ++ sp' ++ " in qty " ++ show q
-  lift $ replaceQty mq $ satisfyQty q
 
   pren <- invertSpine sp
   rhs <- rename m pren t
   solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, a.qty)) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
 
-unifyClosure :: (Tc m) => [Qty] ->  Closure -> [Qty] -> Closure -> m CanUnify
+unifyClosure :: (Tc m) => [Qty] -> Closure -> [Qty] -> Closure -> m CanUnify
 unifyClosure qs1 cl1 qs2 cl2 = do
   l <- getLvl
   t1 <- evalInOwnCtx l cl1
@@ -1512,7 +1441,8 @@ unifyLazy (n1, sp1) (n2, sp2) =
 
 unifyNeuRest :: (Tc m) => VNeu -> VNeu -> m CanUnify
 unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
-  (VRigid x, VRigid x') | x == x' -> unifySpines sp1 sp2 \/ iDontKnow
+  (VRigid x, VRigid x') | x == x' -> do
+    unifySpines sp1 sp2 \/ iDontKnow
   (VBlockedCase c1, VBlockedCase c2) -> unifyCases VNeu c1 c2 /\ unifySpines sp1 sp2
   (VPrim p1, VPrim p2) | p1 == p2 -> unifySpines sp1 sp2
   _ -> return $ No [Mismatching (VNeu (n1, sp1)) (VNeu (n2, sp2))]
