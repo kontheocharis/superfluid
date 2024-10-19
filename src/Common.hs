@@ -67,6 +67,7 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import Control.Monad.Trans (MonadTrans(..))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -318,10 +319,18 @@ class (Monad m) => Has m a where
 
   enter :: (a -> a) -> m c -> m c
   enter f m = do
-    c <- view :: m a
+    c <- view
     modify f
     a <- m
     modify (\(_ :: a) -> c)
+    return a
+
+  enterLifted :: (MonadTrans t) => (a -> a) -> t m c -> t m c
+  enterLifted f m = do
+    c <- lift view
+    lift $ modify f
+    a <- m
+    lift $ modify (\(_ :: a) -> c)
     return a
 
 -- | A typeclass for backtracking try

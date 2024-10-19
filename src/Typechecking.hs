@@ -52,7 +52,7 @@ where
 import Algebra.Lattice (Lattice (..), (/\))
 import Common
   ( Arg (..),
-    Clause,
+    Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (DefGlobal),
@@ -151,7 +151,7 @@ import Globals
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem, dataIsIrrelevant,
+    modifyDefItem,
   )
 import Meta (freshMetaVar, lookupMetaVarQty, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
@@ -185,6 +185,8 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
+import Data.Functor.Identity (Identity(..))
+import Control.Monad.Identity (IdentityT(IdentityT, runIdentityT))
 
 data TcError
   = Mismatch [UnifyError]
@@ -375,8 +377,11 @@ satisfyQty q = do
   q' <- qty
   unless (q >= q') $ tcError $ QtyMismatch q q'
 
+enterQtyLifted :: (MonadTrans t, Tc m) => Qty -> t m a -> t m a
+enterQtyLifted q = enterLifted (`times` q)
+
 enterQty :: (Tc m) => Qty -> m a -> m a
-enterQty q = enter (`times` q)
+enterQty q m = runIdentityT $ enterQtyLifted q (IdentityT m)
 
 replaceQty :: (Tc m) => Qty -> m a -> m a
 replaceQty q = enter (const q)
@@ -1214,33 +1219,33 @@ instance (Eval m) => Lattice (m CanUnify) where
 type SolveT = ExceptT SolveError
 
 -- Typeless and quantityless
-enterTypelessClosure :: (Tc m) => Closure -> m a -> m a
-enterTypelessClosure c m = do
+enterTypelessClosure :: (Tc m) => [Qty] -> Closure -> m a -> m a
+enterTypelessClosure qs c m = do
   ns <- uniqueNames c.numVars
-  enterCtx (typelessBinds (map (,Many) ns)) m
+  enterCtx (typelessBinds (zip ns qs)) m
 
 invertSpine :: (Tc m) => Spine VTm -> SolveT m PRen
 invertSpine Empty = do
   l <- lift getLvl
   return $ PRen (Lvl 0) l mempty
-invertSpine s@(sp' :|> Arg _ _ t) = do
+invertSpine s@(sp' :|> Arg _ q t) = do
   (PRen dom cod ren) <- invertSpine sp'
   f <- lift $ force t
   case f of
-    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' dom ren)
+    VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' (dom, q) ren)
     _ -> throwError $ InvertError s
 
 renameSp :: (Tc m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
 renameSp _ _ t Empty = return t
 renameSp m pren t (sp :|> Arg i q u) = do
   xs <- renameSp m pren t sp
-  ys <- rename m pren u
+  ys <- enterQtyLifted q $ rename m pren u
   return $ SApp i q xs ys
 
-renameClosure :: (Tc m) => MetaVar -> PRen -> Closure -> SolveT m STm
-renameClosure m pren cl = do
+renameClosure :: (Tc m) => MetaVar -> PRen -> [Qty] -> Closure -> SolveT m STm
+renameClosure m pren qs cl = do
   vt <- lift $ evalInOwnCtx pren.codSize cl
-  rename m (liftPRenN cl.numVars pren) vt
+  rename m (liftPRenN qs pren) vt
 
 renamePat :: (Tc m) => MetaVar -> PRen -> VPatB -> SolveT m SPat
 renamePat _ pren p = do
@@ -1256,7 +1261,14 @@ renameCaseSpine ::
   SolveT m STm
 renameCaseSpine renameSubject m pren (Case dat pp v i r cs) sp = do
   v' <- renameSubject m pren v
-  cs' <- mapM (bitraverse (renamePat m pren) (renameClosure m pren)) cs
+  cs' <-
+    mapM
+      ( \(Clause p t) -> do
+          p' <- renamePat m pren p
+          t' <- traverse (renameClosure m pren (map fst p.binds)) t
+          return $ Clause p' t'
+      )
+      cs
   r' <- rename m pren r
   pp' <- mapSpineM (rename m pren) pp
   i' <- mapSpineM (rename m pren) i
@@ -1277,9 +1289,9 @@ renameLazy m pren (n, sp) = case n of
   VLazyCase c -> renameCaseSpine renameLazy m pren c sp
   VRepr n' -> renameReprSpine m pren 1 (headAsValue n') sp
   VLet q x a t u -> do
-    a' <- rename m pren a
-    t' <- rename m pren t
-    u' <- renameClosure m pren u
+    a' <- enterQtyLifted Zero $ rename m pren a
+    t' <- enterQtyLifted q $ rename m pren t
+    u' <- renameClosure m pren [q] u
     return $ SLet q x a' t' u'
 
 renameNeu :: (Tc m) => MetaVar -> PRen -> VNeu -> SolveT m STm
@@ -1289,7 +1301,9 @@ renameNeu m pren (n, sp) = case n of
     | otherwise -> renameSp m pren (SMeta m' []) sp
   VRigid (Lvl l) -> case IM.lookup l pren.vars of
     Nothing -> throwError EscapingVariable
-    Just x' -> renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
+    Just (x', q) -> do
+      lift $ satisfyQty q
+      renameSp m pren (SVar (lvlToIdx pren.domSize x')) sp
   VBlockedCase c -> renameCaseSpine renameNeu m pren c sp
   VPrim p -> renameSp m pren (SPrim p) sp
   VUnrepr n' -> renameReprSpine m pren (-1) (headAsValue n') sp
@@ -1297,11 +1311,11 @@ renameNeu m pren (n, sp) = case n of
 renameNorm :: (Tc m) => MetaVar -> PRen -> VNorm -> SolveT m STm
 renameNorm m pren n = case n of
   VLam i q x t -> do
-    t' <- renameClosure m pren t
+    t' <- renameClosure m pren [q] t
     return $ SLam i q x t'
   VPi i q x ty t -> do
     ty' <- rename m pren ty
-    t' <- renameClosure m pren t
+    t' <- renameClosure m pren [q] t
     return $ SPi i q x ty' t'
   VU -> return SU
   VData (d, sp) -> renameSp m pren (SData d) sp
@@ -1326,7 +1340,7 @@ unifyClauses (c : cs) (c' : cs') = unifyClause c c' /\ unifyClauses cs cs'
 unifyClauses a b = return $ No [DifferentClauses a b]
 
 unifyClause :: (Tc m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
-unifyClause (Possible _ t) (Possible _ t') = unifyClosure t t'
+unifyClause (Possible p t) (Possible p' t') = unifyClosure (map fst p.binds) t (map fst p'.binds) t'
 unifyClause (Impossible _) (Impossible _) = return Yes
 unifyClause a b = return $ No [DifferentClauses [a] [b]]
 
@@ -1406,20 +1420,24 @@ unifyFlex :: (Tc m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
 unifyFlex m sp t = runSolveT m sp t $ do
   mq <- lift $ lookupMetaVarQty m
   q <- lift qty
-  lift . msg $ "We are in quantity " ++ show q ++ " and trying to solve " ++ show mq
-  lift $ satisfyQty mq
+  m' <- lift $ pretty (SMeta m [])
+  sp' <- lift $ pretty sp
+  t' <- lift $ pretty t
+  lift . msg $ "Solving meta " ++ m' ++ " whose qty is " ++ show mq ++ " with body " ++ t' ++ " and spine " ++ sp' ++ " in qty " ++ show q
+  lift $ replaceQty mq $ satisfyQty q
+
   pren <- invertSpine sp
   rhs <- rename m pren t
-  solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, Many)) (toList sp)) rhs >>= eval []
+  solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, a.qty)) (toList sp)) rhs >>= eval []
   lift $ solveMetaVar m solution
 
-unifyClosure :: (Tc m) => Closure -> Closure -> m CanUnify
-unifyClosure cl1 cl2 = do
+unifyClosure :: (Tc m) => [Qty] ->  Closure -> [Qty] -> Closure -> m CanUnify
+unifyClosure qs1 cl1 qs2 cl2 = do
   l <- getLvl
   t1 <- evalInOwnCtx l cl1
   t2 <- evalInOwnCtx l cl2
-  if cl1.numVars == cl2.numVars
-    then enterTypelessClosure cl1 $ unify t1 t2
+  if cl1.numVars == cl2.numVars && all (uncurry (==)) (zip qs1 qs2)
+    then enterTypelessClosure qs1 cl1 $ unify t1 t2
     else error "unifyClosure: different number of variables"
 
 iDontKnow :: (Tc m) => m CanUnify
@@ -1427,11 +1445,12 @@ iDontKnow = return Maybe
 
 unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
-  t1' <- pretty t1
-  t2' <- pretty t2
-  msg $ "unifying " ++ t1' ++ " and " ++ t2'
   t1' <- force t1
   t2' <- force t2
+  t1'' <- pretty t1
+  t2'' <- pretty t2
+  q <- qty
+  msg $ "unifying " ++ t1'' ++ " and " ++ t2'' ++ " in qty " ++ show q
   unifyForced t1' t2'
 
 etaConvert :: (Tc m) => VTm -> PiMode -> Qty -> Closure -> m CanUnify
@@ -1439,11 +1458,11 @@ etaConvert t m q c = do
   l <- getLvl
   x <- evalInOwnCtx l c
   x' <- vApp t (S.singleton (Arg m q (VNeu (VVar l))))
-  enterQty q . enterTypelessClosure c $ unify x x'
+  enterTypelessClosure [q] c $ unify x x'
 
 unifyForced :: (Tc m) => VTm -> VTm -> m CanUnify
 unifyForced t1 t2 = case (t1, t2) of
-  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' && q == q' -> enterQty q $ unifyClosure c c'
+  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' -> unifyClosure [q] c [q'] c'
   (t, VNorm (VLam m' q' _ c')) -> etaConvert t m' q' c'
   (VNorm (VLam m q _ c), t) -> etaConvert t m q c
   (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
@@ -1468,7 +1487,7 @@ unifyForced t1 t2 = case (t1, t2) of
 
 unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
 unifyNormRest n1 n2 = case (n1, n2) of
-  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' && q == q' -> unify t t' /\ enterQty q (unifyClosure c c')
+  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' -> unify t t' /\ unifyClosure [q] c [q'] c'
   (VU, VU) -> return Yes
   (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
   (VCtor ((c, _), sp), VCtor ((c', _), sp'))
@@ -1481,7 +1500,7 @@ unifyLazy (n1, sp1) (n2, sp2) =
         (VDef d1, VDef d2) | d1 == d2 -> return Yes
         (VLit l1, VLit l2) -> unifyLit l1 l2
         (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2
-        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> enterQty Zero (unify a1 a2) /\ enterQty q1 (unify t1 t2) /\ unifyClosure u1 u2
+        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> enterQty Zero (unify a1 a2) /\ enterQty q1 (unify t1 t2) /\ unifyClosure [q1] u1 [q2] u2
         (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2')
         _ -> iDontKnow
     )

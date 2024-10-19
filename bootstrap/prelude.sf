@@ -287,9 +287,7 @@ prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -
 
 def debug-print : [A B : Type] -> A -> B -> B {
   \[A] [B] a b => {
-    let c = js-console-log;
-    ?debug-print
-    -- unsafe-io (io-bind (c a) (\_ => io-return b))
+    unsafe-io (io-bind (js-console-log a) (\_ => io-return b))
   }
 }
 
