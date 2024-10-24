@@ -85,9 +85,9 @@ unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
         case n of
           Just n' -> return (PHole n', [])
           Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar ++ show mq), [])
-  (n : ns', Bound : bs') -> do
+  (n : ns', Bound q : bs') -> do
     (t, ts) <- unelabMeta ns' m bs'
-    return (t, Arg Explicit Many (PName n) : ts)
+    return (t, Arg Explicit q (PName n) : ts)
   (_ : ns', Defined : bs') -> unelabMeta ns' m bs'
   _ -> error "impossible"
 

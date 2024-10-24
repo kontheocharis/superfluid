@@ -22,6 +22,7 @@ import Common
     Lit (..),
     Loc,
     Name (..),
+    Param (..),
     PiMode (..),
     PrimGlobal (..),
     Qty (Many, Zero),
@@ -30,7 +31,7 @@ import Common
     enterLoc,
     mapSpine,
     unName,
-    pattern Possible, Param (..),
+    pattern Possible, Logger (..),
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
@@ -268,10 +269,23 @@ elabDataRep r = do
     Just (DataInfo info) -> do
       let target' = pLams sp r.target
       let dat = DataGlobal h
-      te <- reprDataItem dat r.tags (elab target')
+      te <-
+        reprDataItem
+          dat
+          r.tags
+          (elabAndAccount target')
       mapM_ (elabCtorRep te) r.ctors
       elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
+
+elabAndAccount :: (Elab m) => PTm -> Mode -> m (STm, VTy)
+elabAndAccount t md = do
+  (t', ty) <- elab t md
+  t'' <- pretty t'
+  ty' <- pretty ty
+  msg $ "Elab and account for " ++ t'' ++ " of type " ++ ty'
+  account t'
+  return (t', ty)
 
 elabCtorRep :: (Elab m) => Tel STy -> PCtorRep -> m ()
 elabCtorRep te r = do
@@ -280,7 +294,7 @@ elabCtorRep te r = do
   case g of
     Just (CtorInfo _) -> do
       let target' = pLams sp r.target
-      reprCtorItem te (CtorGlobal h) r.tags (elab target')
+      reprCtorItem te (CtorGlobal h) r.tags (elabAndAccount target')
     _ -> elabError (ExpectedCtorGlobal h)
 
 elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
@@ -294,14 +308,14 @@ elabCaseRep te dat info r = do
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
           r.target
-  reprCaseItem te dat r.tags (elab target')
+  reprCaseItem te dat r.tags (elabAndAccount target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
 elabDefRep r = do
   x <- ensurePatIsBind r.src
   g <- access (lookupGlobal x)
   case g of
-    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elab r.target)
+    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elabAndAccount r.target)
     _ -> elabError (ExpectedDataGlobal x)
 
 elabItem :: (Elab m) => PItem -> m ()

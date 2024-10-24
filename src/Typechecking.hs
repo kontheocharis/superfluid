@@ -63,6 +63,7 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
+    Logger (msg),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -75,13 +76,14 @@ import Common
     Tel,
     Try (..),
     composeZ,
+    enterLoc,
     lvlToIdx,
     mapSpineM,
     nextLvl,
     nextLvls,
     telWithNames,
     pattern Impossible,
-    pattern Possible, enterLoc,
+    pattern Possible,
   )
 import Context
 import Control.Applicative (Alternative (empty))
@@ -363,13 +365,13 @@ newMeta n q = do
 freshMeta :: (Tc m) => Qty -> m STm
 freshMeta = newMeta Nothing
 
-freshMetaOrPatBind :: (Tc m) => m (STm, VTm)
-freshMetaOrPatBind = do
+freshMetaOrPatBind :: (Tc m) => VTy -> m (STm, VTm)
+freshMetaOrPatBind ty = do
   q <- qty
   ifInPat
     ( do
         n <- uniqueName
-        (n', _) <- inferPatBind n
+        (n', _) <- checkPatBind n ty
         vn <- evalPatHere (SPat n' [(q, n)])
         return (n', vn.vPat)
     )
@@ -383,10 +385,10 @@ insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- unfoldHere ty
   case f of
-    VNorm (VPi Implicit q _ _ b) -> do
-      (a, va) <- enterQty q freshMetaOrPatBind
-      ty' <- b $$ [va]
-      insertFull (SApp Implicit q tm a, ty')
+    VNorm (VPi Implicit q _ a b) -> do
+      (v, vv) <- enterQty q (freshMetaOrPatBind a)
+      ty' <- b $$ [vv]
+      insertFull (SApp Implicit q tm v, ty')
     _ -> return (tm, ty)
 
 insert :: (Tc m) => (STm, VTy) -> m (STm, VTy)
@@ -881,8 +883,8 @@ primItem n q ts ty = do
   vty <- evalHere ty'
   modify (addItem n (PrimInfo (PrimGlobalInfo n q vty)) ts)
 
-reprItem :: (Tc m) => Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
-reprItem te getGlob addGlob ts r = do
+reprItem :: (Tc m) => Qty -> Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
+reprItem q te getGlob addGlob ts r = enterQty q $ do
   ty <- getGlob
   (r', _) <- enterTel te $ r (Check ty)
   vr <- closeHere (length te) r'
@@ -893,21 +895,23 @@ reprDataItem :: (Tc m) => DataGlobal -> Set Tag -> Child m -> m (Tel STm)
 reprDataItem dat ts c = do
   di <- access (getDataGlobal dat)
   tm <-
-    enterQty Zero $
-      reprItem
-        Empty
-        (reprHere 1 di.fullTy)
-        (addDataRepr dat)
-        ts
-        c
+    reprItem
+      Zero
+      Empty
+      (reprHere 1 di.fullTy)
+      (addDataRepr dat)
+      ts
+      c
   let (ls, _) = sGatherLams tm
   return (telWithNames di.params (toList $ fmap (\p -> p.name) ls))
 
 reprCtorItem :: (Tc m) => Tel STm -> CtorGlobal -> Set Tag -> Child m -> m ()
 reprCtorItem te ctor ts c = do
   ci <- access (getCtorGlobal ctor)
+  irr <- access (dataIsIrrelevant ci.dataGlobal)
   _ <-
     reprItem
+      (if irr then Zero else Many)
       te
       (evalInOwnCtxHere ci.ty >>= reprHere 1)
       (addCtorRepr ctor)
@@ -917,7 +921,8 @@ reprCtorItem te ctor ts c = do
 
 reprDefItem :: (Tc m) => DefGlobal -> Set Tag -> Child m -> m ()
 reprDefItem def ts c = do
-  _ <- reprItem Empty (access (getDefGlobal def) >>= \d -> return d.ty) (addDefRepr def) ts c
+  di <- access (getDefGlobal def)
+  _ <- reprItem di.qty Empty (return di.ty) (addDefRepr def) ts c
   return ()
 
 reprCaseItem :: (Tc m) => Tel STm -> DataGlobal -> Set Tag -> Child m -> m ()
@@ -925,11 +930,18 @@ reprCaseItem te dat ts c = do
   di <- access (getDataGlobal dat)
   _ <-
     reprItem
+      Many
       te
       (evalInOwnCtxHere (fromJust di.elimTy))
       (addCaseRepr dat)
       ts
-      c
+      ( \md -> do
+          q <- qty
+          msg $ "Currently in CASE ITEM quantity " ++ show q
+          ct <- accessCtx id
+          pretty ct >>= msg
+          c md
+      )
   return ()
 
 spineForTel :: Int -> Tel STm -> Spine STm
@@ -1343,11 +1355,11 @@ unifyFlex m sp t = runSolveT m sp t $ do
   lift $ solveMetaVar m solution
 
 unifyClosure :: (Tc m) => [Qty] -> Closure -> [Qty] -> Closure -> m CanUnify
-unifyClosure qs1 cl1 qs2 cl2 = do
+unifyClosure qs1 cl1 _ cl2 = do
   l <- getLvl
   t1 <- evalInOwnCtx l cl1
   t2 <- evalInOwnCtx l cl2
-  if cl1.numVars == cl2.numVars && all (uncurry (==)) (zip qs1 qs2)
+  if cl1.numVars == cl2.numVars
     then enterTypelessClosure qs1 cl1 $ unify t1 t2
     else error "unifyClosure: different number of variables"
 
@@ -1369,7 +1381,7 @@ etaConvert t m q c = do
 
 unifyForced :: (Tc m) => VTm -> VTm -> m CanUnify
 unifyForced t1 t2 = case (t1, t2) of
-  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' -> unifyClosure [q] c [q'] c'
+  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' && q == q' -> unifyClosure [q] c [q'] c'
   (t, VNorm (VLam m' q' _ c')) -> etaConvert t m' q' c'
   (VNorm (VLam m q _ c), t) -> etaConvert t m q c
   (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
@@ -1394,7 +1406,7 @@ unifyForced t1 t2 = case (t1, t2) of
 
 unifyNormRest :: (Tc m) => VNorm -> VNorm -> m CanUnify
 unifyNormRest n1 n2 = case (n1, n2) of
-  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' -> unify t t' /\ unifyClosure [q] c [q'] c'
+  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' && q == q' -> unify t t' /\ unifyClosure [q] c [q'] c'
   (VU, VU) -> return Yes
   (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
   (VCtor ((c, _), sp), VCtor ((c', _), sp'))

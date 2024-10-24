@@ -15,17 +15,31 @@ import Common
     Has (..),
     HasProjectFiles (..),
     Loc (..),
+    Logger (..),
     Name,
     Param (..),
     Qty (..),
     Tel,
   )
-import Context (Ctx (..), accessCtx, enterCtx, enterQty, enterTel, indexCtx, modifyCtx, qty, quoteHere, typelessBind, typelessBinds)
+import Context
+  ( Ctx (..),
+    CtxEntry (..),
+    accessCtx,
+    enterCtx,
+    enterQty,
+    enterTel,
+    indexCtx,
+    modifyCtx,
+    qty,
+    quoteHere,
+    typelessBind,
+    typelessBinds,
+  )
 import Control.Monad (unless)
 import Data.Foldable (traverse_)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
-import Evaluation (Eval)
+import Evaluation (Eval, nf)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -87,43 +101,48 @@ instance Account VTm where
     account t'
 
 instance Account STm where
-  account tm = case tm of
-    SVar idx -> do
-      n <- accessCtx (`indexCtx` idx)
-      satisfyQty n.qty tm
-    SLam _ q x body -> enterCtx (typelessBind x q) $ account body
-    SApp _ q fn arg -> do
-      account fn
-      enterQty q $ account arg
-    SPi _ q x a b -> enterQty Zero $ do
-      account a
-      enterCtx (typelessBind x q) $ account b
-    SLet q x ty val body -> do
-      enterQty Zero $ account ty
-      enterQty q $ account val
-      enterCtx (typelessBind x q) $ account body
-    SU -> satisfyQty Zero tm
-    SData _ -> satisfyQty Zero tm
-    SCtor (_, args) -> traverse_ (\(Arg _ q t) -> enterQty q $ account t) args
-    SCase c -> do
-      i <- access (dataIsIrrelevant c.dat)
-      if i
-        then do
-          enterQty Zero $ account c.subject
-        else do
-          account c.subject
-      enterQty Zero $ account c.elimTy
-      traverse_ (\(Clause p t) -> enterCtx (typelessBinds p.binds) $ traverse account t) c.clauses
-    SMeta _ _ -> return () -- Metas are assumed to not exist anymore
-    SLit _ -> return () -- Valid in any quantity
-    SDef d -> do
-      di <- access (getDefGlobal d)
-      satisfyQty di.qty tm
-    SPrim p -> do
-      di <- access (getPrimGlobal p)
-      satisfyQty di.qty tm
-    SRepr t -> account t
-    SUnrepr t -> account t
+  account tm' = do
+    e <- accessCtx (\c -> c.env)
+    tm <- nf e tm'
+    case tm' of
+      SVar idx -> do
+        n <- accessCtx (`indexCtx` idx)
+        q <- qty
+        msg $ "Accessing variable " ++ show n.name ++ " with quantity " ++ show n.qty ++ " in quantity " ++ show q ++ "."
+        satisfyQty n.qty tm
+      SLam _ q x body -> enterCtx (typelessBind x q) $ account body
+      SApp _ q fn arg -> do
+        account fn
+        enterQty q $ account arg
+      SPi _ q x a b -> enterQty Zero $ do
+        account a
+        enterCtx (typelessBind x q) $ account b
+      SLet q x ty val body -> do
+        enterQty Zero $ account ty
+        enterQty q $ account val
+        enterCtx (typelessBind x q) $ account body
+      SU -> satisfyQty Zero tm
+      SData _ -> satisfyQty Zero tm
+      SCtor (_, args) -> traverse_ (\(Arg _ q t) -> enterQty q $ account t) args
+      SCase c -> do
+        i <- access (dataIsIrrelevant c.dat)
+        if i
+          then do
+            enterQty Zero $ account c.subject
+          else do
+            account c.subject
+        enterQty Zero $ account c.elimTy
+        traverse_ (\(Clause p t) -> enterCtx (typelessBinds p.binds) $ traverse account t) c.clauses
+      SMeta _ _ -> return () -- Metas are assumed to not exist anymore
+      SLit _ -> return () -- Valid in any quantity
+      SDef d -> do
+        di <- access (getDefGlobal d)
+        satisfyQty di.qty tm
+      SPrim p -> do
+        di <- access (getPrimGlobal p)
+        satisfyQty di.qty tm
+      SRepr t -> account t
+      SUnrepr t -> account t
 
 instance (Account a) => Account (Tel a) where
   account Empty = return ()

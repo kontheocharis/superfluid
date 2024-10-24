@@ -230,7 +230,7 @@ type STy = STm
 
 data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show)
 
-data BoundState = Bound | Defined deriving (Eq, Show)
+data BoundState = Bound Qty | Defined deriving (Eq, Show)
 
 type Bounds = [BoundState]
 

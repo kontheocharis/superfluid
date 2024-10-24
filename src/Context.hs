@@ -75,7 +75,7 @@ instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
     ty' <- pretty ty
     tm' <- case bound of
       Defined -> (" = " ++) <$> pretty tm
-      Bound -> return ""
+      Bound _ -> return ""
     return $ show q ++ name' ++ " : " ++ ty' ++ tm'
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
@@ -116,7 +116,7 @@ bind x q ty ctx =
           tm = VNeu (VVar ctx.lvl),
           lvl = ctx.lvl,
           qty = q,
-          bound = Bound
+          bound = Bound q
         }
     )
     ctx
@@ -145,7 +145,7 @@ typelessBind x q ctx =
         { tm = VNeu (VVar ctx.lvl),
           ty = TyUnneeded,
           lvl = ctx.lvl,
-          bound = Bound,
+          bound = Bound q,
           qty = q,
           name = x
         }
