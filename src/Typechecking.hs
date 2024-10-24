@@ -24,6 +24,7 @@ module Typechecking
     letIn,
     app,
     univ,
+    tel,
     piTy,
     name,
     insertLam,
@@ -62,7 +63,6 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
-    Logger (..),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -88,15 +88,11 @@ import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (when)
-import Control.Monad.Identity (IdentityT (IdentityT, runIdentityT))
 import Control.Monad.Trans (MonadTrans (lift))
-import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Foldable (Foldable (..), toList)
-import Data.Functor.Identity (Identity (..))
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
-import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -106,7 +102,6 @@ import Evaluation
     ensureIsCtor,
     eval,
     evalInOwnCtx,
-    evalPat,
     force,
     ifIsData,
     isCtorTy,
@@ -138,14 +133,13 @@ import Globals
     getCtorGlobal,
     getDataGlobal,
     getDefGlobal,
-    getPrimGlobal,
     hasName,
     knownData,
     lookupGlobal,
     modifyDataItem,
     modifyDefItem,
   )
-import Meta (freshMetaVar, lookupMetaVarQty, solveMetaVar)
+import Meta (freshMetaVar, solveMetaVar)
 import Printing (Pretty (..), indentedFst)
 import Syntax
   ( Case (..),
@@ -938,11 +932,6 @@ reprCaseItem te dat ts c = do
       c
   return ()
 
-quoteHere :: (Tc m) => VTm -> m STm
-quoteHere t = do
-  l <- accessCtx (\c -> c.lvl)
-  quote l t
-
 spineForTel :: Int -> Tel STm -> Spine STm
 spineForTel dist te =
   S.fromList $ zipWith (curry (\(Param m q _ _, i) -> Arg m q (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
@@ -1348,13 +1337,6 @@ runSolveT m sp t f = do
 
 unifyFlex :: (Tc m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
 unifyFlex m sp t = runSolveT m sp t $ do
-  mq <- lift $ lookupMetaVarQty m
-  q <- lift qty
-  m' <- lift $ pretty (SMeta m [])
-  sp' <- lift $ pretty sp
-  t' <- lift $ pretty t
-  lift . msg $ "Solving meta " ++ m' ++ " whose qty is " ++ show mq ++ " with body " ++ t' ++ " and spine " ++ sp' ++ " in qty " ++ show q
-
   pren <- invertSpine sp
   rhs <- rename m pren t
   solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, a.qty)) (toList sp)) rhs >>= eval []
@@ -1376,10 +1358,6 @@ unify :: (Tc m) => VTm -> VTm -> m CanUnify
 unify t1 t2 = do
   t1' <- force t1
   t2' <- force t2
-  t1'' <- pretty t1
-  t2'' <- pretty t2
-  q <- qty
-  msg $ "unifying " ++ t1'' ++ " and " ++ t2'' ++ " in qty " ++ show q
   unifyForced t1' t2'
 
 etaConvert :: (Tc m) => VTm -> PiMode -> Qty -> Closure -> m CanUnify

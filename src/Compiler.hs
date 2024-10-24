@@ -6,6 +6,7 @@
 
 module Compiler (runCli) where
 
+import Accounting (AccError, Acc (..))
 import Codegen (Gen (..), JsStat, generateProgram, renderJsProg)
 import Common
   ( Has (..),
@@ -21,7 +22,7 @@ import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT, tryError)
 import Control.Monad.Extra (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.State (MonadState (..), MonadTrans (lift), StateT (..))
+import Control.Monad.State (MonadState (..), StateT (..))
 import Control.Monad.State.Class (gets)
 import qualified Control.Monad.State.Class as ST
 import Data.Map (Map)
@@ -164,7 +165,11 @@ data Compiler = Compiler
     codegenStatements :: [JsStat]
   }
 
-data CompilerError = TcCompilerError TcError | ParseCompilerError ParseError | ElabCompilerError ElabError
+data CompilerError
+  = TcCompilerError TcError
+  | ParseCompilerError ParseError
+  | ElabCompilerError ElabError
+  | AccCompilerError AccError
 
 instance Pretty Comp CompilerError where
   pretty e = do
@@ -172,6 +177,7 @@ instance Pretty Comp CompilerError where
       TcCompilerError a -> pretty a
       ParseCompilerError a -> pretty a
       ElabCompilerError a -> pretty a
+      AccCompilerError a -> pretty a
     return $ ">> " ++ x
 
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}
@@ -219,6 +225,16 @@ instance Tc Comp where
   tcError = throwError . TcCompilerError
 
   addGoal g = ST.modify (\s -> s {goals = s.goals ++ [g]})
+
+instance Acc Comp where
+  accError = throwError . AccCompilerError
+
+  catchAccErrorNoResume m = do
+    x <- tryError m
+    case x of
+      Left (AccCompilerError e) -> return $ Left e
+      Left e -> throwError e
+      Right a -> return $ Right a
 
 instance Elab Comp where
   elabError = throwError . ElabCompilerError

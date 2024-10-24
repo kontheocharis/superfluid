@@ -736,11 +736,11 @@ def string-eq : String -> String -> Bool {
   }
 }
 
-def Word : Type {
+def 0 Word : Type {
   Fin 65536
 }
 
-def Byte : Type {
+def 0 Byte : Type {
   Fin 256
 }
 
@@ -769,7 +769,7 @@ def word-to-nat : Word -> Nat {
   fin-to-nat
 }
 
-def Holds : Bool -> Type {
+def 0 Holds : Bool -> Type {
   \b => Equal b true
 }
 

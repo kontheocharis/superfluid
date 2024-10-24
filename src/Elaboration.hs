@@ -10,6 +10,7 @@ module Elaboration
   )
 where
 
+import Accounting (Acc, Account (account))
 import Common
   ( Arg (..),
     CtorGlobal (..),
@@ -22,18 +23,20 @@ import Common
     Loc,
     Name (..),
     PiMode (..),
+    PrimGlobal (..),
     Qty (Many, Zero),
     Spine,
     Tel,
+    enterLoc,
     mapSpine,
     unName,
-    pattern Possible, enterLoc,
+    pattern Possible, Param (..),
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
-import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal, knownDef)
+import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), getDataGlobal, getDefGlobal, getPrimGlobal, indexArity, knownCtor, knownData, knownDef, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -47,6 +50,7 @@ import Presyntax
     PPrim (..),
     PProgram (..),
     PTm (..),
+    PTy,
     pApp,
     pGatherApps,
     pGatherPis,
@@ -114,7 +118,7 @@ instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
         PatMustBeFullyApplied n n' ->
           return $ "Pattern must be fully applied, but got " ++ show n' ++ " arguments instead of " ++ show n
 
-class (Tc m) => Elab m where
+class (Tc m, Acc m) => Elab m where
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
@@ -178,12 +182,7 @@ elab p mode = case (p, mode) of
   (PU, Infer) -> univ
   (PPi m q x a b, Infer) -> do
     -- If something ends in Type or equals, we use rig zero
-    let potentiallyZero a' = case (q, fst . pGatherApps . snd . pGatherPis $ a') of
-          (Many, PU) -> Zero
-          (Many, PName (Name "Equal")) -> Zero
-          (_, PLocated _ t) -> potentiallyZero t
-          _ -> q
-    let q' = potentiallyZero a `times` potentiallyZero b
+    let q' = defaultQty a q `times` defaultQty b q
     piTy m q' x (elab a) (elab b)
   (PList ts rest, md) -> do
     let end = case rest of
@@ -201,21 +200,42 @@ elab p mode = case (p, mode) of
       ]
   (PParams _ _, Infer) -> error "impossible"
 
+defaultQty :: PTy -> Qty -> Qty
+defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of
+  PU -> Zero
+  PName (Name "Equal") -> Zero
+  PLocated _ t -> defaultQty t fb
+  _ -> fb
+
 elabDef :: (Elab m) => PDef -> m ()
-elabDef def = defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
+elabDef def = do
+  defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
+  ensureAllProblemsSolved
+  di <- access (getDefGlobal (DefGlobal def.name))
+  account di
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
 elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
 
+withDefaultQtys :: Tel PTy -> Tel PTy
+withDefaultQtys = fmap (\(Param m q n t) -> Param m (defaultQty t q) n t)
+
 elabData :: (Elab m) => PData -> m ()
 elabData dat = do
-  dataItem dat.name dat.tags (fmap (fmap elab) dat.params) (elab dat.ty)
+  dataItem dat.name dat.tags (fmap (fmap elab) (withDefaultQtys dat.params)) (elab dat.ty)
   let d = DataGlobal dat.name
   mapM_ (elabCtor d) dat.ctors
   endDataItem d
+  ensureAllProblemsSolved
+  di <- access (getDataGlobal (DataGlobal dat.name))
+  account di
 
 elabPrim :: (Elab m) => PPrim -> m ()
-elabPrim prim = primItem prim.name prim.qty prim.tags (elab prim.ty)
+elabPrim prim = do
+  primItem prim.name prim.qty prim.tags (elab prim.ty)
+  ensureAllProblemsSolved
+  pr <- access (getPrimGlobal (PrimGlobal prim.name))
+  account pr
 
 ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =
@@ -296,4 +316,5 @@ elabItem i = do
   ensureAllProblemsSolved
 
 elabProgram :: (Elab m) => PProgram -> m ()
-elabProgram (PProgram items) = mapM_ elabItem items
+elabProgram (PProgram items) = do
+  mapM_ elabItem items
