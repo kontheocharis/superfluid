@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Accounting
   ( Acc (..),
@@ -16,18 +17,23 @@ import Common
     HasProjectFiles (..),
     Loc (..),
     Logger (..),
+    Lvl (..),
     Name,
     Param (..),
     Qty (..),
+    Spine,
     Tel,
   )
 import Context
   ( Ctx (..),
     CtxEntry (..),
     accessCtx,
+    coindexCtx,
     enterCtx,
     enterQty,
     enterTel,
+    evalHere,
+    evalInOwnCtxHere,
     indexCtx,
     modifyCtx,
     qty,
@@ -36,10 +42,10 @@ import Context
     typelessBinds,
   )
 import Control.Monad (unless)
-import Data.Foldable (traverse_)
+import Data.Foldable (Foldable (..), traverse_)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, nf)
+import Evaluation (Eval, evalInOwnCtx, nf, force)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -50,8 +56,22 @@ import Globals
     getDefGlobal,
     getPrimGlobal,
   )
+import Meta (lookupMetaVarQty)
 import Printing (Pretty (..))
-import Syntax (Case (..), Closure (..), SPat (..), STm (..), VTm (..))
+import Syntax
+  ( Case (..),
+    Closure (..),
+    SPat (..),
+    STm (..),
+    VLazy,
+    VLazyHead (..),
+    VNeu,
+    VNeuHead (..),
+    VNorm (..),
+    VPatB (..),
+    VTm (..),
+    headAsValue,
+  )
 import Unelaboration (Unelab)
 
 -- Accounting for all resources :)
@@ -70,7 +90,7 @@ instance (Acc m) => Has m [Name] where
     modifyCtx (\c -> c {nameList = f ctx.nameList})
 
 data AccError
-  = QtyMismatch Qty Qty STm
+  = QtyMismatch Qty Qty VTm
 
 instance (HasProjectFiles m, Acc m) => Pretty m AccError where
   pretty e = do
@@ -90,59 +110,100 @@ instance (HasProjectFiles m, Acc m) => Pretty m AccError where
 class Account a where
   account :: (Acc m) => a -> m ()
 
-satisfyQty :: (Acc m) => Qty -> STm -> m ()
-satisfyQty q t = do
+satisfyQty :: (Acc m) => Qty -> VTm -> m ()
+satisfyQty q v = do
   q' <- qty
-  unless (q >= q') $ accError $ QtyMismatch q q' t
+  unless (q >= q') $ accError $ QtyMismatch q q' v
+
+instance (Account t) => Account (Spine t) where
+  account Empty = return ()
+  account (ts :|> Arg _ q t) = do
+    enterQty q $ account t
+    account ts
+
+instance Account (Closure, [(Qty, Name)]) where
+  account (cl, bs) = do
+    vcl <- evalInOwnCtxHere cl
+    enterCtx (typelessBinds bs) $ account vcl
+
+instance Account VNorm where
+  account tm = case tm of
+    VLam _ q x t -> account (t, [(q, x)])
+    VPi _ q x ty t -> do
+      enterQty Zero $ do
+        account ty
+        account (t, [(q, x)])
+      satisfyQty Zero (VNorm tm)
+    VU -> satisfyQty Zero (VNorm tm)
+    VData (_, sp) -> do
+      satisfyQty Zero (VNorm tm)
+      account sp
+    VCtor ((_, pp), sp) -> do
+      account pp
+      account sp
+
+instance Account (Case VTm VTm VPatB Closure) where
+  account c = do
+    i <- access (dataIsIrrelevant c.dat)
+    if i
+      then do
+        enterQty Zero $ account c.subject
+      else do
+        account c.subject
+    enterQty Zero $ account c.elimTy
+    traverse_ (\(Clause p t) -> traverse (account . (,p.binds)) t) c.clauses
+
+instance Account VLazy where
+  account (tm, sp) = case tm of
+    VDef d -> do
+      di <- access (getDefGlobal d)
+      satisfyQty di.qty (VLazy (tm, sp))
+      account sp
+    VLit v -> do
+      traverse_ account v
+      account sp
+    VLazyCase c -> do
+      account (c {subject = VLazy c.subject})
+      account sp
+    VRepr n' -> account (headAsValue n')
+    VLet q x ty t u -> do
+      enterQty Zero $ account ty
+      enterQty q $ account t
+      account (u, [(q, x)])
+      account sp
+
+instance Account VNeu where
+  account (tm, sp) = case tm of
+    VFlex m -> do
+      q <- lookupMetaVarQty m
+      satisfyQty q (VNeu (tm, sp))
+      account sp
+    VRigid l -> do
+      n <- accessCtx (`coindexCtx` l)
+      satisfyQty n.qty (VNeu (tm, sp))
+    VBlockedCase c -> do
+      account (c {subject = VNeu c.subject})
+      account sp
+    VPrim p -> do
+      di <- access (getPrimGlobal p)
+      satisfyQty di.qty (VNeu (tm, sp))
+      account sp
+    VUnrepr n' -> do
+      account (headAsValue n')
+      account sp
 
 instance Account VTm where
   account t = do
-    t' <- quoteHere t
-    account t'
+    t' <- force t
+    case t' of
+      VNorm n -> account n
+      VLazy n -> account n
+      VNeu n -> account n
 
 instance Account STm where
   account tm' = do
-    e <- accessCtx (\c -> c.env)
-    tm <- nf e tm'
-    case tm' of
-      SVar idx -> do
-        n <- accessCtx (`indexCtx` idx)
-        q <- qty
-        msg $ "Accessing variable " ++ show n.name ++ " with quantity " ++ show n.qty ++ " in quantity " ++ show q ++ "."
-        satisfyQty n.qty tm
-      SLam _ q x body -> enterCtx (typelessBind x q) $ account body
-      SApp _ q fn arg -> do
-        account fn
-        enterQty q $ account arg
-      SPi _ q x a b -> enterQty Zero $ do
-        account a
-        enterCtx (typelessBind x q) $ account b
-      SLet q x ty val body -> do
-        enterQty Zero $ account ty
-        enterQty q $ account val
-        enterCtx (typelessBind x q) $ account body
-      SU -> satisfyQty Zero tm
-      SData _ -> satisfyQty Zero tm
-      SCtor (_, args) -> traverse_ (\(Arg _ q t) -> enterQty q $ account t) args
-      SCase c -> do
-        i <- access (dataIsIrrelevant c.dat)
-        if i
-          then do
-            enterQty Zero $ account c.subject
-          else do
-            account c.subject
-        enterQty Zero $ account c.elimTy
-        traverse_ (\(Clause p t) -> enterCtx (typelessBinds p.binds) $ traverse account t) c.clauses
-      SMeta _ _ -> return () -- Metas are assumed to not exist anymore
-      SLit _ -> return () -- Valid in any quantity
-      SDef d -> do
-        di <- access (getDefGlobal d)
-        satisfyQty di.qty tm
-      SPrim p -> do
-        di <- access (getPrimGlobal p)
-        satisfyQty di.qty tm
-      SRepr t -> account t
-      SUnrepr t -> account t
+    vtm <- evalHere tm'
+    account vtm
 
 instance (Account a) => Account (Tel a) where
   account Empty = return ()
@@ -154,18 +215,18 @@ instance Account DataGlobalInfo where
   account di = do
     account di.params
     enterQty Zero $ account di.fullTy
-    enterTel di.params $ do
-      traverse_
-        ( \c -> do
-            ci <- access (getCtorGlobal c)
-            enterQty Zero $ account ci.ty.body
-        )
-        di.ctors
+    let bs = map (\p -> (p.qty, p.name)) (toList di.params)
+    traverse_
+      ( \c -> do
+          ci <- access (getCtorGlobal c)
+          enterQty Zero $ account (ci.ty, bs)
+      )
+      di.ctors
 
 instance Account DefGlobalInfo where
   account f = do
     enterQty Zero $ account f.ty
-    enterQty f.qty $ account (fromJust f.tm)
+    enterQty f.qty $ account (fromJust f.vtm)
 
 instance Account PrimGlobalInfo where
   account p = enterQty Zero $ account p.ty

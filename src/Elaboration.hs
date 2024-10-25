@@ -281,9 +281,6 @@ elabDataRep r = do
 elabAndAccount :: (Elab m) => PTm -> Mode -> m (STm, VTy)
 elabAndAccount t md = do
   (t', ty) <- elab t md
-  t'' <- pretty t'
-  ty' <- pretty ty
-  msg $ "Elab and account for " ++ t'' ++ " of type " ++ ty'
   account t'
   return (t', ty)
 

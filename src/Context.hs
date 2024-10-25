@@ -28,6 +28,7 @@ module Context
     evalHere,
     evalPatHere,
     enterTel,
+    evalInOwnCtxHere,
   )
 where
 
@@ -37,7 +38,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, eval, evalPat, quote)
+import Evaluation (Eval, eval, evalPat, quote, evalInOwnCtx)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (Bound, Defined),
@@ -49,7 +50,7 @@ import Syntax
     VPatB,
     VTm (..),
     VTy,
-    pattern VVar,
+    pattern VVar, Closure,
   )
 
 data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
@@ -240,3 +241,8 @@ quoteHere :: (Eval m, Has m Ctx) => VTm -> m STm
 quoteHere t = do
   l <- accessCtx (\c -> c.lvl)
   quote l t
+
+evalInOwnCtxHere :: (Eval m, Has m Ctx) => Closure -> m VTm
+evalInOwnCtxHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  evalInOwnCtx l t

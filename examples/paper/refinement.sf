@@ -71,6 +71,7 @@ def 0 vec-ind-cons' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
   \x xs => ?vec-ind-cons'
 }
 
+
 repr data Vec T n as Vec' T n {
   vec-nil as vec-nil',
   vec-cons x xs as vec-cons' x (repr xs),
@@ -122,18 +123,14 @@ def main : IO () {
   js-console-log n
 }
 
-def foo : [* n : Nat] -> Vec Nat n -> Nat {
-  ?foo
-}
-
 -- def pain : [n : Nat] -> Vec Nat n -> Nat {
 --   \v => foo v
 -- }
 
-def vec-ind'' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
-    -> E 0 vec-nil'
-    -> ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))
-    -> [n : Nat] -> (b : Vec' T n) -> E n b
-{
-  \E ni co b => vec-ind' E ni co b
-}
+-- def vec-ind'' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
+--     -> E 0 vec-nil'
+--     -> ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))
+--     -> [* n : Nat] -> (b : Vec' T n) -> E n b
+-- {
+--   \E ni co b => vec-ind' E ni co b
+-- }

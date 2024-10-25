@@ -536,11 +536,6 @@ inPatNames :: InPat -> [(Qty, Name)]
 inPatNames (InPossiblePat ns) = ns
 inPatNames _ = []
 
-evalInOwnCtxHere :: (Tc m) => Closure -> m VTm
-evalInOwnCtxHere t = do
-  l <- accessCtx (\c -> c.lvl)
-  evalInOwnCtx l t
-
 lam :: (Tc m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
 lam mode m x t = do
   forbidPat
@@ -935,13 +930,7 @@ reprCaseItem te dat ts c = do
       (evalInOwnCtxHere (fromJust di.elimTy))
       (addCaseRepr dat)
       ts
-      ( \md -> do
-          q <- qty
-          msg $ "Currently in CASE ITEM quantity " ++ show q
-          ct <- accessCtx id
-          pretty ct >>= msg
-          c md
-      )
+      c
   return ()
 
 spineForTel :: Int -> Tel STm -> Spine STm
