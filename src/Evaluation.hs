@@ -365,9 +365,9 @@ mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do
   return $ DefGlobalInfo n q ty' vtm' tm'
 
 mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
-mapPrimGlobalInfoM f (PrimGlobalInfo n ty) = do
+mapPrimGlobalInfoM f (PrimGlobalInfo n q ty) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
-  return $ PrimGlobalInfo n ty'
+  return $ PrimGlobalInfo n q ty'
 
 mapGlobalInfoM :: (Eval m) => (STm -> m STm) -> GlobalInfo -> m GlobalInfo
 mapGlobalInfoM f i = case i of
@@ -597,8 +597,8 @@ eval env (SUnrepr t) = do
 vAppBinds :: (Eval m) => Env VTm -> VTm -> Bounds -> m VTm
 vAppBinds env v binds = case (drop (length env - length binds) env, binds) of
   (_, []) -> return v
-  (x : env', Bound : binds') -> do
-    v' <- vApp v (S.singleton (Arg Explicit Many x))
+  (x : env', Bound q : binds') -> do
+    v' <- vApp v (S.singleton (Arg Explicit q x))
     vAppBinds env' v' binds'
   (_ : env', Defined : binds') -> vAppBinds env' v binds'
   ([], _) -> error "impossible"

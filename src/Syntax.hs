@@ -96,16 +96,15 @@ instance Monoid Sub where
 data PRen = PRen
   { domSize :: Lvl,
     codSize :: Lvl,
-    vars :: IntMap Lvl
+    vars :: IntMap (Lvl, Qty)
   }
   deriving (Show)
 
-liftPRen :: PRen -> PRen
-liftPRen (PRen dom cod ren) = PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl dom ren)
+liftPRen :: Qty -> PRen -> PRen
+liftPRen q (PRen dom cod ren) = PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl (dom, q) ren)
 
-liftPRenN :: Int -> PRen -> PRen
-liftPRenN 0 ren = ren
-liftPRenN n ren = liftPRenN (n - 1) (liftPRen ren)
+liftPRenN :: [Qty] -> PRen -> PRen
+liftPRenN qs ren = foldl (flip liftPRen) ren qs
 
 type VPat = VTm
 
@@ -231,7 +230,7 @@ type STy = STm
 
 data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show)
 
-data BoundState = Bound | Defined deriving (Eq, Show)
+data BoundState = Bound Qty | Defined deriving (Eq, Show)
 
 type Bounds = [BoundState]
 

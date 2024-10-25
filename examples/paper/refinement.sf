@@ -122,3 +122,15 @@ def main : IO () {
   let n = vec-index v 2n;
   js-console-log n
 }
+
+-- def pain : [n : Nat] -> Vec Nat n -> Nat {
+--   \v => foo v
+-- }
+
+-- def vec-ind'' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
+--     -> E 0 vec-nil'
+--     -> ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))
+--     -> [* n : Nat] -> (b : Vec' T n) -> E n b
+-- {
+--   \E ni co b => vec-ind' E ni co b
+-- }

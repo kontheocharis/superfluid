@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Common
   ( Name (..),
@@ -50,6 +51,8 @@ module Common
     Has (..),
     Try (..),
     spineValues,
+    idxToLvl,
+    enterLoc,
   )
 where
 
@@ -67,6 +70,7 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import Control.Monad.Trans (MonadTrans(..))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -183,6 +187,9 @@ type Filename = String
 -- end (exclusive) position.
 data Loc = NoLoc | Loc Filename Pos Pos deriving (Eq, Show)
 
+enterLoc :: (Has m Loc) => Loc -> m a -> m a
+enterLoc = enter . const
+
 instance Semigroup Loc where
   NoLoc <> NoLoc = NoLoc
   NoLoc <> Loc f s e = Loc f s e
@@ -236,6 +243,9 @@ nextLvls (Lvl l) n = Lvl (l + n)
 
 lvlToIdx :: Lvl -> Lvl -> Idx
 lvlToIdx (Lvl l) (Lvl i) = Idx (l - i - 1)
+
+idxToLvl :: Lvl -> Idx -> Lvl
+idxToLvl (Lvl l) (Idx i) = Lvl (l - i - 1)
 
 -- Members of a context (represented as a level)
 members :: Lvl -> [Lvl]
@@ -318,10 +328,18 @@ class (Monad m) => Has m a where
 
   enter :: (a -> a) -> m c -> m c
   enter f m = do
-    c <- view :: m a
+    c <- view
     modify f
     a <- m
     modify (\(_ :: a) -> c)
+    return a
+
+  enterLifted :: (MonadTrans t) => (a -> a) -> t m c -> t m c
+  enterLifted f m = do
+    c <- lift view
+    lift $ modify f
+    a <- m
+    lift $ modify (\(_ :: a) -> c)
     return a
 
 -- | A typeclass for backtracking try

@@ -10,6 +10,7 @@ module Elaboration
   )
 where
 
+import Accounting (Acc, Account (account))
 import Common
   ( Arg (..),
     CtorGlobal (..),
@@ -21,19 +22,22 @@ import Common
     Lit (..),
     Loc,
     Name (..),
+    Param (..),
     PiMode (..),
+    PrimGlobal (..),
     Qty (Many, Zero),
     Spine,
     Tel,
+    enterLoc,
     mapSpine,
     unName,
-    pattern Possible,
+    pattern Possible, Logger (..),
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
-import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), indexArity, knownCtor, knownData, lookupGlobal, knownDef)
+import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), getDataGlobal, getDefGlobal, getPrimGlobal, indexArity, knownCtor, knownData, knownDef, lookupGlobal)
 import Presyntax
   ( PCaseRep (..),
     PCtor (..),
@@ -47,6 +51,7 @@ import Presyntax
     PPrim (..),
     PProgram (..),
     PTm (..),
+    PTy,
     pApp,
     pGatherApps,
     pGatherPis,
@@ -81,7 +86,7 @@ import Typechecking
     reprDefItem,
     univ,
     unrepr,
-    wildPat,
+    wild,
   )
 
 -- Presyntax exists below here
@@ -114,7 +119,7 @@ instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
         PatMustBeFullyApplied n n' ->
           return $ "Pattern must be fully applied, but got " ++ show n' ++ " arguments instead of " ++ show n
 
-class (Tc m) => Elab m where
+class (Tc m, Acc m) => Elab m where
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
@@ -157,7 +162,7 @@ elab p mode = case (p, mode) of
   (PRepr t, md) -> repr md (elab t)
   (PUnrepr t, md) -> unrepr md (elab t)
   (PHole n, md) -> meta md (Just n)
-  (PWild, md) -> ifInPat (wildPat md) (meta md Nothing)
+  (PWild, md) -> wild md
   (PLambdaCase r cs, md) -> do
     n <- uniqueName
     elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
@@ -169,21 +174,16 @@ elab p mode = case (p, mode) of
     FinLit f bound -> case bound of
       Just b -> lit md (FinLit f (elab b))
       Nothing -> lit md (FinLit f (elab (pKnownDef KnownAdd [pKnownCtor KnownSucc [PLit (NatLit f)], PWild])))
+  (PName x, md) -> name md x
   (te, Check ty) -> checkByInfer (elab te Infer) ty
   -- Only infer:
-  (PName x, Infer) -> name x
   (PApp {}, Infer) -> do
     let (s, sp) = toPSpine p
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
   (PPi m q x a b, Infer) -> do
     -- If something ends in Type or equals, we use rig zero
-    let potentiallyZero a' = case (q, fst . pGatherApps . snd . pGatherPis $ a') of
-          (Many, PU) -> Zero
-          (Many, PName (Name "Equal")) -> Zero
-          (_, PLocated _ t) -> potentiallyZero t
-          _ -> q
-    let q' = potentiallyZero a `times` potentiallyZero b
+    let q' = defaultQty a q `times` defaultQty b q
     piTy m q' x (elab a) (elab b)
   (PList ts rest, md) -> do
     let end = case rest of
@@ -201,21 +201,42 @@ elab p mode = case (p, mode) of
       ]
   (PParams _ _, Infer) -> error "impossible"
 
+defaultQty :: PTy -> Qty -> Qty
+defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of
+  PU -> Zero
+  PName (Name "Equal") -> Zero
+  PLocated _ t -> defaultQty t fb
+  _ -> fb
+
 elabDef :: (Elab m) => PDef -> m ()
-elabDef def = defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
+elabDef def = do
+  defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
+  ensureAllProblemsSolved
+  di <- access (getDefGlobal (DefGlobal def.name))
+  account di
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
 elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
 
+withDefaultQtys :: Tel PTy -> Tel PTy
+withDefaultQtys = fmap (\(Param m q n t) -> Param m (defaultQty t q) n t)
+
 elabData :: (Elab m) => PData -> m ()
 elabData dat = do
-  dataItem dat.name dat.tags (fmap (fmap elab) dat.params) (elab dat.ty)
+  dataItem dat.name dat.tags (fmap (fmap elab) (withDefaultQtys dat.params)) (elab dat.ty)
   let d = DataGlobal dat.name
   mapM_ (elabCtor d) dat.ctors
   endDataItem d
+  ensureAllProblemsSolved
+  di <- access (getDataGlobal (DataGlobal dat.name))
+  account di
 
 elabPrim :: (Elab m) => PPrim -> m ()
-elabPrim prim = primItem prim.name prim.tags (elab prim.ty)
+elabPrim prim = do
+  primItem prim.name prim.qty prim.tags (elab prim.ty)
+  ensureAllProblemsSolved
+  pr <- access (getPrimGlobal (PrimGlobal prim.name))
+  account pr
 
 ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =
@@ -248,10 +269,20 @@ elabDataRep r = do
     Just (DataInfo info) -> do
       let target' = pLams sp r.target
       let dat = DataGlobal h
-      te <- reprDataItem dat r.tags (elab target')
+      te <-
+        reprDataItem
+          dat
+          r.tags
+          (elabAndAccount target')
       mapM_ (elabCtorRep te) r.ctors
       elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
+
+elabAndAccount :: (Elab m) => PTm -> Mode -> m (STm, VTy)
+elabAndAccount t md = do
+  (t', ty) <- elab t md
+  account t'
+  return (t', ty)
 
 elabCtorRep :: (Elab m) => Tel STy -> PCtorRep -> m ()
 elabCtorRep te r = do
@@ -260,7 +291,7 @@ elabCtorRep te r = do
   case g of
     Just (CtorInfo _) -> do
       let target' = pLams sp r.target
-      reprCtorItem te (CtorGlobal h) r.tags (elab target')
+      reprCtorItem te (CtorGlobal h) r.tags (elabAndAccount target')
     _ -> elabError (ExpectedCtorGlobal h)
 
 elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
@@ -274,14 +305,14 @@ elabCaseRep te dat info r = do
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
           r.target
-  reprCaseItem te dat r.tags (elab target')
+  reprCaseItem te dat r.tags (elabAndAccount target')
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
 elabDefRep r = do
   x <- ensurePatIsBind r.src
   g <- access (lookupGlobal x)
   case g of
-    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elab r.target)
+    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elabAndAccount r.target)
     _ -> elabError (ExpectedDataGlobal x)
 
 elabItem :: (Elab m) => PItem -> m ()
@@ -296,4 +327,5 @@ elabItem i = do
   ensureAllProblemsSolved
 
 elabProgram :: (Elab m) => PProgram -> m ()
-elabProgram (PProgram items) = mapM_ elabItem items
+elabProgram (PProgram items) = do
+  mapM_ elabItem items

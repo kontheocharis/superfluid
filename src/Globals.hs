@@ -39,6 +39,7 @@ module Globals
     addDefRepr,
     dataIsIrrelevant,
     unfoldDefSyntax,
+    getPrimGlobal,
   )
 where
 
@@ -91,6 +92,7 @@ data DefGlobalInfo = DefGlobalInfo
 
 data PrimGlobalInfo = PrimGlobalInfo
   { name :: Name,
+    qty :: Qty,
     ty :: VTm
   }
 
@@ -185,6 +187,12 @@ getDefGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (DefInfo info) -> info
   Just _ -> error $ "getDefGlobal: not a def global" ++ show g
   _ -> error $ "getDefGlobal: not a global" ++ show g
+
+getPrimGlobal :: PrimGlobal -> Sig -> PrimGlobalInfo
+getPrimGlobal g sig = case M.lookup g.globalName sig.contents of
+  Just (PrimInfo info) -> info
+  Just _ -> error $ "getPrimGlobal: not a prim global" ++ show g
+  _ -> error $ "getPrimGlobal: not a global" ++ show g
 
 getGlobal :: Name -> Sig -> GlobalInfo
 getGlobal n sig = case M.lookup n sig.contents of

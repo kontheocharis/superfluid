@@ -53,7 +53,7 @@ import Globals
     getGlobal,
     getGlobalTags,
   )
-import Meta (lookupMetaVar, lookupMetaVarName)
+import Meta (lookupMetaVar, lookupMetaVarName, lookupMetaVarQty)
 import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
 import Printing (Pretty (..))
 import Syntax
@@ -75,6 +75,7 @@ unelabMeta :: (Unelab m) => [Name] -> MetaVar -> Bounds -> m (PTm, [Arg PTm])
 unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
   (_, []) -> do
     mt <- lookupMetaVar m
+    mq <- lookupMetaVarQty m
     case mt of
       Just t -> do
         t' <- quote (Lvl (length ns)) t >>= unelab ns
@@ -83,10 +84,10 @@ unelabMeta ns m bs = case (drop (length ns - length bs) ns, bs) of
         n <- lookupMetaVarName m
         case n of
           Just n' -> return (PHole n', [])
-          Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar), [])
-  (n : ns', Bound : bs') -> do
+          Nothing -> return (PHole (Name $ "m" ++ show m.unMetaVar ++ show mq), [])
+  (n : ns', Bound q : bs') -> do
     (t, ts) <- unelabMeta ns' m bs'
-    return (t, Arg Explicit Many (PName n) : ts)
+    return (t, Arg Explicit q (PName n) : ts)
   (_ : ns', Defined : bs') -> unelabMeta ns' m bs'
   _ -> error "impossible"
 
@@ -197,7 +198,7 @@ unelabSig = do
     unelabPrim :: (Unelab m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
     unelabPrim n p ts = do
       ty' <- unelabValue [] p.ty
-      return $ MkPPrim n ty' ts
+      return $ MkPPrim n p.qty ty' ts
 
     unelabSig' :: (Unelab m) => Sig -> m PProgram
     unelabSig' s =
