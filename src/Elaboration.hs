@@ -31,7 +31,7 @@ import Common
     enterLoc,
     mapSpine,
     unName,
-    pattern Possible, Logger (..),
+    pattern Possible,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)

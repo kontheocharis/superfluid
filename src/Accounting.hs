@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE InstanceSigs #-}
 
 module Accounting
   ( Acc (..),
@@ -16,8 +15,6 @@ import Common
     Has (..),
     HasProjectFiles (..),
     Loc (..),
-    Logger (..),
-    Lvl (..),
     Name,
     Param (..),
     Qty (..),
@@ -31,13 +28,10 @@ import Context
     coindexCtx,
     enterCtx,
     enterQty,
-    enterTel,
     evalHere,
     evalInOwnCtxHere,
-    indexCtx,
     modifyCtx,
     qty,
-    quoteHere,
     typelessBind,
     typelessBinds,
   )
@@ -45,7 +39,7 @@ import Control.Monad (unless)
 import Data.Foldable (Foldable (..), traverse_)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, evalInOwnCtx, nf, force)
+import Evaluation (Eval, force)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -61,7 +55,6 @@ import Printing (Pretty (..))
 import Syntax
   ( Case (..),
     Closure (..),
-    SPat (..),
     STm (..),
     VLazy,
     VLazyHead (..),

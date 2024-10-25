@@ -63,7 +63,6 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
-    Logger (msg),
     Lvl (..),
     MetaVar,
     Name (..),
