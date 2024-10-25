@@ -1,55 +1,40 @@
-data Shape : Type {
-  i : Nat -> Shape,
-  cross : Shape -> Shape -> Shape,
+record Iso (A : Type) (B : Type) : Type {
+  forward : A -> B,
+  backward : B -> A,
+  r-inv : forward (backward a) = a,
+  l-inv : backward (forward b) = b,
 }
 
-data Index : Shape -> Type {
-  here : [n : Nat] -> Fin n -> Index (i n),
-  pair : [s1 : Shape] -> [s2 : Shape] -> Index s1 -> Index s2 -> Index (cross s1 s2),
+record Index : Type {
+  shapes : Nat,
+  arities : Vec Nat shapes,
 }
 
-data Tensor : Shape -> Type -> Type {
-  mk-tensor : [h : Shape] -> [A : Type] -> (Index h -> A) -> Tensor h A,
+def total-size : Index -> Nat {
+  ?total-size
 }
 
-def repeat : [h : Shape] -> [A : Type] -> (x : A) -> Tensor h A {
-  \x => mk-tensor (\_ => x)
+data Idx : Index -> Type {
+  [] : Idx (.shapes = 0, .arities = []),
+  [_, .. _] : [s : Nat, i : Index] -> (a : Fin s) -> Idx i -> Idx (.shapes = 1 + i.shapes, .arities = [s, .. i.arities]),
 }
 
-data Ring : Type -> Type {
-  mk-ring : [R : Type]
-    -> (zero : R)
-    -> (one : R)
-    -> (plus : R -> R -> R)
-    -> (times : R -> R -> R)
-    -> Ring R,
+def idx-iso : [i : Index] -> Iso (Idx i) (Fin (total-size i)) {(
+    .forward = ?forward,
+    .backward = ?backward,
+    .r-inv = ?r-inv,
+    .l-inv = ?l-inv,
+)}
+
+record Matrix (T : Type, i : Index) : Type {
+  at : (i : Idx i) -> T
 }
 
-def tensor-index : [h : Shape] -> [A : Type] -> Tensor h A -> Index h -> A {
-  \t idx => case t {
-    mk-tensor f => f idx
-  }
+def fill : (n : Nat) -> (Fin n -> T) -> Vec T n {
+  ?fill
 }
 
-def tensor-op : [h : Shape] -> [R : Type] -> (R -> R -> R) -> Tensor h R -> Tensor h R -> Tensor h R {
-  \op t1 t2 => {
-    mk-tensor (\idx => op (tensor-index t1 idx) (tensor-index t2 idx))
-  }
+repr record Matrix T i as Vec T (total-size i) {
+  m.at as \d => index (repr m) (idx-iso.forward d),
+  (.at = a) as fill (total-size i) (\f => a (idx-iso.backward f)),
 }
-
-def tensor-mul : [h1 : Shape]
-  -> [h2 : Shape]
-  -> [h3 : Shape]
-  -> [R : Type]
-  -> Ring R
-  -> Tensor (cross h1 h2) R
-  -> Tensor (cross h2 h3) R
-  -> Tensor (cross h1 h3) R
-{
-  \ring t1 t2 => case ring {
-    mk-ring zero one plus times => {
-
-    }
-  }
-}
-

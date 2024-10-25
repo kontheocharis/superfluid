@@ -16,6 +16,7 @@ data Item : Type {
   sword : Item,
   bow : Item,
   arrow : Item,
+  food : Item,
 }
 
 data Inventory : Nat -> Type {
@@ -51,13 +52,9 @@ data Player : Type {
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 -- |  X coordinate | Y coordinate  |
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
--- |   Direction   | Inventory size|
+-- | D |  Inventory #  | I1  |  I2 |  <- Inventory size and start of items
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
--- |             Item 1            |
--- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
--- |              ...              |
--- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
--- |             Item n            |
+-- | I3  | I4  | I5  | ...         |  <- cont. items
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 repr data Item as Fin 5 { -- this should be automatic?
