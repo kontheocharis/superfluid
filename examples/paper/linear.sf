@@ -12,6 +12,15 @@ def 1 swap : [T : Type] -> LinPair T T -> LinPair T T {
 }
 
 data LinList (A : Type) : Type {
-  1 lnil : LinList A
+  1 lnil : LinList A,
   1 lcons : 1 A -> 1 LinList A -> LinList A
 }
+
+def 1 lin-map : [A : Type] -> (1 A -> A) -> 1 LinList A -> LinList A {
+  \f l => case l {
+    lnil => lnil,
+    lcons x xs => lcons (f x) (lin-map f xs)
+  }
+}
+
+

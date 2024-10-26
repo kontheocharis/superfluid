@@ -100,7 +100,7 @@ instance (HasProjectFiles m, Acc m) => Pretty m AccError where
                 Zero -> "zero"
                 One -> "one"
                 Many -> "many"
-          return $ "Quantity mismatch: got " ++ showQty q1 ++ " of term " ++ t' ++ ", but " ++ showQty q2 ++ " are requested."
+          return $ "Quantity mismatch: got " ++ showQty q1 ++ " of term " ++ t' ++ ", but " ++ showQty q2 ++ " requested."
 
 class Account a where
   runAccount :: (Acc m) => a -> m ()
@@ -154,7 +154,7 @@ instance Account (Case VTm VTm VPatB Closure) where
       else do
         account c.subject
     need Zero $ account c.elimTy
-    traverse_ (\(Clause p t) -> traverse (account . (,p.binds)) t) c.clauses
+    traverse_ (\(Clause p t) -> child $ traverse (account . (,p.binds)) t) c.clauses
 
 instance Account VLazy where
   account (tm, sp) = case tm of
