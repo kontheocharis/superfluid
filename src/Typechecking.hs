@@ -855,8 +855,9 @@ endDataItem dat = do
         )
     )
 
-ctorItem :: (Tc m) => DataGlobal -> Name -> Set Tag -> Child m -> m ()
-ctorItem dat n ts ty = do
+ctorItem :: (Tc m) => DataGlobal -> Name -> Maybe Qty -> Set Tag -> Child m -> m ()
+ctorItem dat n mq ts ty = do
+  let q' = fromMaybe Many mq
   di <- access (getDataGlobal dat)
   idx <- access (\s -> length (getDataGlobal dat s).ctors)
   (sp, ty', q) <- enterTel di.params $ do
@@ -869,7 +870,7 @@ ctorItem dat n ts ty = do
       Nothing -> tcError $ InvalidCtorType ty'
       Just (_, q) -> return (sp, ty', q)
   cty <- closeHere (length di.params) ty'
-  modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx q dat sp)) ts)
+  modify (addItem n (CtorInfo (CtorGlobalInfo n q' cty idx q dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Maybe Qty -> Set Tag -> Child m -> m ()

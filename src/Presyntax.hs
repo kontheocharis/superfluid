@@ -76,6 +76,7 @@ tagged ts (PLocatedItem loc i) = PLocatedItem loc $ tagged ts i
 
 data PCtor = MkPCtor
   { name :: Name,
+    qty :: MaybeQty,
     ty :: PTy,
     tags :: Set Tag
   }
@@ -328,11 +329,11 @@ instance (Monad m) => Pretty m PTm where
     return $ "if " ++ pc ++ " " ++ curlies pt ++ " else " ++ curlies pe
 
 instance (Monad m) => Pretty m PCtor where
-  pretty (MkPCtor n ty ts) = do
+  pretty (MkPCtor n q ty ts) = do
     pts <- pretty ts
     pn <- pretty n
     pty <- pretty ty
-    return $ pts ++ pn ++ " : " ++ pty
+    return $ show q ++ pts ++ pn ++ " : " ++ pty
 
 instance (Monad m) => Pretty m PData where
   pretty (MkPData n te ty cs ts) = do

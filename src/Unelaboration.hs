@@ -187,7 +187,7 @@ unelabSig = do
     unelabCtor :: (Unelab m) => Name -> CtorGlobalInfo -> [Name] -> Set Tag -> m PCtor
     unelabCtor n c dataParams ts = do
       ty' <- unelab dataParams c.ty.body
-      return $ MkPCtor n ty' ts
+      return $ MkPCtor n (MaybeQty (Just c.qty)) ty' ts
 
     unelabDef :: (Unelab m) => Name -> DefGlobalInfo -> Set Tag -> m PDef
     unelabDef n d ts = do

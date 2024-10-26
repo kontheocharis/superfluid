@@ -221,7 +221,7 @@ elabDef def = do
   runAccount di
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
-elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
+elabCtor dat ctor = ctorItem dat ctor.name ctor.qty.un ctor.tags (elab ctor.ty)
 
 withDefaultQtys :: Tel PTy -> Tel PTy
 withDefaultQtys = fmap (\(Param m q n t) -> Param m (defaultQty t q) n t)

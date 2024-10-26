@@ -22,7 +22,7 @@ import Common
     Qty (..),
     Spine,
     Tel,
-    minus, Try (try), Parent (child),
+    minus, Parent (child),
   )
 import Context
   ( Ctx (..),
@@ -34,12 +34,10 @@ import Context
     evalHere,
     evalInOwnCtxHere,
     modifyCtx,
-    qty,
     setCtxEntryQty,
     typelessBind,
-    typelessBinds, expect,
+    typelessBinds, expect, qty,
   )
-import Control.Monad (unless)
 import Data.Foldable (Foldable (..), traverse_)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
@@ -53,10 +51,7 @@ import Globals
     getCtorGlobal,
     getDefGlobal,
     getPrimGlobal,
-    modifyDefItem,
-    modifyPrimItem,
   )
-import Meta (lookupMetaVarQty, modifyMetaVarQty)
 import Printing (Pretty (..))
 import Syntax
   ( Case (..),
@@ -141,7 +136,12 @@ instance Account VNorm where
     VU -> return ()
     VData (_, sp) -> do
       account sp
-    VCtor ((_, pp), sp) -> do
+    VCtor ((c, pp), sp) -> do
+      di <- access (getCtorGlobal c)
+      have
+        di.qty
+        (VNorm tm)
+        (\q -> return ())
       account pp
       account sp
 
@@ -163,7 +163,7 @@ instance Account VLazy where
       have
         di.qty
         (VLazy (tm, sp))
-        (\q -> modify (modifyDefItem d (\i -> i {qty = q})))
+        (\q -> return ())
       account sp
     VLit v -> do
       traverse_ account v
@@ -180,9 +180,9 @@ instance Account VLazy where
 
 instance Account VNeu where
   account (tm, sp) = case tm of
-    VFlex m -> do
-      q <- lookupMetaVarQty m
-      have q (VNeu (tm, sp)) (modifyMetaVarQty m . const)
+    VFlex _ -> do
+      -- q <- lookupMetaVarQty m
+      -- have q (VNeu (tm, sp)) (modifyMetaVarQty m . const)
       account sp
     VRigid l -> do
       n <- accessCtx (`coindexCtx` l)

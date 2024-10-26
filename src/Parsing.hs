@@ -285,10 +285,11 @@ reprCaseItem = do
 -- | Parse a constructor item.
 ctorItem :: Parser PCtor
 ctorItem = do
+  q <- qty
   name <- identifier
   _ <- colon
   ty <- term
-  return $ MkPCtor name ty mempty
+  return $ MkPCtor name q ty mempty
 
 -- | Parse a data item.
 dataItem :: Parser PData

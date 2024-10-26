@@ -41,6 +41,7 @@ module Globals
     unfoldDefSyntax,
     getPrimGlobal,
     modifyPrimItem,
+    modifyCtorItem,
   )
 where
 
@@ -65,6 +66,7 @@ import Syntax (Closure, STm (..), STy, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
+    qty :: Qty,
     ty :: Closure,
     idx :: Int,
     qtySum :: Qty,
@@ -173,6 +175,9 @@ modifyDefItem def f s = s {contents = M.insert def.globalName (DefInfo (f (getDe
 
 modifyPrimItem :: PrimGlobal -> (PrimGlobalInfo -> PrimGlobalInfo) -> Sig -> Sig
 modifyPrimItem def f s = s {contents = M.insert def.globalName (PrimInfo (f (getPrimGlobal def s))) s.contents}
+
+modifyCtorItem :: CtorGlobal -> (CtorGlobalInfo -> CtorGlobalInfo) -> Sig -> Sig
+modifyCtorItem ctor f s = s {contents = M.insert ctor.globalName (CtorInfo (f (getCtorGlobal ctor s))) s.contents}
 
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of

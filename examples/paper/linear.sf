@@ -1,6 +1,17 @@
 
-
-def 1 duplicate : [T : Type] -> 1 T -> 1 T -> (T * T) {
-  \t u => (t, u)
+data LinPair (A B : Type) : Type {
+  1 lpair : 1 A -> 1 B -> LinPair A B
 }
 
+def 1 duplicate : [T : Type] -> 1 T -> 1 T -> LinPair T T {
+  \t u => lpair t u
+}
+
+def 1 swap : [T : Type] -> LinPair T T -> LinPair T T {
+  \(lpair t u) => lpair u t
+}
+
+data LinList (A : Type) : Type {
+  1 lnil : LinList A
+  1 lcons : 1 A -> 1 LinList A -> LinList A
+}

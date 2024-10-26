@@ -48,7 +48,6 @@ import Common
     Logger (..),
     Lvl (..),
     MetaVar,
-    Name,
     Param (..),
     PiMode (..),
     Qty (Many, Zero),
@@ -352,9 +351,9 @@ mapDataGlobalInfoM f (DataGlobalInfo n params fullTy ty ctors motiveTy elimTy in
   return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy' indexArity
 
 mapCtorGlobalInfoM :: (Eval m) => (STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
-mapCtorGlobalInfoM f (CtorGlobalInfo n ty idx p dataGlobal argArity) = do
+mapCtorGlobalInfoM f (CtorGlobalInfo n q ty idx p dataGlobal argArity) = do
   ty' <- mapClosureM f ty
-  return $ CtorGlobalInfo n ty' idx p dataGlobal argArity
+  return $ CtorGlobalInfo n q ty' idx p dataGlobal argArity
 
 mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
 mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do

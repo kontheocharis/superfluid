@@ -145,7 +145,7 @@ data Qty = Zero | One | Many deriving (Eq)
 instance Show Qty where
   show Zero = "0 "
   show One = "1 "
-  show Many = ""
+  show Many = "* "
 
 instance Ord Qty where
   compare Zero Zero = EQ
