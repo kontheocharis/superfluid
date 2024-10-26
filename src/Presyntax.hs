@@ -15,6 +15,7 @@ module Presyntax
     PTm (..),
     PPrim (..),
     PProgram (..),
+    MaybeQty (..),
     tagged,
     pApp,
     pGatherApps,
@@ -49,9 +50,16 @@ type PTy = PTm
 
 type PPat = PTm
 
+newtype MaybeQty = MaybeQty { un :: Maybe Qty }
+  deriving (Eq)
+
+instance Show MaybeQty where
+  show (MaybeQty Nothing) = ""
+  show (MaybeQty (Just q)) = show q
+
 data PDef = MkPDef
   { name :: Name,
-    qty :: Qty,
+    qty :: MaybeQty,
     ty :: PTy,
     tm :: PTm,
     tags :: Set Tag
@@ -116,7 +124,7 @@ data PDefRep = MkPDefRep
 
 data PPrim = MkPPrim
   { name :: Name,
-    qty :: Qty,
+    qty :: MaybeQty,
     ty :: PTy,
     tags :: Set Tag
   }
@@ -134,10 +142,10 @@ data PItem
 newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 
 data PTm
-  = PPi PiMode Qty Name PTy PTy
-  | PSigma Qty Name PTy Qty PTy
+  = PPi PiMode (MaybeQty) Name PTy PTy
+  | PSigma (MaybeQty) Name PTy (MaybeQty) PTy
   | PLam PiMode PPat PTm
-  | PLet Qty PPat PTy PTm PTm
+  | PLet (MaybeQty) PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
@@ -180,11 +188,11 @@ pGatherApps (PLocated _ t) = pGatherApps t
 pGatherApps t = (t, Empty)
 
 pGatherPis :: PTm -> (Tel PTy, PTm)
-pGatherPis (PPi m q n a b) = let (ns, b') = pGatherPis b in (Param m q n a :<| ns, b')
+pGatherPis (PPi m _ n a b) = let (ns, b') = pGatherPis b in (Param m Zero n a :<| ns, b')
 pGatherPis (PLocated _ t) = pGatherPis t
 pGatherPis t = (Empty, t)
 
-pLetToList :: PTm -> ([(Qty, PPat, PTy, PTm)], PTm)
+pLetToList :: PTm -> ([(MaybeQty, PPat, PTy, PTm)], PTm)
 pLetToList (PLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, n, ty, t1) : binds, ret)
 pLetToList (PLocated _ t) = pLetToList t
 pLetToList t = ([], t)
@@ -203,15 +211,15 @@ isCompound (PParams t _) = isCompound t
 -- isCompound (PParams _ _) = True
 isCompound _ = False
 
-prettyLets :: (Monad m) => ([(Qty, PPat, PTy, PTm)], PTm) -> m String
+prettyLets :: (Monad m) => ([(MaybeQty, PPat, PTy, PTm)], PTm) -> m String
 prettyLets (binds, ret) = do
   pbinds <-
     mapM
-      ( \(q, v, ty, t) -> do
+      ( \(MaybeQty q, v, ty, t) -> do
           pv <- singlePretty v
           pty <- pretty ty
           pt <- pretty t
-          return $ "let " ++ show q ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
+          return $ "let " ++ maybe "" show q ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
       )
       binds
   pret <- pretty ret
@@ -229,7 +237,7 @@ instance (Monad m) => Pretty m PTm where
   singlePretty v | isCompound v = pretty v >>= \p -> return $ "(" ++ p ++ ")"
   singlePretty v = pretty v
 
-  pretty (PPi Explicit Many (Name "_") t1 t2) = do
+  pretty (PPi Explicit (MaybeQty Nothing) (Name "_") t1 t2) = do
     pt1 <- singlePretty t1
     pt2 <- pretty t2
     return $ pt1 ++ " -> " ++ pt2

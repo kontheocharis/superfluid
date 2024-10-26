@@ -88,12 +88,12 @@ import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Extra (when)
+import Control.Monad.Extra (when, fromMaybeM)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -340,18 +340,19 @@ inferMeta n q = do
   checkMeta n vty q
 
 prettyGoal :: (Tc m) => Goal -> m String
-prettyGoal (Goal c n _ ty) = enterCtx (const c) $ do
+prettyGoal (Goal c n _ q ty) = enterCtx (const c) $ do
   c' <- getCtx >>= pretty
   ty' <- pretty ty
-  let g = maybe "_" (\n' -> "?" ++ n'.unName) n ++ " : " ++ ty'
+  let g = show q ++ maybe "_" (\n' -> "?" ++ n'.unName) n ++ " : " ++ ty'
   return $ indentedFst c' ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
 checkMeta :: (Tc m) => Maybe Name -> VTy -> Qty -> m (STm, VTy)
 checkMeta n ty q = do
   m <- newMeta n q
-  c <- getCtx
   case n of
-    Just _ -> addGoal (Goal c n m ty)
+    Just _ -> do
+      c <- getCtx
+      addGoal (Goal c n m q ty)
     Nothing -> return ()
   return (m, ty)
 
@@ -385,7 +386,7 @@ insertFull (tm, ty) = do
   f <- unfoldHere ty
   case f of
     VNorm (VPi Implicit q _ a b) -> do
-      (v, vv) <- enterQty q (freshMetaOrPatBind a)
+      (v, vv) <- need q (freshMetaOrPatBind a)
       ty' <- b $$ [vv]
       insertFull (SApp Implicit q tm v, ty')
     _ -> return (tm, ty)
@@ -565,15 +566,16 @@ insertLam q x' a b t = do
   (t', _) <- enterCtx (insertedBind x' q a) (t (Check vb))
   return (SLam Implicit q x' t', VNorm (VPi Implicit q x' a b))
 
-letIn :: (Tc m) => Mode -> Qty -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
+letIn :: (Tc m) => Mode -> Maybe Qty -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
 letIn mode q x a t u = do
   forbidPat
-  (a', _) <- enterQty Zero $ a (Check (VNorm VU))
+  (a', _) <- expect Zero $ a (Check (VNorm VU))
   va <- evalHere a'
-  (t', _) <- enterQty q $ t (Check va)
+  q' <- fromMaybeM qty (return q)
+  (t', _) <- expect q' $ t (Check va)
   vt <- evalHere t'
-  (u', ty) <- enterCtx (define x q vt va) $ u mode
-  return (SLet q x a' t' u', ty)
+  (u', ty) <- enterCtx (define x q' vt va) $ u mode
+  return (SLet q' x a' t' u', ty)
 
 spine :: (Tc m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
 spine (t, ty) Empty = return (t, ty)
@@ -586,7 +588,7 @@ spine (t, ty) (Arg m _ u :<| sp) = do
     m
     ty'
     ( \_ q _ a b -> do
-        (u', _) <- enterQty q $ u (Check a)
+        (u', _) <- expect q $ u (Check a)
         uv <- evalHere u'
         b' <- b $$ [uv]
         spine (SApp m q t' u', b') sp
@@ -714,26 +716,25 @@ ensureDataAndGetWide ssTy f = do
     )
     f
 
-caseSubject :: (Tc m) => Child m -> m (STm, VTy)
-caseSubject s = do
-  sRes <- try $ s Infer
-  case sRes of
-    Right r -> return r
-    Left e -> do
-      (ss, ssTy) <- enterQty Zero $ s Infer
-      l <- getLvl
-      ifIsData
-        l
-        ssTy
-        ( \d _ -> do
-            i <- access (dataIsIrrelevant d)
-            if i
-              then
-                return ()
-              else giveUp e
-        )
-        (return ()) -- Handled later
-      return (ss, ssTy)
+caseSubject :: Child m -> m (STm, VTy)
+caseSubject s = s Infer
+  -- case sRes of
+  --   Right r -> return r
+  --   Left e -> do
+  --     (ss, ssTy) <- expect Zero $ s Infer
+  --     l <- getLvl
+  --     ifIsData
+  --       l
+  --       ssTy
+  --       ( \d _ -> do
+  --           i <- access (dataIsIrrelevant d)
+  --           if i
+  --             then
+  --               return ()
+  --             else giveUp e
+  --       )
+  --       (return ()) -- Handled later
+  --     return (ss, ssTy)
 
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
@@ -751,7 +752,7 @@ caseOf mode s r cs = do
       let motive = fromJust di.motiveTy
       motiveApplied <- motive $$ map (\a -> a.arg) (toList paramSp)
       rr <- case r of
-        Just r' -> enterQty Zero $ fst <$> r' (Check motiveApplied)
+        Just r' -> expect Zero $ fst <$> r' (Check motiveApplied)
         Nothing -> constLamsForPis motiveApplied ty
       vrr <- evalHere rr
 
@@ -801,13 +802,14 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-defItem :: (Tc m) => Qty -> Name -> Set Tag -> Child m -> Child m -> m ()
-defItem q n ts ty tm = do
+defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Child m -> m ()
+defItem mq n ts ty tm = do
   ensureNewName n
-  (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
+  let q = fromMaybe Many mq
+  (ty', _) <- expect Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
   modify (addItem n (DefInfo (DefGlobalInfo n q vty Nothing Nothing)) ts)
-  (tm', _) <- enterQty q $ tm (Check vty)
+  (tm', _) <- expect q $ tm (Check vty)
 
   vtm <- evalHere tm'
   b <- normaliseProgram
@@ -819,7 +821,7 @@ defItem q n ts ty tm = do
 tel :: (Tc m) => Tel (Child m) -> m (Tel STy)
 tel Empty = return Empty
 tel (t :<| ts) = do
-  (t', _) <- enterQty Zero $ t.ty (Check (VNorm VU))
+  (t', _) <- expect Zero $ t.ty (Check (VNorm VU))
   vt <- evalHere t'
   ts' <- enterCtx (bind t.name t.qty vt) $ tel ts
   return (Param t.mode t.qty t.name t' :<| ts')
@@ -829,7 +831,7 @@ dataItem n ts te ty = do
   ensureNewName n
   te' <- tel te
   ty' <- enterTel te' $ do
-    (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
+    (ty', _) <- expect Zero $ ty (Check (VNorm VU))
     vty <- evalHere ty'
     i <- getLvl >>= (`isTypeFamily` vty)
     unless i (tcError $ InvalidDataFamily vty)
@@ -859,7 +861,7 @@ ctorItem dat n ts ty = do
   idx <- access (\s -> length (getDataGlobal dat s).ctors)
   (sp, ty', q) <- enterTel di.params $ do
     ensureNewName n
-    (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
+    (ty', _) <- expect Zero $ ty (Check (VNorm VU))
     let sp = fmap (\p -> Arg p.mode p.qty ()) $ fst (sGatherPis ty')
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
@@ -870,15 +872,16 @@ ctorItem dat n ts ty = do
   modify (addItem n (CtorInfo (CtorGlobalInfo n cty idx q dat sp)) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
-primItem :: (Tc m) => Name -> Qty -> Set Tag -> Child m -> m ()
-primItem n q ts ty = do
+primItem :: (Tc m) => Name -> Maybe Qty -> Set Tag -> Child m -> m ()
+primItem n mq ts ty = do
   ensureNewName n
-  (ty', _) <- enterQty Zero $ ty (Check (VNorm VU))
+  let q = fromMaybe Many mq
+  (ty', _) <- expect Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
   modify (addItem n (PrimInfo (PrimGlobalInfo n q vty)) ts)
 
 reprItem :: (Tc m) => Qty -> Tel STm -> m VTy -> (Closure -> Set Tag -> Sig -> Sig) -> Set Tag -> Child m -> m STm
-reprItem q te getGlob addGlob ts r = enterQty q $ do
+reprItem q te getGlob addGlob ts r = expect q $ do
   ty <- getGlob
   (r', _) <- enterTel te $ r (Check ty)
   vr <- closeHere (length te) r'
@@ -1250,7 +1253,7 @@ rename m pren tm = case tm of
 
 unifySpines :: (Tc m) => Spine VTm -> Spine VTm -> m CanUnify
 unifySpines Empty Empty = return Yes
-unifySpines (sp :|> Arg _ q u) (sp' :|> Arg _ q' u') | q == q' = unifySpines sp sp' /\ enterQty q (unify u u')
+unifySpines (sp :|> Arg _ q u) (sp' :|> Arg _ q' u') | q == q' = unifySpines sp sp' /\ unify u u'
 unifySpines sp sp' = return $ No [DifferentSpineLengths sp sp']
 
 unifyClauses :: (Tc m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
@@ -1266,7 +1269,6 @@ unifyClause a b = return $ No [DifferentClauses [a] [b]]
 data Problem = Problem
   { ctx :: Ctx,
     loc :: Loc,
-    qty :: Qty,
     lhs :: VTm,
     rhs :: VTm,
     errs :: [UnifyError]
@@ -1274,7 +1276,7 @@ data Problem = Problem
   deriving (Show)
 
 instance (Tc m) => Pretty m Problem where
-  pretty (Problem ctx _ _ lhs rhs errs) = enterCtx (const ctx) $ do
+  pretty (Problem ctx _ lhs rhs errs) = enterCtx (const ctx) $ do
     lhs' <- pretty lhs
     rhs' <- pretty rhs
     errs' <- intercalate ", " <$> mapM pretty errs
@@ -1286,9 +1288,8 @@ addProblem p = modify (S.|> p)
 addNewProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
 addNewProblem t t' e = do
   c <- getCtx
-  q <- qty
   l <- view
-  let p = Problem {ctx = c, qty = q, loc = l, lhs = t, rhs = t', errs = []}
+  let p = Problem {ctx = c, loc = l, lhs = t, rhs = t', errs = []}
   addProblem $ p {errs = [SolveError (WithProblem p e)]}
 
 removeProblem :: (Tc m) => Int -> m ()
@@ -1298,7 +1299,7 @@ getProblems :: (Tc m) => m (Seq Problem)
 getProblems = view
 
 enterProblem :: (Tc m) => Problem -> m a -> m a
-enterProblem p = enterPat NotInPat . enterCtx (const p.ctx) . enterLoc p.loc . replaceQty p.qty
+enterProblem p = enterPat NotInPat . enterCtx (const p.ctx) . enterLoc p.loc
 
 newtype SolveAttempts = SolveAttempts {n :: Int}
 
@@ -1407,7 +1408,7 @@ unifyLazy (n1, sp1) (n2, sp2) =
         (VDef d1, VDef d2) | d1 == d2 -> return Yes
         (VLit l1, VLit l2) -> unifyLit l1 l2
         (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2
-        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> enterQty Zero (unify a1 a2) /\ enterQty q1 (unify t1 t2) /\ unifyClosure [q1] u1 [q2] u2
+        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> unify a1 a2 /\ unify t1 t2 /\ unifyClosure [q1] u1 [q2] u2
         (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2')
         _ -> iDontKnow
     )

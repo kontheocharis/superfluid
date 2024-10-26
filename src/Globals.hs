@@ -40,6 +40,7 @@ module Globals
     dataIsIrrelevant,
     unfoldDefSyntax,
     getPrimGlobal,
+    modifyPrimItem,
   )
 where
 
@@ -169,6 +170,9 @@ modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (get
 
 modifyDefItem :: DefGlobal -> (DefGlobalInfo -> DefGlobalInfo) -> Sig -> Sig
 modifyDefItem def f s = s {contents = M.insert def.globalName (DefInfo (f (getDefGlobal def s))) s.contents}
+
+modifyPrimItem :: PrimGlobal -> (PrimGlobalInfo -> PrimGlobalInfo) -> Sig -> Sig
+modifyPrimItem def f s = s {contents = M.insert def.globalName (PrimInfo (f (getPrimGlobal def s))) s.contents}
 
 getDataGlobal :: DataGlobal -> Sig -> DataGlobalInfo
 getDataGlobal g sig = case M.lookup g.globalName sig.contents of

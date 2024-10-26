@@ -18,8 +18,8 @@ module Context
     typelessBinds,
     quoteHere,
     lookupName,
-    enterQty,
-    replaceQty,
+    need,
+    expect,
     qty,
     enterCtx,
     accessCtx,
@@ -29,6 +29,7 @@ module Context
     evalPatHere,
     enterTel,
     evalInOwnCtxHere,
+    setCtxEntryQty,
   )
 where
 
@@ -38,11 +39,12 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, eval, evalPat, quote, evalInOwnCtx)
+import Evaluation (Eval, eval, evalInOwnCtx, evalPat, quote)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (Bound, Defined),
     Bounds,
+    Closure,
     Env,
     SPat,
     STm (..),
@@ -50,7 +52,7 @@ import Syntax
     VPatB,
     VTm (..),
     VTy,
-    pattern VVar, Closure,
+    pattern VVar,
   )
 
 data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
@@ -165,6 +167,16 @@ addCtxEntry e ctx =
       nameList = e.name : ctx.nameList
     }
 
+setCtxEntryQty :: Lvl -> Qty -> Ctx -> Ctx
+setCtxEntryQty l q ctx =
+  ctx
+    { qtys = replaceAt (lvlToIdx ctx.lvl l) q ctx.qtys
+    }
+  where
+    -- How does haskell not have this function?
+    replaceAt :: Idx -> a -> [a] -> [a]
+    replaceAt (Idx i) x xs = take i xs ++ [x] ++ drop (i + 1) xs
+
 typelessBinds :: [(Qty, Name)] -> Ctx -> Ctx
 typelessBinds ns ctx = foldr (uncurry . flip $ typelessBind) ctx (reverse ns)
 
@@ -194,6 +206,7 @@ data Goal = Goal
   { ctx :: Ctx,
     name :: Maybe Name,
     tm :: STm,
+    qty :: Qty,
     ty :: VTy
   }
 
@@ -215,11 +228,11 @@ enterCtx = enter
 qty :: (Has m Qty) => m Qty
 qty = view
 
-enterQty :: (Has m Qty) => Qty -> m a -> m a
-enterQty q = enter (`times` q)
+need :: (Has m Qty) => Qty -> m a -> m a
+need q = enter (`times` q)
 
-replaceQty :: (Has m Qty) => Qty -> m a -> m a
-replaceQty q = enter (const q)
+expect :: (Has m Qty) => Qty -> m a -> m a
+expect q = enter (const q)
 
 evalHere :: (Eval m, Has m Ctx) => STm -> m VTm
 evalHere t = do

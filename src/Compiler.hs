@@ -16,7 +16,7 @@ import Common
     Logger (..),
     Name (..),
     Qty (Many),
-    Try (..),
+    Try (..), Parent (..),
   )
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT, tryError)
@@ -225,6 +225,13 @@ instance Tc Comp where
   tcError = throwError . TcCompilerError
 
   addGoal g = ST.modify (\s -> s {goals = s.goals ++ [g]})
+
+instance Parent Comp where
+  child c = do
+    s <- get
+    a <- c
+    put s
+    return a
 
 instance Acc Comp where
   accError = throwError . AccCompilerError

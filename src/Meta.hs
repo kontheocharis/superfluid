@@ -12,6 +12,7 @@ module Meta
     resetSolvedMetas,
     HasMetas,
     lookupMetaVarQty,
+    modifyMetaVarQty,
   )
 where
 
@@ -45,6 +46,12 @@ lookupMetaVarQty (MetaVar m) = do
   SolvedMetas ms <- view
   let (_, qty, _) = fromJust $ IM.lookup m ms
   return qty
+
+modifyMetaVarQty :: (Has m SolvedMetas) => MetaVar -> (Qty -> Qty) -> m ()
+modifyMetaVarQty (MetaVar m) f = do
+  SolvedMetas ms <- view
+  let (tm, qty, name) = fromJust $ IM.lookup m ms
+  modify (\sm -> sm {values = IM.insert m (tm, f qty, name) sm.values})
 
 freshMetaVar :: (Has m SolvedMetas) => Maybe Name -> Qty -> m MetaVar
 freshMetaVar n q = do

@@ -98,8 +98,8 @@ jsLam v q b = do
   v' <- jsNewBind v
   JsExpr b' <- enter (Name v' :) b
   case q of
-    Many -> return . JsExpr $ "(" ++ v' ++ ") => " ++ b'
     Zero -> return $ JsExpr b'
+    _ -> return . JsExpr $ "(" ++ v' ++ ") => " ++ b'
 
 jsLams :: (Gen m) => Spine Name -> m JsExpr -> m JsExpr
 jsLams vs b = foldr (\t -> jsLam t.arg t.qty) b (toList vs)
@@ -110,8 +110,8 @@ jsLet v q t ts = do
   t' <- t
   ts' <- enter (Name v' :) ts
   case q of
-    Many -> return $ jsConst v' t' : ts'
     Zero -> return ts'
+    _ -> return $ jsConst v' t' : ts'
 
 addDecl :: (Gen m) => JsStat -> m ()
 addDecl d = modify (++ [d])

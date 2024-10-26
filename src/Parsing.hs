@@ -27,7 +27,8 @@ import qualified Data.Set as S
 import Data.String
 import Data.Text (Text)
 import Presyntax
-  ( PCaseRep (..),
+  ( MaybeQty (..),
+    PCaseRep (..),
     PCtor (MkPCtor),
     PCtorRep (MkPCtorRep),
     PData (MkPData),
@@ -41,7 +42,7 @@ import Presyntax
     PTm (..),
     PTy,
     pApp,
-    tagged,
+    tagged, un,
   )
 import Printing (Pretty (..))
 import Text.Parsec
@@ -307,7 +308,7 @@ dataItem = do
 primItem :: Parser PPrim
 primItem = do
   reserved "prim"
-  q <- fromMaybe Many <$> qty
+  q <- qty
   (name, ty) <- defSig
   case ty of
     Nothing -> fail "Primitive items must have a type signature"
@@ -329,7 +330,7 @@ tags = do
 defItem :: Parser PDef
 defItem = do
   reserved "def"
-  q <- fromMaybe Many <$> qty
+  q <- qty
   (name, ty) <- defSig
   t <- lets
   return $ MkPDef name q (fromMaybe PWild ty) t mempty
@@ -451,7 +452,7 @@ tel =
         ( do
             q <- qty
             t <- app
-            return (fromMaybe Many q, Name "_", t)
+            return (fromMaybe Many q.un, Name "_", t)
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
@@ -467,6 +468,7 @@ tel =
                   Implicit -> Zero
                   Instance -> Many
               )
+              . (\u -> u.un)
               <$> qty
           n <- many1 var
           _ <- colon
@@ -474,12 +476,14 @@ tel =
           return $ map (q,,ty) n
       return . NE.fromList $ concat ts
 
-qty :: Parser (Maybe Qty)
+qty :: Parser MaybeQty
 qty =
-  try (reservedOp "0" >> return (Just Zero))
-    -- <|> try (reservedOp "1" >> return (Just One))
-    <|> try (reservedOp "*" >> return (Just Many))
-    <|> return Nothing
+  MaybeQty
+    <$> ( try (reservedOp "0" >> return (Just Zero))
+            <|> try (reservedOp "1" >> return (Just One))
+            <|> try (reservedOp "*" >> return (Just Many))
+            <|> return Nothing
+        )
 
 -- | Parse a pi type or sigma type.
 piTOrSigmaT :: Parser PTy
@@ -487,12 +491,13 @@ piTOrSigmaT = try $ do
   ns <- tel
   ( reservedOp "->" >> do
       ret <- term
-      return $ foldr (\(t, l) acc ->  PLocated l (PPi t.mode t.qty t.name t.ty acc)) ret ns
+      return $ foldr (\(t, l) acc -> PLocated l (PPi t.mode (MaybeQty (Just t.qty)) t.name t.ty acc)) ret ns
     )
     <|> ( reservedOp "*" >> do
-            -- q <- qty
+            q <- qty
             ret <- term
-            return $ foldr (\(t, l) acc -> PLocated l (PSigma t.qty t.name t.ty Many acc)) ret ns
+            -- Remove this terrible hack!
+            return $ foldr (\(t, l) acc -> PLocated l (PSigma (MaybeQty (Just t.qty)) t.name t.ty q acc)) ret ns
         )
 
 -- | Parse an application.
@@ -527,7 +532,7 @@ lets = curlies $ do
     reservedOp "="
     t <- term
     reservedOp ";"
-    return (fromMaybe Many q, v, ty, t)
+    return (q, v, ty, t)
   ret <- term
   return $
     foldr

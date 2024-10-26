@@ -10,7 +10,7 @@ module Elaboration
   )
 where
 
-import Accounting (Acc, Account (account))
+import Accounting (Acc, Account (runAccount))
 import Common
   ( Arg (..),
     CtorGlobal (..),
@@ -56,7 +56,7 @@ import Presyntax
     pGatherApps,
     pGatherPis,
     pLams,
-    toPSpine,
+    toPSpine, MaybeQty (..),
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
@@ -153,7 +153,7 @@ elab p mode = case (p, mode) of
   (PUnit, md) -> elab (pKnownCtor KnownTt []) md
   (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md -- @@Todo: sigma
   (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
-  (PLet q x a t u, md) -> do
+  (PLet (MaybeQty q) x a t u, md) -> do
     case patAsVar x of
       Left x' -> letIn md q x' (elab a) (elab t) (elab u)
       Right p' -> do
@@ -181,7 +181,12 @@ elab p mode = case (p, mode) of
     let (s, sp) = toPSpine p
     app (elab s) (mapSpine elab sp)
   (PU, Infer) -> univ
-  (PPi m q x a b, Infer) -> do
+  (PPi m (MaybeQty mq) x a b, Infer) -> do
+    let q = case (mq, m) of
+          (Just q', _) -> q'
+          (Nothing, Implicit) -> Zero
+          (Nothing, Explicit) -> Many
+          (Nothing, Instance) -> Many
     -- If something ends in Type or equals, we use rig zero
     let q' = defaultQty a q `times` defaultQty b q
     piTy m q' x (elab a) (elab b)
@@ -210,10 +215,10 @@ defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of
 
 elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
-  defItem def.qty def.name def.tags (elab def.ty) (elab def.tm)
+  defItem def.qty.un def.name def.tags (elab def.ty) (elab def.tm)
   ensureAllProblemsSolved
   di <- access (getDefGlobal (DefGlobal def.name))
-  account di
+  runAccount di
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
 elabCtor dat ctor = ctorItem dat ctor.name ctor.tags (elab ctor.ty)
@@ -229,14 +234,14 @@ elabData dat = do
   endDataItem d
   ensureAllProblemsSolved
   di <- access (getDataGlobal (DataGlobal dat.name))
-  account di
+  runAccount di
 
 elabPrim :: (Elab m) => PPrim -> m ()
 elabPrim prim = do
-  primItem prim.name prim.qty prim.tags (elab prim.ty)
+  primItem prim.name prim.qty.un prim.tags (elab prim.ty)
   ensureAllProblemsSolved
   pr <- access (getPrimGlobal (PrimGlobal prim.name))
-  account pr
+  runAccount pr
 
 ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =
@@ -281,7 +286,7 @@ elabDataRep r = do
 elabAndAccount :: (Elab m) => PTm -> Mode -> m (STm, VTy)
 elabAndAccount t md = do
   (t', ty) <- elab t md
-  account t'
+  runAccount t'
   return (t', ty)
 
 elabCtorRep :: (Elab m) => Tel STy -> PCtorRep -> m ()

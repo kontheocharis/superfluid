@@ -54,7 +54,7 @@ import Globals
     getGlobalTags,
   )
 import Meta (lookupMetaVar, lookupMetaVarName, lookupMetaVarQty)
-import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp)
+import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, MaybeQty (..))
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (..),
@@ -118,9 +118,9 @@ unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns
 
 unelab :: (Unelab m) => [Name] -> STm -> m PTm
 unelab ns = \case
-  (SPi m q x a b) -> PPi m q x <$> unelab ns a <*> unelab (x : ns) b
+  (SPi m q x a b) -> PPi m (MaybeQty (Just q)) x <$> unelab ns a <*> unelab (x : ns) b
   (SLam m _ x t) -> PLam m (PName x) <$> unelab (x : ns) t
-  (SLet q x ty t u) -> PLet q (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
+  (SLet q x ty t u) -> PLet (MaybeQty (Just q)) (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
   (SMeta m bs) -> do
     (t, ts) <- unelabMeta ns m bs
     return $ pApp t ts
@@ -193,12 +193,12 @@ unelabSig = do
     unelabDef n d ts = do
       ty' <- unelabValue [] d.ty
       body' <- traverse (unelab []) d.tm
-      return $ MkPDef n d.qty ty' (fromMaybe PWild body') ts
+      return $ MkPDef n (MaybeQty (Just d.qty)) ty' (fromMaybe PWild body') ts
 
     unelabPrim :: (Unelab m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
     unelabPrim n p ts = do
       ty' <- unelabValue [] p.ty
-      return $ MkPPrim n p.qty ty' ts
+      return $ MkPPrim n (MaybeQty (Just p.qty)) ty' ts
 
     unelabSig' :: (Unelab m) => Sig -> m PProgram
     unelabSig' s =

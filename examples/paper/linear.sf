@@ -1,0 +1,6 @@
+
+
+def 1 duplicate : [T : Type] -> 1 T -> 1 T -> (T * T) {
+  \t u => (t, u)
+}
+

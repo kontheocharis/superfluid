@@ -1,8 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Common
   ( Name (..),
@@ -11,6 +11,7 @@ module Common
     pattern Possible,
     pattern Impossible,
     Lit (..),
+    Parent (..),
     Times (..),
     inc,
     inv,
@@ -53,10 +54,13 @@ module Common
     spineValues,
     idxToLvl,
     enterLoc,
+    minus,
   )
 where
 
 import Control.Monad ((>=>))
+import Control.Monad.State (MonadState (..), gets)
+import Control.Monad.Trans (MonadTrans (..))
 import Data.Bifoldable (Bifoldable (..))
 import Data.Bifunctor (Bifunctor (..))
 import Data.Bitraversable (Bitraversable (..))
@@ -70,7 +74,6 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
-import Control.Monad.Trans (MonadTrans(..))
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -137,18 +140,21 @@ composeZM 0 _ _ = return
 composeZM n f g = if n > 0 then f >=> composeZM (n - 1) f g else g >=> composeZM (n + 1) f g
 
 -- | A quantity
-data Qty = Zero | Many deriving (Eq)
+data Qty = Zero | One | Many deriving (Eq)
 
 instance Show Qty where
   show Zero = "0 "
-  -- show One = "1 "
+  show One = "1 "
   show Many = ""
 
 instance Ord Qty where
   compare Zero Zero = EQ
-  compare Zero Many = LT
-  compare Many Zero = GT
+  compare Zero _ = LT
+  compare One Zero = GT
+  compare One One = EQ
+  compare One Many = LT
   compare Many Many = EQ
+  compare Many _ = GT
 
 instance Semiring Qty where
   one = Many
@@ -156,12 +162,24 @@ instance Semiring Qty where
 
   times Zero _ = Zero
   times _ Zero = Zero
-  -- times One One = One
+  times One One = One
   times _ _ = Many
 
   plus Zero n = n
   plus n Zero = n
+  plus One One = Many
   plus _ _ = Many
+
+-- Don't be fooled, a + b = c !=> b = c - a
+minus :: Qty -> Qty -> Maybe Qty
+minus Zero Zero = Just Zero
+minus Zero _ = Nothing
+minus Many Zero = Just Many
+minus Many Many = Just Many
+minus One One = Just Zero
+minus One Many = Nothing
+minus One Zero = Just One
+minus Many One = Just Many
 
 -- | An amount of times to do something, which might be infinite.
 newtype Times = Finite Int deriving (Eq, Ord, Show)
@@ -347,6 +365,10 @@ class Try m where
   type E m :: Type
   try :: m a -> m (Either (E m) a)
   giveUp :: E m -> m a
+
+class Parent m where
+  -- Run a child computation, don't remember any state changes
+  child :: m a -> m a
 
 -- Printing
 
