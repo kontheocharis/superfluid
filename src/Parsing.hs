@@ -482,7 +482,8 @@ qty =
   MaybeQty
     <$> ( try (reservedOp "0" >> return (Just Zero))
             <|> try (reservedOp "1" >> return (Just One))
-            <|> try (reservedOp "*" >> return (Just Many))
+            <|> try (reservedOp "!" >> return (Just Many))
+            <|> try (reservedOp "&" >> return (Just View))
             <|> return Nothing
         )
 

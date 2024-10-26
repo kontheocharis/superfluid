@@ -23,4 +23,12 @@ def 1 lin-map : [A : Type] -> (1 A -> A) -> 1 LinList A -> LinList A {
   }
 }
 
-
+def 1 lin-length : [A : Type] -> 1 LinList A -> LinPair (LinList A) Nat {
+  \l => case l {
+    lnil => lpair lnil 0,
+    lcons x xs => {
+      let (lpair xs' n) = lin-length xs;
+      lpair (lcons x xs') (s n)
+    }
+  }
+}

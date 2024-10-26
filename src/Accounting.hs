@@ -100,6 +100,7 @@ instance (HasProjectFiles m, Acc m) => Pretty m AccError where
                 Zero -> "zero"
                 One -> "one"
                 Many -> "many"
+                View -> "view"
           return $ "Quantity mismatch: got " ++ showQty q1 ++ " of term " ++ t' ++ ", but " ++ showQty q2 ++ " requested."
 
 class Account a where

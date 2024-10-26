@@ -140,21 +140,13 @@ composeZM 0 _ _ = return
 composeZM n f g = if n > 0 then f >=> composeZM (n - 1) f g else g >=> composeZM (n + 1) f g
 
 -- | A quantity
-data Qty = Zero | One | Many deriving (Eq)
+data Qty = Zero | One | View | Many deriving (Eq, Ord)
 
 instance Show Qty where
   show Zero = "0 "
   show One = "1 "
-  show Many = "* "
-
-instance Ord Qty where
-  compare Zero Zero = EQ
-  compare Zero _ = LT
-  compare One Zero = GT
-  compare One One = EQ
-  compare One Many = LT
-  compare Many Many = EQ
-  compare Many _ = GT
+  show View = "& "
+  show Many = "! "
 
 instance Semiring Qty where
   one = Many
@@ -162,24 +154,34 @@ instance Semiring Qty where
 
   times Zero _ = Zero
   times _ Zero = Zero
-  times One One = One
-  times _ _ = Many
+  times View _ = View
+  times _ View = View
+  times One _ = One
+  times _ One = View
+  times Many Many = Many
 
   plus Zero n = n
   plus n Zero = n
-  plus One One = Many
+  plus One One = One
+  plus One View = One
+  plus View One = One
+  plus View View = View
   plus _ _ = Many
 
 -- Don't be fooled, a + b = c !=> b = c - a
 minus :: Qty -> Qty -> Maybe Qty
 minus Zero Zero = Just Zero
 minus Zero _ = Nothing
-minus Many Zero = Just Many
-minus Many Many = Just Many
+minus Many _ = Just Many
+minus One Zero = Just One
+minus One View = Just One
 minus One One = Just Zero
 minus One Many = Nothing
-minus One Zero = Just One
-minus Many One = Just Many
+minus View Zero = Just View
+minus View View = Just View
+minus View One = Nothing
+minus View Many = Nothing
+
 
 -- | An amount of times to do something, which might be infinite.
 newtype Times = Finite Int deriving (Eq, Ord, Show)

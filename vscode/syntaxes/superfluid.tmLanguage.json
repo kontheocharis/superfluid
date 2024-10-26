@@ -12,7 +12,7 @@
     },
     {
       "name": "keyword.operator.superfluid",
-      "match": "=>|->|:|\\*|;|=|\\\\"
+      "match": "=>|->|:|\\*|&|!|;|=|\\\\"
     },
     {
       "name": "constant.numeric.superfluid",
