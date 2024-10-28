@@ -716,26 +716,6 @@ ensureDataAndGetWide ssTy f = do
     )
     f
 
-caseSubject :: Child m -> m (STm, VTy)
-caseSubject s = s Infer
-  -- case sRes of
-  --   Right r -> return r
-  --   Left e -> do
-  --     (ss, ssTy) <- expect Zero $ s Infer
-  --     l <- getLvl
-  --     ifIsData
-  --       l
-  --       ssTy
-  --       ( \d _ -> do
-  --           i <- access (dataIsIrrelevant d)
-  --           if i
-  --             then
-  --               return ()
-  --             else giveUp e
-  --       )
-  --       (return ()) -- Handled later
-  --     return (ss, ssTy)
-
 caseOf :: (Tc m) => Mode -> Child m -> Maybe (Child m) -> [Clause (Child m) (Child m)] -> m (STm, VTy)
 caseOf mode s r cs = do
   forbidPat
@@ -745,7 +725,7 @@ caseOf mode s r cs = do
       retTy <- freshMeta q >>= evalHere
       caseOf (Check retTy) s r cs
     Check ty -> do
-      (ss, ssTy) <- caseSubject s
+      (ss, ssTy) <- s Infer
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
 
       di <- access (getDataGlobal d)
@@ -1380,7 +1360,6 @@ unifyForced t1 t2 = case (t1, t2) of
   (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
   (VNeu (VUnrepr c1, sp1), VNeu (VUnrepr c2, sp2)) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
   (_, VNeu (VUnrepr _, _)) -> do
-    --- we actually need something more in the system to prove this??
     rt1 <- reprHere 1 t1
     rt2 <- reprHere 1 t2
     unify rt1 rt2

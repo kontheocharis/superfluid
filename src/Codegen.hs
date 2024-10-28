@@ -23,10 +23,8 @@ import Common
     mapSpineM,
     spineValues,
     unName,
-    pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (replicateM, zipWithM)
 import Control.Monad.Extra (when)
 import Data.Foldable (toList)
 import Data.List (intercalate)
