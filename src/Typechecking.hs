@@ -86,7 +86,7 @@ import Common
     pattern Possible,
   )
 import Context
-import Control.Applicative (Alternative (empty), (<**>))
+import Control.Applicative (Alternative (empty), (<**>), (<|>))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
@@ -1432,29 +1432,7 @@ unifyLit l1 l2 = case (l1, l2) of
 
 -- Pattern matching
 
--- data Rhs = Give Closure | Refuse Lvl
-
--- type Lhs = [VPatB]
-
 data Pat = WildP | VarP Name | CtorP CtorGlobal (Spine Pat)
-
--- data Header = Header
---   { ctx :: Tel VTy,
---     lhs :: Lhs
---   }
-
--- data Computation = Computation
---   { header :: Header,
---     rhs :: Rhs
---   }
-
--- data Splitting = Splitting
---   { header :: Header,
---     at :: Lvl,
---     children :: [CaseTree]
---   }
-
--- data C = Children
 
 data CaseTree = Body STm | Bind Qty Name VTy CaseTree | Split Idx DataGlobal [CaseTree] | Refute Idx
 
@@ -1468,17 +1446,6 @@ data Constraint = Constraint {tm :: VTm, pat :: Pat, ty :: VTy}
 --     telBinds' i (Param _ q n _ :<| ts) = do
 --       ps <- telBinds' (i + 1) ts
 --       return $ VPatB (VV (Lvl i)) [(q, n)] : ps
-
--- Important: clause is non-empty!
-extractFirstPat :: Tel STy -> Clause [p] t -> Either t ((Param STy, p), (Tel STy, Clause [p] t))
-extractFirstPat (u :<| us) (Clause (p : ps) t) = Right ((u, p), (us, Clause ps t))
-extractFirstPat Empty (Clause [] (Just t)) = Left t
-extractFirstPat _ (Clause [] Nothing) = error "extractFirstPat: impossible clause with no patterns"
-
-extractFirstPats :: Tel STy -> [Clause [p] t] -> Either t ((Param STy, [p]), (Tel STy, [Clause [p] t]))
-extractFirstPats params cs = case mapM (extractFirstPat params) cs of
-  Left t -> Left t
-  Right ps -> undefined -- TODO
 
 data Lhs = Lhs
   { elims :: [Pat],
@@ -1504,11 +1471,21 @@ instance (Has m Ctx) => Has (MatchT m) Ctx where
 
 data PatternError = ExpectedPi VTy | ExpectedApp | NonExhaustive | NotImpossible
 
-match :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
-match = undefined
+type MatchTactic m = MatchState m -> MatchT m (Maybe CaseTree)
 
-matchIntro :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
-matchIntro s = do
+match :: (Tc m) => MatchTactic m
+match = tackle [matchBind, matchDone, matchSplit]
+  where
+    tackle :: (Tc m) => [MatchTactic m] -> MatchTactic m
+    tackle [] _ = return Nothing
+    tackle (t : ts) s = do
+      res <- t s
+      case res of
+        Just t' -> return $ Just t'
+        Nothing -> tackle ts s
+
+matchBind :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchBind s = do
   ty' <- lift $ unfoldHere s.ty
   case ty' of
     VNorm (VPi m q x a b) -> binder x q a $ \l -> do
@@ -1534,6 +1511,9 @@ matchDone s = do
       -- first match semantics
       (t', _) <- lift $ t (Check s.ty)
       return . Just $ Body t'
+
+matchSplit :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchSplit = undefined
 
 -- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
 
