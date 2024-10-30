@@ -37,12 +37,14 @@ import Presyntax
     PDefRep (MkPDefRep),
     PItem (..),
     PPat,
+    PPats (..),
     PPrim (MkPPrim),
     PProgram (..),
     PTm (..),
     PTy,
     pApp,
-    tagged, un,
+    tagged,
+    un,
   )
 import Printing (Pretty (..))
 import Text.Parsec
@@ -333,8 +335,19 @@ defItem = do
   reserved "def"
   q <- qty
   (name, ty) <- defSig
-  t <- lets
+  t <-
+    try (curlies $ commaSep clause)
+      <|> ( do
+              t <- lets
+              return [Clause (PPats []) (Just t)]
+          )
   return $ MkPDef name q (fromMaybe PWild ty) t mempty
+
+clause :: Parser (Clause PPats PTm)
+clause = do
+  ps <- many1 singlePat <* reservedOp "=>"
+  t' <- (try (reserved "impossible") >> return Nothing) <|> Just <$> term
+  return $ Clause (PPats ps) t'
 
 -- | Parse the type signature of a declaration.
 defSig :: Parser (Name, Maybe PTy)

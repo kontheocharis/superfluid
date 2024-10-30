@@ -1,9 +1,13 @@
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use newtype instead of data" #-}
 
 module Presyntax
   ( PTy,
     PPat,
     Tag,
+    PPats (..),
     PDef (..),
     PCtor (..),
     PData (..),
@@ -22,6 +26,8 @@ module Presyntax
     pGatherPis,
     pLams,
     toPSpine,
+    clausesAreSingleTerm,
+    singleTermClause,
   )
 where
 
@@ -50,21 +56,31 @@ type PTy = PTm
 
 type PPat = PTm
 
-newtype MaybeQty = MaybeQty { un :: Maybe Qty }
+newtype MaybeQty = MaybeQty {un :: Maybe Qty}
   deriving (Eq)
 
 instance Show MaybeQty where
   show (MaybeQty Nothing) = ""
   show (MaybeQty (Just q)) = show q
 
+data PPats = PPats [PPat]
+  deriving (Eq, Show)
+
 data PDef = MkPDef
   { name :: Name,
     qty :: MaybeQty,
     ty :: PTy,
-    tm :: PTm,
+    clauses :: [Clause PPats PTm],
     tags :: Set Tag
   }
   deriving (Eq, Show)
+
+clausesAreSingleTerm :: [Clause PPats PTm] -> Maybe PTm
+clausesAreSingleTerm [Clause (PPats []) (Just t)] = Just t
+clausesAreSingleTerm _ = Nothing
+
+singleTermClause :: PTm -> Clause PPats PTm
+singleTermClause t = Clause (PPats []) (Just t)
 
 tagged :: Set Tag -> PItem -> PItem
 tagged ts (PData d) = PData $ d {tags = ts}
@@ -143,10 +159,10 @@ data PItem
 newtype PProgram = PProgram [PItem] deriving (Eq, Show)
 
 data PTm
-  = PPi PiMode (MaybeQty) Name PTy PTy
-  | PSigma (MaybeQty) Name PTy (MaybeQty) PTy
+  = PPi PiMode MaybeQty Name PTy PTy
+  | PSigma MaybeQty Name PTy MaybeQty PTy
   | PLam PiMode PPat PTm
-  | PLet (MaybeQty) PPat PTy PTm PTm
+  | PLet MaybeQty PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
@@ -347,12 +363,17 @@ instance (Monad m) => Pretty m PData where
 instance (Monad m) => Pretty m (Tel PTy) where
   pretty ps = intercalate " " <$> mapM pretty (toList ps)
 
+instance (Monad m) => Pretty m PPats where
+  pretty (PPats ps) = intercalate " " <$> mapM singlePretty ps
+
 instance (Monad m) => Pretty m PDef where
-  pretty (MkPDef n q ty tm ts) = do
+  pretty (MkPDef n q ty cls ts) = do
     pts <- pretty ts
     pn <- pretty n
     pty <- pretty ty
-    ptm <- prettyLets (pLetToList tm)
+    ptm <- case clausesAreSingleTerm cls of
+      Just t -> prettyLets (pLetToList t)
+      Nothing -> curlies <$> pretty cls
     return $ pts ++ "def " ++ show q ++ pn ++ " : " ++ pty ++ " " ++ ptm
 
 instance (Monad m) => Pretty m PPrim where

@@ -54,7 +54,7 @@ import Globals
     getGlobalTags,
   )
 import Meta (lookupMetaVar, lookupMetaVarName, lookupMetaVarQty)
-import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, MaybeQty (..))
+import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, MaybeQty (..), singleTermClause)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (..),
@@ -193,7 +193,7 @@ unelabSig = do
     unelabDef n d ts = do
       ty' <- unelabValue [] d.ty
       body' <- traverse (unelab []) d.tm
-      return $ MkPDef n (MaybeQty (Just d.qty)) ty' (fromMaybe PWild body') ts
+      return $ MkPDef n (MaybeQty (Just d.qty)) ty' [singleTermClause (fromMaybe PWild body')] ts
 
     unelabPrim :: (Unelab m) => Name -> PrimGlobalInfo -> Set Tag -> m PPrim
     unelabPrim n p ts = do
