@@ -47,6 +47,7 @@ module Syntax
     vGetSpine,
     pattern VVar,
     pattern VMeta,
+    pattern VV,
   )
 where
 
@@ -222,6 +223,9 @@ vGetSpine _ = Empty
 
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = (VRigid l, Empty)
+
+pattern VV :: Lvl -> VTm
+pattern VV l = VNeu (VRigid l, Empty)
 
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = (VFlex m, Empty)

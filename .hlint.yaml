@@ -55,6 +55,7 @@
 - ignore: { name: Use <$> }
 - ignore: { name: Use unwords }
 - ignore: { name: Use >=> }
+- ignore: { name: Fuse foldr/map }
 # Define some custom infix operators
 # - fixity: infixr 3 ~^#^~
 

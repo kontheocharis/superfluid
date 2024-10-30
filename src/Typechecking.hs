@@ -88,7 +88,7 @@ import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Extra (when, fromMaybeM)
+import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
@@ -156,6 +156,7 @@ import Syntax
     VNeu,
     VNeuHead (..),
     VNorm (..),
+    VPat,
     VPatB (..),
     VTm (..),
     VTy,
@@ -169,6 +170,7 @@ import Syntax
     sPis,
     uniqueSLams,
     vGetSpine,
+    pattern VV,
     pattern VVar,
   )
 import Unelaboration (Unelab)
@@ -1423,3 +1425,68 @@ unifyLit l1 l2 = case (l1, l2) of
   (NatLit x, NatLit y) | x == y -> return Yes
   (FinLit d n, FinLit d' n') | d == d' -> unify n n'
   _ -> return $ No [Mismatching (VLazy (VLit l1, Empty)) (VLazy (VLit l2, Empty))]
+
+-- Pattern matching
+
+-- data Rhs = Give Closure | Refuse Lvl
+
+type Lhs = [VPatB]
+
+-- data Header = Header
+--   { ctx :: Tel VTy,
+--     lhs :: Lhs
+--   }
+
+-- data Computation = Computation
+--   { header :: Header,
+--     rhs :: Rhs
+--   }
+
+-- data Splitting = Splitting
+--   { header :: Header,
+--     at :: Lvl,
+--     children :: [CaseTree]
+--   }
+
+-- data C = Children
+
+data CaseTree = Body Closure | Bind Qty Name CaseTree | Split Lvl DataGlobal [CaseTree] | Refute Lvl
+
+telBinds :: (Tc m) => Tel a -> m Lhs
+telBinds = telBinds' 0
+  where
+    telBinds' :: (Tc m) => Int -> Tel a -> m Lhs
+    telBinds' _ Empty = return []
+    telBinds' i (Param _ q n _ :<| ts) = do
+      ps <- telBinds' (i + 1) ts
+      return $ VPatB (VV (Lvl i)) [(q, n)] : ps
+
+-- Important: clause is non-empty!
+extractFirstPat :: Tel STy -> Clause [p] t -> Either t ((Param STy, p), (Tel STy, Clause [p] t))
+extractFirstPat (u :<| us) (Clause (p : ps) t) = Right ((u, p), (us, Clause ps t))
+extractFirstPat Empty (Clause [] (Just t)) = Left t
+extractFirstPat _ (Clause [] Nothing) = error "extractFirstPat: impossible clause with no patterns"
+
+extractFirstPats :: Tel STy -> [Clause [p] t] -> Either t ((Param STy, [p]), (Tel STy, [Clause [p] t]))
+extractFirstPats params cs = case mapM (extractFirstPat params) cs of
+  Left t -> Left t
+  Right ps -> undefined -- TODO
+
+buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
+buildCaseTree params ret cls = do
+  bs <- telBinds params
+  case extractFirstPats params cls of
+    Left t -> return $ Body t
+    Right ((u, ps), (us, cls')) -> do
+      let psAreVars = all (\case VPatB (VV _) _ -> True; _ -> False) ps
+      if psAreVars
+        then do
+          vty <- evalHere u.ty
+          rest <- enterCtx (bind u.name u.qty vty) $ buildCaseTree us ret cls' -- need to apply to types!
+          return $ Bind u.qty u.name rest
+        else do
+          -- Here we need to add a Bind, then an immediate split where we unify
+          -- each pattern with (ci t) such that we end up with a bunch of
+          -- substitutions, one for each constructor. then recurse
+
+          return undefined
