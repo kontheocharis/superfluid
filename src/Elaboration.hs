@@ -239,7 +239,7 @@ defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of
 
 elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
-  defItem def.qty.un def.name def.tags (elab def.ty) (elab def.tm)
+  defItem def.qty.un def.name def.tags (elab def.ty) (elab PWild) -- @@Todo
   ensureAllProblemsSolved
   di <- access (getDefGlobal (DefGlobal def.name))
   runAccount di

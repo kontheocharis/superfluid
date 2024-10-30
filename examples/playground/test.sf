@@ -1,3 +1,47 @@
-def main : IO () {
-  
+
+-- mutual {
+--   data Tel : Type {
+--     0 empty : Tel,
+--     0 with : (0 T : Tel) -> (0 P : El T -> Type) -> Tel
+--   }
+
+--   def 0 El : Tel -> Type {
+--     \case {
+--       empty => (),
+--       with T P => (x : El T) * El (P x)
+--     }
+--   }
+
+--   def 0 size : Tel -> Nat {
+--     \case {
+--       empty => z,
+--       with T _ => s (size T)
+--     }
+--   }
+
+--   def 0 AtT : (0 T : Tel) -> (i : Fin (size T)) -> Type {
+--     \T i => case (T, i) of {
+--       (empty, _) => impossible,
+--       (with T P, fz) => El T -> Type,
+--       (with T P, fs i') => AtT T i'
+--     }
+--   }
+-- }
+
+def add : Nat -> Nat -> Nat {
+  z a => a,
+  (s n) b => s (add n b)
 }
+
+-- def 0 Tel : Type {
+--   Tel' (\[Tel''] => El [?h1])
+-- }
+
+
+-- def foo : Nat {
+--   foo
+-- }
+
+-- def main : IO () {
+--   a => b
+-- }
