@@ -92,6 +92,7 @@ import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.State (StateT)
 import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.Trans.Maybe (MaybeT)
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
@@ -177,7 +178,6 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
-import Control.Monad.Trans.Maybe (MaybeT)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1485,25 +1485,30 @@ data Lhs = Lhs
     constraints :: [Constraint]
   }
 
-data DefState m = DefState
+matches :: Lhs -> Bool
+matches (Lhs [] []) = True
+matches _ = False
+
+data MatchState m = DefState
   { def :: DefGlobal,
     elims :: (Spine VTm),
     ty :: VTy,
     cls :: [Clause Lhs (Child m)]
   }
 
-type PatternT m = ExceptT PatternError m
-instance (Has m Ctx) => Has (PatternT m) Ctx where
+type MatchT m = ExceptT PatternError m
+
+instance (Has m Ctx) => Has (MatchT m) Ctx where
   view = lift $ view
   modify f = lift $ modify f
 
-data PatternError = ExpectedPi VTy | ExpectedApp
+data PatternError = ExpectedPi VTy | ExpectedApp | NonExhaustive | NotImpossible
 
-buildCaseTree :: (Tc m) => DefState m -> PatternT m (Maybe CaseTree)
-buildCaseTree = undefined
+match :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+match = undefined
 
-intro :: (Tc m) => DefState m -> PatternT m (Maybe CaseTree)
-intro s = do
+matchIntro :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchIntro s = do
   ty' <- lift $ unfoldHere s.ty
   case ty' of
     VNorm (VPi m q x a b) -> binder x q a $ \l -> do
@@ -1515,10 +1520,20 @@ intro s = do
               Clause (Lhs [] _) _ -> throwError ExpectedApp
           )
           s.cls
-      rest <- buildCaseTree (s {ty = b', cls = cls', elims = s.elims :|> Arg m q (VV l) })
+      rest <- match (s {ty = b', cls = cls', elims = s.elims :|> Arg m q (VV l)})
       return $ Bind q x a <$> rest
     _ -> return Nothing
 
+matchDone :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchDone s = do
+  case s.cls of
+    (c : _) | not $ matches c.pat -> return Nothing
+    [] -> throwError NonExhaustive
+    (Impossible _ : _) -> throwError NotImpossible
+    (Possible _ t : _) -> do
+      -- first match semantics
+      (t', _) <- lift $ t (Check s.ty)
+      return . Just $ Body t'
 
 -- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
 
