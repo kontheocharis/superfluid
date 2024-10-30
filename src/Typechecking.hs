@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QuantifiedConstraints #-}
@@ -85,10 +86,11 @@ import Common
     pattern Possible,
   )
 import Context
-import Control.Applicative (Alternative (empty))
+import Control.Applicative (Alternative (empty), (<**>))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
+import Control.Monad.State (StateT)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
@@ -141,6 +143,7 @@ import Globals
     modifyDefItem,
   )
 import Meta (freshMetaVar, solveMetaVar)
+import Presyntax (PTm)
 import Printing (Pretty (..), indentedFst)
 import Syntax
   ( Case (..),
@@ -174,6 +177,7 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
+import Control.Monad.Trans.Maybe (MaybeT)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1430,7 +1434,9 @@ unifyLit l1 l2 = case (l1, l2) of
 
 -- data Rhs = Give Closure | Refuse Lvl
 
-type Lhs = [VPatB]
+-- type Lhs = [VPatB]
+
+data Pat = WildP | VarP Name | CtorP CtorGlobal (Spine Pat)
 
 -- data Header = Header
 --   { ctx :: Tel VTy,
@@ -1450,16 +1456,18 @@ type Lhs = [VPatB]
 
 -- data C = Children
 
-data CaseTree = Body Closure | Bind Qty Name CaseTree | Split Lvl DataGlobal [CaseTree] | Refute Lvl
+data CaseTree = Body STm | Bind Qty Name VTy CaseTree | Split Idx DataGlobal [CaseTree] | Refute Idx
 
-telBinds :: (Tc m) => Tel a -> m Lhs
-telBinds = telBinds' 0
-  where
-    telBinds' :: (Tc m) => Int -> Tel a -> m Lhs
-    telBinds' _ Empty = return []
-    telBinds' i (Param _ q n _ :<| ts) = do
-      ps <- telBinds' (i + 1) ts
-      return $ VPatB (VV (Lvl i)) [(q, n)] : ps
+data Constraint = Constraint {tm :: VTm, pat :: Pat, ty :: VTy}
+
+-- telBinds :: (Tc m) => Tel a -> m Lhs
+-- telBinds = telBinds' 0
+--   where
+--     telBinds' :: (Tc m) => Int -> Tel a -> m Lhs
+--     telBinds' _ Empty = return []
+--     telBinds' i (Param _ q n _ :<| ts) = do
+--       ps <- telBinds' (i + 1) ts
+--       return $ VPatB (VV (Lvl i)) [(q, n)] : ps
 
 -- Important: clause is non-empty!
 extractFirstPat :: Tel STy -> Clause [p] t -> Either t ((Param STy, p), (Tel STy, Clause [p] t))
@@ -1472,21 +1480,65 @@ extractFirstPats params cs = case mapM (extractFirstPat params) cs of
   Left t -> Left t
   Right ps -> undefined -- TODO
 
-buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
-buildCaseTree params ret cls = do
-  bs <- telBinds params
-  case extractFirstPats params cls of
-    Left t -> return $ Body t
-    Right ((u, ps), (us, cls')) -> do
-      let psAreVars = all (\case VPatB (VV _) _ -> True; _ -> False) ps
-      if psAreVars
-        then do
-          vty <- evalHere u.ty
-          rest <- enterCtx (bind u.name u.qty vty) $ buildCaseTree us ret cls' -- need to apply to types!
-          return $ Bind u.qty u.name rest
-        else do
-          -- Here we need to add a Bind, then an immediate split where we unify
-          -- each pattern with (ci t) such that we end up with a bunch of
-          -- substitutions, one for each constructor. then recurse
+data Lhs = Lhs
+  { elims :: [Pat],
+    constraints :: [Constraint]
+  }
 
-          return undefined
+data DefState m = DefState
+  { def :: DefGlobal,
+    elims :: (Spine VTm),
+    ty :: VTy,
+    cls :: [Clause Lhs (Child m)]
+  }
+
+type PatternT m = ExceptT PatternError m
+instance (Has m Ctx) => Has (PatternT m) Ctx where
+  view = lift $ view
+  modify f = lift $ modify f
+
+data PatternError = ExpectedPi VTy | ExpectedApp
+
+buildCaseTree :: (Tc m) => DefState m -> PatternT m (Maybe CaseTree)
+buildCaseTree = undefined
+
+intro :: (Tc m) => DefState m -> PatternT m (Maybe CaseTree)
+intro s = do
+  ty' <- lift $ unfoldHere s.ty
+  case ty' of
+    VNorm (VPi m q x a b) -> binder x q a $ \l -> do
+      b' <- lift $ b $$ [VV l]
+      cls' <-
+        mapM
+          ( \case
+              Clause (Lhs (p : ps) cs) t -> return $ Clause (Lhs ps (cs ++ [Constraint (VV l) p a])) t
+              Clause (Lhs [] _) _ -> throwError ExpectedApp
+          )
+          s.cls
+      rest <- buildCaseTree (s {ty = b', cls = cls', elims = s.elims :|> Arg m q (VV l) })
+      return $ Bind q x a <$> rest
+    _ -> return Nothing
+
+
+-- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
+
+-- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
+-- buildCaseTree params ret cls = do
+--   bs <- telBinds params
+--   case extractFirstPats params cls of
+--     Left t -> return $ Body t
+--     Right ((u, ps), (us, cls')) -> do
+--       let psAreVars = all (\case VPatB (VV _) _ -> True; _ -> False) ps
+--       if psAreVars
+--         then do
+--           vty <- evalHere u.ty
+--           rest <- enterCtx (bind u.name u.qty vty) $ buildCaseTree us ret cls' -- need to apply to types!
+--           return $ Bind u.qty u.name rest
+--         else do
+--           -- Here we need to add a Bind, then an immediate split where we unify
+--           -- each pattern with (ci t) such that we end up with a bunch of
+--           -- substitutions, one for each constructor. then recurse
+
+--           return undefined
+
+-- if we are at a pi and the first clause's first pattern is a constructor or variable,

@@ -30,6 +30,7 @@ module Context
     enterTel,
     evalInOwnCtxHere,
     setCtxEntryQty,
+    binder,
   )
 where
 
@@ -259,3 +260,8 @@ evalInOwnCtxHere :: (Eval m, Has m Ctx) => Closure -> m VTm
 evalInOwnCtxHere t = do
   l <- accessCtx (\c -> c.lvl)
   evalInOwnCtx l t
+
+binder :: (Has m Ctx) => Name -> Qty -> VTy -> (Lvl -> m a) -> m a
+binder x q t f = do
+  l <- accessCtx (\c -> c.lvl)
+  enterCtx (bind x q t) $ f l
