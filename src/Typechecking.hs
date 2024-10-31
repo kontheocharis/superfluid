@@ -93,7 +93,7 @@ import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.State (StateT)
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Maybe (MaybeT)
-import Data.Foldable (Foldable (..), toList)
+import Data.Foldable (Foldable (..), find, toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Maybe (fromJust, fromMaybe)
@@ -1438,6 +1438,31 @@ data CaseTree = Body STm | Bind Qty Name VTy CaseTree | Split Idx DataGlobal [Ca
 
 data Constraint = Constraint {tm :: VTm, pat :: Pat, ty :: VTy}
 
+type Con = Tel STy
+
+-- getName :: Name -> Con -> Maybe (Param VTy)
+-- getName n = find (\p -> n == p.name)
+
+-- patTy :: (HasNameSupply m) => Con -> Pat -> m (Con, VTy)
+-- patTy c WildP = (c :|> Param Explicit Many (Name "_") SU, SU)
+
+-- patToVTm :: (HasNameSupply m, Has m Sig) => Con -> Pat -> Qty -> VTy -> m (Con, VTm)
+-- patToVTm c WildP q ty = do
+--   sty <- quoteHere ty
+--   n <- uniqueName
+--   return
+--     ( c :|> Param Explicit q n sty,
+--       VNeu (VVar (Lvl (length c)))
+--     )
+-- patToVTm c (VarP n) q ty = do
+--   sty <- quoteHere ty
+--   return
+--     ( c :|> Param Explicit q n sty,
+--       VNeu (VVar (Lvl (length c)))
+--     )
+-- patToVTm c (CtorP ctor sp) q ty = do
+
+
 -- telBinds :: (Tc m) => Tel a -> m Lhs
 -- telBinds = telBinds' 0
 --   where
@@ -1449,12 +1474,12 @@ data Constraint = Constraint {tm :: VTm, pat :: Pat, ty :: VTy}
 
 data Lhs = Lhs
   { elims :: [Pat],
-    constraints :: [Constraint]
+    constr :: [Constraint]
   }
 
-matches :: Lhs -> Bool
-matches (Lhs [] []) = True
-matches _ = False
+matched :: Lhs -> Bool
+matched (Lhs [] []) = True
+matched _ = False
 
 data MatchState m = DefState
   { def :: DefGlobal,
@@ -1484,7 +1509,7 @@ match = tackle [matchBind, matchDone, matchSplit]
         Just t' -> return $ Just t'
         Nothing -> tackle ts s
 
-matchBind :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchBind :: (Tc m) => MatchTactic m
 matchBind s = do
   ty' <- lift $ unfoldHere s.ty
   case ty' of
@@ -1501,19 +1526,27 @@ matchBind s = do
       return $ Bind q x a <$> rest
     _ -> return Nothing
 
-matchDone :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
+matchDone :: (Tc m) => MatchTactic m
 matchDone s = do
   case s.cls of
-    (c : _) | not $ matches c.pat -> return Nothing
+    (c : _) | not $ matched c.pat -> return Nothing
     [] -> throwError NonExhaustive
-    (Impossible _ : _) -> throwError NotImpossible
+    (Impossible _ : _) -> throwError NotImpossible -- @@Review: This doesn't seem right
     (Possible _ t : _) -> do
       -- first match semantics
       (t', _) <- lift $ t (Check s.ty)
       return . Just $ Body t'
 
-matchSplit :: (Tc m) => MatchState m -> MatchT m (Maybe CaseTree)
-matchSplit = undefined
+matchSplit :: (Tc m) => MatchTactic m
+matchSplit s = do
+  case s.cls of
+    [] -> return Nothing
+    (Clause (Lhs {constr = []}) _ : _) -> return Nothing
+    (Clause (Lhs {constr = (c : cs)}) _ : ps) -> do
+      case c of
+        Constraint (VV l) (CtorP c _) ty -> return Nothing
+        Constraint (VV _) WildP ty -> return Nothing
+        Constraint (VV _) (VarP _) ty -> return Nothing
 
 -- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
 
