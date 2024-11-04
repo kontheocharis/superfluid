@@ -11,6 +11,7 @@ module Syntax
     sLams,
     sPis,
     Case (..),
+    VData,
     sGatherApps,
     sGatherPis,
     sGatherLams,
@@ -273,9 +274,9 @@ uniqueSLams ms t = do
   sp <- fromList <$> mapM (\(m, q) -> Param m q <$> uniqueName <*> return ()) ms
   return $ sLams sp t
 
-sLams :: Tel () -> STm -> STm
+sLams :: Tel a -> STm -> STm
 sLams Empty t = t
-sLams (Param m q x () :<| sp) t = SLam m q x (sLams sp t)
+sLams (Param m q x _ :<| sp) t = SLam m q x (sLams sp t)
 
 sGatherApps :: STm -> (STm, Spine STm)
 sGatherApps (SApp m q t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m q u)

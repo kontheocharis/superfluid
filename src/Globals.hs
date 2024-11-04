@@ -278,6 +278,8 @@ data KnownGlobal a where
   KnownJsIndex :: KnownGlobal PrimGlobal
   KnownAdd :: KnownGlobal DefGlobal
   KnownSub :: KnownGlobal DefGlobal
+  KnownHequal :: KnownGlobal DataGlobal
+  KnownHrefl :: KnownGlobal CtorGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -292,6 +294,7 @@ knownData KnownList = DataGlobal (Name "List")
 knownData KnownString = DataGlobal (Name "String")
 knownData KnownUnit = DataGlobal (Name "Unit")
 knownData KnownBool = DataGlobal (Name "Bool")
+knownData KnownHequal = DataGlobal (Name "HEqual")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -306,6 +309,7 @@ knownCtor KnownStr = CtorGlobal (Name "str")
 knownCtor KnownTt = CtorGlobal (Name "tt")
 knownCtor KnownTrue = CtorGlobal (Name "true")
 knownCtor KnownFalse = CtorGlobal (Name "false")
+knownCtor KnownHrefl = CtorGlobal (Name "hrefl")
 
 knownPrim :: KnownGlobal PrimGlobal -> PrimGlobal
 knownPrim KnownJsImpossible = PrimGlobal (Name "js-impossible")

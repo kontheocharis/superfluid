@@ -155,6 +155,7 @@ import Syntax
     STm (..),
     STy,
     Sub,
+    VData,
     VLazy,
     VLazyHead (..),
     VNeu,
@@ -171,6 +172,7 @@ import Syntax
     sGatherApps,
     sGatherLams,
     sGatherPis,
+    sLams,
     sPis,
     uniqueSLams,
     vGetSpine,
@@ -1432,11 +1434,15 @@ unifyLit l1 l2 = case (l1, l2) of
 
 -- Pattern matching
 
-data Pat = WildP | VarP Name | CtorP CtorGlobal (Spine Pat)
+-- data Pat = WildP | VarP Name | CtorP CtorGlobal (Spine Pat)
 
-data CaseTree = Body STm | Bind Qty Name VTy CaseTree | Split Idx DataGlobal [CaseTree] | Refute Idx
+data CaseTree
+  = Body STm
+  | Bind PiMode Qty Name VTy CaseTree
+  | Split Ctx (Tel STy) STy Lvl Qty DataGlobal (Spine VTm) [CaseTree]
+  | Refute  Idx
 
-data Constraint = Constraint {tm :: VTm, pat :: Pat, ty :: VTy}
+data Constraint = Constraint {lhs :: Spine VTm, rhs :: Spine VTm, lhsTy :: VTy, rhsTy :: VTy}
 
 type Con = Tel STy
 
@@ -1462,7 +1468,6 @@ type Con = Tel STy
 --     )
 -- patToVTm c (CtorP ctor sp) q ty = do
 
-
 -- telBinds :: (Tc m) => Tel a -> m Lhs
 -- telBinds = telBinds' 0
 --   where
@@ -1473,9 +1478,21 @@ type Con = Tel STy
 --       return $ VPatB (VV (Lvl i)) [(q, n)] : ps
 
 data Lhs = Lhs
-  { elims :: [Pat],
+  { elims :: [(VData, VPatB)],
     constr :: [Constraint]
   }
+
+data Pat = Pat {lvl :: Lvl, asTm :: STm}
+
+-- pattern CtorP :: (CtorGlobal, Spine STm) -> Spine STm -> STm
+-- pattern CtorP c sp = VNorm (VCtor (c, sp))
+
+-- pattern WildP :: VTm
+-- pattern WildP l <- Pat l (VNeu (VVar _)) where
+--   WildP l = Pat l (VNeu (VVar (Lvl 0)))
+
+-- pattern VarP :: Name -> Pat
+-- pattern VarP n = Pat l  (VV (Lvl 0))
 
 matched :: Lhs -> Bool
 matched (Lhs [] []) = True
@@ -1485,6 +1502,7 @@ data MatchState m = DefState
   { def :: DefGlobal,
     elims :: (Spine VTm),
     ty :: VTy,
+    patVars :: Ctx,
     cls :: [Clause Lhs (Child m)]
   }
 
@@ -1509,21 +1527,80 @@ match = tackle [matchBind, matchDone, matchSplit]
         Just t' -> return $ Just t'
         Nothing -> tackle ts s
 
+-- caseAnalysis :: DataGlobal -> Spine STy -> Tel STy -> STy -> Spine STm -> [STm] -> STm
+-- caseAnalysis d dParams del ty t m =
+--   sLams del . SCase $
+--     Case
+--       { dat = d,
+--         datParams = dParams,
+--         subject =
+--       }
+
+-- unifyConstraint : (δ γ : Tel Γ) -> exists (Γ' : Con) . Sub Γ' (Γ, δ ~ γ) + 1
+unifyConstraint :: (Tc m) => Constraint -> MatchT m Sub
+unifyConstraint (Constraint lhs rhs lhsTy rhsTy) = undefined
+
+-- specialise : [δ γ : Tel Γ] -> [Γ' : Con] -> [σ : Sub Γ' (Γ, δ ~ γ)] -> Tm Γ' (T σ) -> Tm Γ (Π (δ ~ γ) (wk T))
+specialise :: (Tc m) => STm -> MatchT m STm
+specialise = undefined
+
+data Elim = Elim
+
+-- basicAnalysis : (Ξ : Tel Γ) -> (e : Ξ-Elim n)
+--                  -> (Δ : Tel Γ) -> (T : Ty (Γ, Δ)) -> (t : Tms (Γ, Δ) Ξ)
+--                  -> Vec n (\i => Π (e.Δ(i), Δ, Ξ ~ t) T)
+--                  -> (Π Δ T)
+basicAnalysis :: Elim -> Tel STm -> STy -> Spine VTm -> [STm] -> STm
+basicAnalysis = undefined
+
+caseElim :: DataGlobal -> Elim
+caseElim = undefined
+
+resolveVars :: (Tc m) => Ctx -> VTm -> m VTm
+resolveVars = undefined
+
+treeToElims :: (Tc m) => CaseTree -> MatchT m STm
+treeToElims (Body t) = return t
+treeToElims (Bind m q x a t) = do
+  t' <- treeToElims t
+  return $ SLam m q x t'
+treeToElims (Split s te ty l q d sp ts) = do
+  ms <-
+    mapM
+      ( \t -> do
+          t' <- treeToElims t
+          return undefined
+          -- specialise s t'
+      )
+      ts
+  return $ basicAnalysis (caseElim d) te ty (sp :|> Arg Explicit q (VV l)) ms
+treeToElims (Refute i) = undefined
+
 matchBind :: (Tc m) => MatchTactic m
 matchBind s = do
   ty' <- lift $ unfoldHere s.ty
   case ty' of
     VNorm (VPi m q x a b) -> binder x q a $ \l -> do
-      b' <- lift $ b $$ [VV l]
-      cls' <-
-        mapM
-          ( \case
-              Clause (Lhs (p : ps) cs) t -> return $ Clause (Lhs ps (cs ++ [Constraint (VV l) p a])) t
-              Clause (Lhs [] _) _ -> throwError ExpectedApp
-          )
-          s.cls
-      rest <- match (s {ty = b', cls = cls', elims = s.elims :|> Arg m q (VV l)})
-      return $ Bind q x a <$> rest
+      a' <- lift $ unfoldHere a
+      case a' of
+        (VNorm (VData (d, sp))) -> do
+          b' <- lift $ b $$ [VV l]
+          cls' <-
+            mapM
+              ( \case
+                  Clause (Lhs ((p'@(pDatId, pDatSp), p) : ps) cs) t -> do
+                    -- Here we want to enter ctor params
+                    let c = Constraint (sp :|> Arg m q (VV l)) (pDatSp :|> Arg m q p.vPat) a' (VNorm (VData p'))
+                    s <- unifyConstraint c
+
+                    return undefined
+                  -- return $ Clause (Lhs ps (cs ++ [Constraint (VV l) p a])) t
+                  Clause (Lhs [] _) _ -> throwError ExpectedApp
+              )
+              s.cls
+          rest <- match (s {ty = b', cls = cls', elims = s.elims :|> Arg m q (VV l)})
+          return $ Bind m q x a <$> rest
+        _ -> return Nothing
     _ -> return Nothing
 
 matchDone :: (Tc m) => MatchTactic m
@@ -1542,11 +1619,12 @@ matchSplit s = do
   case s.cls of
     [] -> return Nothing
     (Clause (Lhs {constr = []}) _ : _) -> return Nothing
-    (Clause (Lhs {constr = (c : cs)}) _ : ps) -> do
-      case c of
-        Constraint (VV l) (CtorP c _) ty -> return Nothing
-        Constraint (VV _) WildP ty -> return Nothing
-        Constraint (VV _) (VarP _) ty -> return Nothing
+    (Clause (Lhs {constr = (c : cs)}) _ : ps) -> return Nothing
+
+-- case c of
+--   Constraint (VV l) (CtorP _ c _) ty -> return Nothing
+--   Constraint (VV _) WildP ty -> return Nothing
+-- Constraint (VV _) (VarP _) ty -> return Nothing
 
 -- buildCaseTree :: (Tc m) => Tel STy -> STy -> [Clause [VPatB] Closure] -> m CaseTree
 
