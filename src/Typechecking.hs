@@ -155,6 +155,7 @@ import Syntax
     STm (..),
     STy,
     Sub,
+    VCtor,
     VData,
     VLazy,
     VLazyHead (..),
@@ -177,7 +178,7 @@ import Syntax
     uniqueSLams,
     vGetSpine,
     pattern VV,
-    pattern VVar, VCtor,
+    pattern VVar,
   )
 import Unelaboration (Unelab)
 
@@ -1434,13 +1435,13 @@ unifyLit l1 l2 = case (l1, l2) of
 
 -- Pattern matching
 
-data Pat = WildP | VarP Name | CtorP VCtor (Spine Pat)
+data Pat = WildP | VarP Name Qty | CtorP VCtor (Spine Pat)
 
 data CaseTree
   = Body STm
   | Bind PiMode Qty Name VTy CaseTree
   | Split Ctx (Tel STy) STy Lvl Qty DataGlobal (Spine VTm) [CaseTree]
-  | Refute  Idx
+  | Refute Idx
 
 type Con = Tel STy
 
@@ -1476,7 +1477,7 @@ type Con = Tel STy
 --       return $ VPatB (VV (Lvl i)) [(q, n)] : ps
 
 data Lhs = Lhs
-  { elims :: [(VTm, VPatB)],
+  { elims :: [(VTm, Pat)],
     constr :: [Constraint]
   }
 
@@ -1584,7 +1585,7 @@ matchBind s = do
         mapM
           ( \case
               Clause (Lhs ((ty, p) : ps) cs) t -> do
-                let c = Constraint (VV l) p.vPat a ty
+                let c = Constraint l p a ty
                 return $ Clause (Lhs ps (c : cs)) t
               Clause (Lhs [] _) _ -> throwError ExpectedApp
           )
@@ -1593,17 +1594,20 @@ matchBind s = do
       return $ Bind m q x a <$> rest
     _ -> return Nothing
 
--- Unify result is basically ((Γ' : Con) * ((Γ , δ ~ γ) ~= Γ')) + ((Γ' : Con) -> (Γ , δ ~ γ) ~= Γ') + 1
+-- Unify result is basically
+--
+-- δ ~? γ : ((Γ' : Con) * ((Γ , δ ~ γ) ~= Γ')) + ((Γ' : Con) -> (Γ , δ ~ γ) ~= Γ') + 1
+--
 -- For failure, any Γ' will do.
 -- For success, we are given a Γ'
 data UnifyResult = Success Ctx Sub | Failure Sub | IDontKnow
 
-data Constraint = Constraint {lhs :: VTm, rhs :: VTm, lhsTy :: VTy, rhsTy :: VTy}
+data Constraint = Constraint {lhs :: Lvl, rhs :: Pat, lhsTy :: VTy}
 
-unifyConstraint :: (Tc m) => Constraint -> m UnifyResult
-unifyConstraint = undefined
+-- unifyConstraint :: (Tc m) => Constraint -> m UnifyResult
+-- unifyConstraint = undefined
 
-unifyWithReason :: (Tc m) => VTm -> VTm -> m UnifyResult
+unifyWithReason :: (Tc m) => Spine VTm -> Spine VTm -> m UnifyResult
 unifyWithReason = undefined
 
 matchDone :: (Tc m) => MatchTactic m
@@ -1617,12 +1621,48 @@ matchDone s = do
       (t', _) <- lift $ t (Check s.ty)
       return . Just $ Body t'
 
+getPiDatRetArgs :: VTm -> Spine VTm
+getPiDatRetArgs = undefined
+
+getDatArgs :: VTm -> Spine VTm
+getDatArgs = undefined
+
+ctorAppliedHere :: (Tc m) => CtorGlobal -> m VTm
+ctorAppliedHere = undefined
+
 matchSplit :: (Tc m) => MatchTactic m
 matchSplit s = do
   case s.cls of
     [] -> return Nothing
     (Clause (Lhs {constr = []}) _ : _) -> return Nothing
-    (Clause (Lhs {constr = (c : cs)}) _ : ps) -> return Nothing
+    (Clause (Lhs {constr = (Constraint l (CtorP (c, pp) sp) ty : cs)}) _ : ps) -> do
+      lvl <- lift getLvl
+      lift $
+        ifIsData
+          lvl
+          lty
+          ( \d sp -> do
+              di <- access (getDataGlobal d)
+              cs <-
+                mapM
+                  ( \c -> do
+                    ci <- access (getCtorGlobal c)
+                    ty' <- ci.ty $$> pp
+                    let args' = getPiDatRetArgs ty'
+                    let args = getDatArgs ty
+                    let c' = ctorAppliedHere c
+                    reason <- unifyWithReason (args :|> ) (args' :|> c')
+
+                    return _
+                  )
+                  di.ctors
+              return undefined
+          )
+          (return Nothing)
+    (Clause lhs@Lhs {constr = (Constraint _ (VarP n q) lty : cs)} c : ps) -> do
+      match (s {cls = Clause (lhs {constr = cs}) c : ps, patVars = bind n q lty s.patVars})
+    (Clause lhs@Lhs {constr = (Constraint _ WildP _ : cs)} c : ps) -> do
+      match (s {cls = Clause (lhs {constr = cs}) c : ps})
 
 -- case c of
 --   Constraint (VV l) (CtorP _ c _) ty -> return Nothing
