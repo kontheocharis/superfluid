@@ -11,10 +11,10 @@ module Accounting
   )
 where
 
+import Interfaces.General ( Parent(..), Has(access, view, modify) )
 import Common
   ( Arg (..),
     Clause (..),
-    Has (..),
     HasProjectFiles (..),
     Loc (..),
     Name,
@@ -22,7 +22,7 @@ import Common
     Qty (..),
     Spine,
     Tel,
-    minus, Parent (child),
+    minus,
   )
 import Context
   ( Ctx (..),

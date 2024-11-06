@@ -34,7 +34,8 @@ module Context
   )
 where
 
-import Common (Has (..), Idx (..), Lvl (..), Name, Param (..), Qty, Tel, idxToLvl, lvlToIdx, members, nextLvl)
+import Interfaces.General (Has (..))
+import Common (Idx (..), Lvl (..), Name, Param (..), Qty, Tel, idxToLvl, lvlToIdx, members, nextLvl)
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M

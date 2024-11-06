@@ -16,8 +16,6 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
-    Has (..),
-    HasNameSupply (uniqueName),
     HasProjectFiles,
     Lit (..),
     Loc,
@@ -28,7 +26,6 @@ import Common
     Qty (Many, Zero),
     Spine,
     Tel,
-    enterLoc,
     mapSpine,
     unName,
     pattern Possible,
@@ -38,8 +35,14 @@ import Data.Bifunctor (bimap)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), getDataGlobal, getDefGlobal, getPrimGlobal, indexArity, knownCtor, knownData, knownDef, lookupGlobal)
+import Interfaces.General
+  ( Has (access, view),
+    HasNameSupply (uniqueName),
+    enterLoc,
+  )
 import Presyntax
-  ( PCaseRep (..),
+  ( MaybeQty (..),
+    PCaseRep (..),
     PCtor (..),
     PCtorRep (..),
     PData (..),
@@ -56,7 +59,7 @@ import Presyntax
     pGatherApps,
     pGatherPis,
     pLams,
-    toPSpine, MaybeQty (..),
+    toPSpine,
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)

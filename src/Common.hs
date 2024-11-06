@@ -11,7 +11,6 @@ module Common
     pattern Possible,
     pattern Impossible,
     Lit (..),
-    Parent (..),
     Times (..),
     inc,
     inv,
@@ -47,13 +46,9 @@ module Common
     DataGlobal (..),
     PrimGlobal (..),
     DefGlobal (..),
-    HasNameSupply (..),
     HasProjectFiles (..),
-    Has (..),
-    Try (..),
     spineValues,
     idxToLvl,
-    enterLoc,
     minus,
   )
 where
@@ -207,9 +202,6 @@ type Filename = String
 -- end (exclusive) position.
 data Loc = NoLoc | Loc Filename Pos Pos deriving (Eq, Show)
 
-enterLoc :: (Has m Loc) => Loc -> m a -> m a
-enterLoc = enter . const
-
 instance Semigroup Loc where
   NoLoc <> NoLoc = NoLoc
   NoLoc <> Loc f s e = Loc f s e
@@ -334,43 +326,6 @@ instance (Monad m) => Pretty m (Set Tag) where
 
 instance Show Tag where
   show UnfoldTag = "unfold"
-
-class (Monad m) => HasNameSupply m where
-  uniqueName :: m Name
-
-class (Monad m) => Has m a where
-  view :: m a
-
-  access :: (a -> b) -> m b
-  access f = f <$> view
-
-  modify :: (a -> a) -> m ()
-
-  enter :: (a -> a) -> m c -> m c
-  enter f m = do
-    c <- view
-    modify f
-    a <- m
-    modify (\(_ :: a) -> c)
-    return a
-
-  enterLifted :: (MonadTrans t) => (a -> a) -> t m c -> t m c
-  enterLifted f m = do
-    c <- lift view
-    lift $ modify f
-    a <- m
-    lift $ modify (\(_ :: a) -> c)
-    return a
-
--- | A typeclass for backtracking try
-class Try m where
-  type E m :: Type
-  try :: m a -> m (Either (E m) a)
-  giveUp :: E m -> m a
-
-class Parent m where
-  -- Run a child computation, don't remember any state changes
-  child :: m a -> m a
 
 -- Printing
 

@@ -3,13 +3,16 @@
 
 module Codegen (Gen (..), generateProgram, renderJsProg, JsStat) where
 
+import Interfaces.General (
+    Has (..),
+    HasNameSupply (uniqueName)
+
+  )
 import Common
   ( Arg (..),
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
-    Has (..),
-    HasNameSupply (uniqueName),
     Idx (..),
     Lit (CharLit, FinLit, NatLit, StringLit),
     Logger (warnMsg),

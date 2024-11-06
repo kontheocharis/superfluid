@@ -16,7 +16,6 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
-    Has (..),
     Idx (..),
     Lvl (..),
     MetaVar,
@@ -24,7 +23,6 @@ import Common
     Param (..),
     PiMode (..),
     PrimGlobal (..),
-    Qty (..),
     Tag,
     Tel,
     mapSpineM,
@@ -53,8 +51,11 @@ import Globals
     getGlobal,
     getGlobalTags,
   )
+import Interfaces.General
+  ( Has (..),
+  )
 import Meta (lookupMetaVar, lookupMetaVarName, lookupMetaVarQty)
-import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, MaybeQty (..), singleTermClause)
+import Presyntax (MaybeQty (..), PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, singleTermClause)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (..),

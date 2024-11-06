@@ -13,12 +13,9 @@
 module Typechecking
   ( Tc (..),
     TcError (..),
-    Ctx (..),
-    emptyCtx,
     Mode (..),
     InPat (..),
     Problem,
-    Goal,
     SolveAttempts (..),
     prettyGoal,
     lam,
@@ -58,8 +55,6 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (DefGlobal),
-    Has (..),
-    HasNameSupply (uniqueName),
     HasProjectFiles,
     Idx (..),
     Lit (..),
@@ -74,9 +69,7 @@ import Common
     Spine,
     Tag,
     Tel,
-    Try (..),
     composeZ,
-    enterLoc,
     lvlToIdx,
     mapSpineM,
     nextLvl,
@@ -142,6 +135,12 @@ import Globals
     lookupGlobal,
     modifyDataItem,
     modifyDefItem,
+  )
+import Interfaces.General
+  ( Has (access, enter, modify, view),
+    HasNameSupply (uniqueName),
+    Try,
+    enterLoc,
   )
 import Meta (freshMetaVar, solveMetaVar)
 import Presyntax (PTm)
@@ -1440,7 +1439,7 @@ data CaseTree
   = Body STm
   | Bind PiMode Qty Name VTy CaseTree
   | Split Ctx (Tel STy) STy Lvl Qty DataGlobal (Spine VTm) [CaseTree]
-  | Refute  Idx
+  | Refute Idx
 
 data Constraint = Constraint {lhs :: Spine VTm, rhs :: Spine VTm, lhsTy :: VTy, rhsTy :: VTy}
 

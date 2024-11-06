@@ -6,18 +6,16 @@
 
 module Compiler (runCli) where
 
-import Accounting (AccError, Acc (..))
+import Accounting (Acc (..), AccError)
 import Codegen (Gen (..), JsStat, generateProgram, renderJsProg)
 import Common
-  ( Has (..),
-    HasNameSupply (..),
-    HasProjectFiles (getProjectFileContents),
+  ( HasProjectFiles (getProjectFileContents),
     Loc (..),
     Logger (..),
     Name (..),
     Qty (Many),
-    Try (..), Parent (..),
   )
+import Context (Ctx (..), Goal, emptyCtx)
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT, tryError)
 import Control.Monad.Extra (unless)
@@ -33,6 +31,8 @@ import Data.Text.IO (hPutStrLn)
 import Elaboration (Elab (..), ElabError, elabProgram)
 import Evaluation (Eval (..), reprInfSig)
 import Globals (Sig, emptySig)
+import Interfaces.General
+    ( Parent(..), Try(..), Has(view, modify), HasNameSupply(..) )
 import Meta (SolvedMetas, emptySolvedMetas)
 import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
 import Options.Applicative.Builder
@@ -55,14 +55,11 @@ import Printing (Pretty (..))
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Typechecking
-  ( Ctx,
-    Goal,
-    InPat (..),
+  ( InPat (..),
     Problem,
     SolveAttempts (..),
     Tc (addGoal, tcError),
     TcError,
-    emptyCtx,
     prettyGoal,
   )
 import Unelaboration (Unelab, unelabSig)

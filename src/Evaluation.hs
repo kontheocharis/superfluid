@@ -35,6 +35,10 @@ module Evaluation
   )
 where
 
+import Interfaces.General (
+
+    Has (..),
+    HasNameSupply (..))
 import Common
   ( Arg (..),
     Clause (..),
@@ -42,8 +46,6 @@ import Common
     DataGlobal (..),
     DefGlobal (..),
     Glob (..),
-    Has (..),
-    HasNameSupply (..),
     Idx (..),
     Logger (..),
     Lvl (..),

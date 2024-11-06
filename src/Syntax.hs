@@ -59,7 +59,6 @@ import Common
     DataGlobal,
     DefGlobal,
     Glob (..),
-    HasNameSupply (uniqueName),
     Idx,
     Lit,
     Lvl (..),
@@ -77,6 +76,7 @@ import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
+import Interfaces.General (HasNameSupply (uniqueName))
 
 data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 

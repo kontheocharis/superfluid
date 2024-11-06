@@ -16,11 +16,12 @@ module Meta
   )
 where
 
-import Common (Has (..), MetaVar (..), Name, Qty)
+import Common (MetaVar (..), Name, Qty)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Maybe (fromJust)
 import Syntax (VTm)
+import Interfaces.General (Has (..))
 
 newtype SolvedMetas = SolvedMetas {values :: IntMap (Maybe VTm, Qty, Maybe Name)}
 
