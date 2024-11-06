@@ -12,6 +12,7 @@ module Syntax
     sPis,
     Case (..),
     VData,
+    VCtor,
     sGatherApps,
     sGatherPis,
     sGatherLams,
