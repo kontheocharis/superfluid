@@ -63,6 +63,7 @@ import Common
     Idx (..),
     Lit (..),
     Loc,
+    Logger (..),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -77,9 +78,11 @@ import Common
     composeZ,
     enterLoc,
     lvlToIdx,
+    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
+    spineValues,
     telWithNames,
     pattern Impossible,
     pattern Possible,
@@ -88,7 +91,7 @@ import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Extra (when, fromMaybeM)
+import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
@@ -146,6 +149,9 @@ import Syntax
   ( Case (..),
     Closure (body, numVars),
     Env,
+    HTel (..),
+    HTm (..),
+    HTy,
     PRen (..),
     SPat (..),
     STm (..),
@@ -159,6 +165,10 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
+    embed,
+    hApp,
+    hPis,
+    hSimpleTel,
     headAsValue,
     isEmptySub,
     liftPRenN,
@@ -167,6 +177,8 @@ import Syntax
     sGatherLams,
     sGatherPis,
     sPis,
+    unembed,
+    unembedTel,
     uniqueSLams,
     vGetSpine,
     pattern VVar,
@@ -823,6 +835,13 @@ dataItem n ts te ty = do
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
   (motiveTy, elimTy, arity) <- buildElimTy dat
+
+  di <- access (getDataGlobal dat)
+  e' <- hElimTy dat
+
+  e'' <- pretty (embed (Lvl 0) $ hPis (unembedTel [] di.params) e')
+  msg $ "ElimTy: " ++ e''
+
   modify
     ( modifyDataItem
         dat
@@ -930,6 +949,72 @@ telWithUniqueNames = do
             return (Param m q n' a)
           Name _ -> return (Param m q n a)
     )
+
+hMethodTy :: (Tc m) => CtorGlobal -> m (Spine HTm -> HTm -> HTm)
+hMethodTy c = do
+  ci <- access (getCtorGlobal c)
+  di <- access (getDataGlobal ci.dataGlobal)
+
+  -- Access the relevant info
+  sTy <- evalInOwnCtxHere ci.ty >>= vUnfold (Lvl (length di.params)) >>= quote (Lvl (length di.params))
+  let (sArgs, sRet) = sGatherPis sTy
+  let (_, sRetSp) = sGatherApps sRet
+  let sRetIndexSp = S.drop (length di.params) sRetSp
+  sUniqueArgs <- telWithUniqueNames sArgs
+
+  -- Convert to HOAS
+  return $ \ps motive ->
+    let penv = reverse $ spineValues ps
+     in let args = unembedTel penv sUniqueArgs
+         in let retSp as = mapSpine (unembed (reverse (spineValues as) ++ penv)) sRetIndexSp
+             in hPis args (\as -> hApp motive (retSp as :|> Arg Explicit Zero (hApp (HCtor (c, ps)) as)))
+
+hIndicesTel :: (Tc m) => DataGlobal -> m (Spine HTm -> HTel)
+hIndicesTel d = do
+  di <- access (getDataGlobal d)
+
+  -- Access the relevant info
+  sTy <- evalInOwnCtxHere di.ty >>= vUnfold (Lvl (length di.params)) >>= quote (Lvl (length di.params))
+  let (sIndices, _) = sGatherPis sTy
+  sUniqueIndices <- telWithUniqueNames sIndices
+
+  -- Convert to HOAS
+  return $ \ps -> unembedTel (reverse $ spineValues ps) sUniqueIndices
+
+hElimTy :: (Tc m) => DataGlobal -> m (Spine HTm -> HTy)
+hElimTy d = do
+  di <- access (getDataGlobal d)
+
+  -- Get HOAS indices and methods
+  indicesTel <- hIndicesTel d
+  methodTys <- mapM hMethodTy di.ctors
+
+  let motiveTy ps = hPis (indicesTel ps) (const HU)
+  let methodsTel ps m = hSimpleTel . S.fromList $ map (\c -> Param Explicit Many (Name "_") (c ps m)) methodTys
+  let subjectTy ps is = hApp (HData d) (ps <> is)
+
+  return $ \ps ->
+    HPi
+      Explicit
+      Zero
+      (Name "P")
+      (motiveTy ps)
+      ( \m ->
+          hPis
+            (methodsTel ps m)
+            ( \_ ->
+                hPis
+                  (indicesTel ps)
+                  ( \is ->
+                      HPi
+                        Explicit
+                        Many
+                        (Name "s")
+                        (subjectTy ps is)
+                        (\s -> hApp m (is :|> Arg Explicit Zero s))
+                  )
+            )
+      )
 
 buildElimTy :: (Tc m) => DataGlobal -> m (Closure, Closure, Spine ())
 buildElimTy dat = do

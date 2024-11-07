@@ -50,9 +50,14 @@ module Syntax
     HTm (..),
     pv,
     HTy,
+    HTel (..),
     HCase,
     embed,
     unembed,
+    unembedTel,
+    hPis,
+    hApp,
+    hSimpleTel,
   )
 where
 
@@ -324,7 +329,7 @@ type HCase = (Case HTm HTm SPat ([HTm] -> HTm))
 type HTy = HTm
 
 data HTm
-  = HPi PiMode Qty Name HTm (HTm -> HTm)
+  = HPi PiMode Qty Name HTy (HTm -> HTy)
   | HLam PiMode Qty Name (HTm -> HTm)
   | HLet Qty Name HTy HTm (HTm -> HTm)
   | HMeta MetaVar Bounds
@@ -340,6 +345,21 @@ data HTm
   | HRepr HTm
   | HUnrepr HTm
 
+data HTel = HEmpty | HWithParam PiMode Qty Name HTy (HTm -> HTel)
+
+hSimpleTel :: Tel HTy -> HTel
+hSimpleTel = foldr (\(Param m q n a) acc -> HWithParam m q n a (const acc)) HEmpty
+
+unembedTel :: Env HTm -> Tel STy -> HTel
+unembedTel _ Empty = HEmpty
+unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
+
+hApp :: HTm -> Spine HTm -> HTm
+hApp = foldl (\f (Arg m q u) -> HApp m q f u)
+
+hPis :: HTel -> (Spine HTm -> HTy) -> HTy
+hPis HEmpty b = b Empty
+hPis (HWithParam m q n a f) b = HPi m q n a (\x -> hPis (f x) (\xs -> b (Arg m q x :<| xs)))
 
 embedCase :: Lvl -> HCase -> SCase
 embedCase l (Case d ps s is t cs) =
