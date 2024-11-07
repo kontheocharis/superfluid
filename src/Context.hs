@@ -30,6 +30,7 @@ module Context
     enterTel,
     evalInOwnCtxHere,
     setCtxEntryQty,
+    here,
   )
 where
 
@@ -233,6 +234,9 @@ need q = enter (`times` q)
 
 expect :: (Has m Qty) => Qty -> m a -> m a
 expect q = enter (const q)
+
+here :: (Has m Ctx) => (Lvl -> a) -> m a
+here f = f <$> accessCtx (\c -> c.lvl)
 
 evalHere :: (Eval m, Has m Ctx) => STm -> m VTm
 evalHere t = do

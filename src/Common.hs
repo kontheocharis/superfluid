@@ -55,6 +55,7 @@ module Common
     idxToLvl,
     enterLoc,
     minus,
+    membersIn,
   )
 where
 
@@ -270,6 +271,9 @@ idxToLvl (Lvl l) (Idx i) = Lvl (l - i - 1)
 -- Members of a context (represented as a level)
 members :: Lvl -> [Lvl]
 members (Lvl l) = map Lvl [0 .. l - 1]
+
+membersIn :: Lvl -> Lvl -> [Lvl]
+membersIn (Lvl i) (Lvl l) = map Lvl [i .. i + l - 1]
 
 -- Spines and arguments
 

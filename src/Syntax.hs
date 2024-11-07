@@ -47,18 +47,20 @@ module Syntax
     vGetSpine,
     pattern VVar,
     pattern VMeta,
+    pv,
+    embed,
   )
 where
 
 import Common
   ( Arg (..),
-    Clause,
+    Clause (..),
     CtorGlobal,
     DataGlobal,
     DefGlobal,
     Glob (..),
     HasNameSupply (uniqueName),
-    Idx,
+    Idx (..),
     Lit,
     Lvl (..),
     MetaVar,
@@ -66,9 +68,14 @@ import Common
     Param (..),
     PiMode,
     PrimGlobal,
+    Qty,
     Spine,
     Tel,
-    unLvl, Qty,
+    lvlToIdx,
+    members,
+    membersIn,
+    nextLvl,
+    unLvl,
   )
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -153,7 +160,6 @@ data VNeuHead
   | VUnrepr VHead
   deriving (Show)
 
-
 data VLazyHead
   = VDef DefGlobal
   | VLit (Lit VTm)
@@ -168,7 +174,6 @@ data VHead
   | VDataHead DataGlobal
   | VCtorHead (CtorGlobal, Spine VTm)
   deriving (Show)
-
 
 mapHeadM :: (Monad m) => (VTm -> m VTm) -> VHead -> m VHead
 mapHeadM f h = do
@@ -189,6 +194,10 @@ headAsValue (VNeuHead h) = VNeu (h, Empty)
 headAsValue (VLazyHead h) = VLazy (h, Empty)
 headAsValue (VDataHead d) = VNorm (VData (d, Empty))
 headAsValue (VCtorHead c) = VNorm (VCtor (c, Empty))
+
+-- Pattern variable
+pv :: STm
+pv = SVar (Idx 0)
 
 data VNorm
   = VPi PiMode Qty Name VTy Closure
@@ -254,8 +263,9 @@ data STm
 
 sReprTimes :: Int -> STm -> STm
 sReprTimes 0 t = t
-sReprTimes n t | n > 0 = SRepr (sReprTimes (n - 1) t)
-               | otherwise = SUnrepr (sReprTimes (n + 1) t)
+sReprTimes n t
+  | n > 0 = SRepr (sReprTimes (n - 1) t)
+  | otherwise = SUnrepr (sReprTimes (n + 1) t)
 
 -- @@Todo: case and constructor params should be (Lvl, [VTm]) instead.
 -- Otherwise we are doing lots of unnecessary work.
@@ -301,3 +311,59 @@ sGlobWithParams (DataGlob d) _ = SData d
 sGlobWithParams (CtorGlob c) xs = SCtor (c, xs)
 sGlobWithParams (DefGlob d) _ = SDef d
 sGlobWithParams (PrimGlob p) _ = SPrim p
+
+-- HOAS
+
+type HCase = (Case HTm HTm SPat ([HTm] -> HTm))
+
+type HTy = HTm
+
+data HTm
+  = HPi PiMode Qty Name HTm (HTm -> HTm)
+  | HLam PiMode Qty Name (HTm -> HTm)
+  | HLet Qty Name HTy HTm (HTm -> HTm)
+  | HMeta MetaVar Bounds
+  | HApp PiMode Qty HTm HTm
+  | HCase HCase
+  | HVar Lvl
+  | HU
+  | HData DataGlobal
+  | HCtor (CtorGlobal, Spine HTm)
+  | HDef DefGlobal
+  | HPrim PrimGlobal
+  | HLit (Lit HTm)
+  | HRepr HTm
+  | HUnrepr HTm
+
+embedCase :: Lvl -> HCase -> SCase
+embedCase l (Case d ps s is t cs) =
+  Case
+    d
+    (fmap (fmap (embed l)) ps)
+    (embed l s)
+    (fmap (fmap (embed l)) is)
+    (embed l t)
+    (fmap embedClause cs)
+  where
+    embedClause :: Clause SPat ([HTm] -> HTm) -> Clause SPat STm
+    embedClause (Clause p c) =
+      let pvs = map HVar $ membersIn l (Lvl (length p.binds))
+       in Clause p (fmap (embed l . ($ pvs)) c)
+
+embed :: Lvl -> HTm -> STm
+embed l = \case
+  HPi m q n a b -> SPi m q n (embed l a) (embed (nextLvl l) (b (HVar l)))
+  HLam m q n f -> SLam m q n (embed (nextLvl l) (f (HVar l)))
+  HLet q n ty a b -> SLet q n (embed l ty) (embed l a) (embed (nextLvl l) (b (HVar l)))
+  HMeta m bs -> SMeta m bs
+  HApp m q t u -> SApp m q (embed l t) (embed l u)
+  HCase c -> SCase (embedCase l c)
+  HVar l' -> SVar (lvlToIdx l l')
+  HU -> SU
+  HData d -> SData d
+  HCtor (c, sp) -> SCtor (c, fmap (fmap $ embed l) sp)
+  HDef d -> SDef d
+  HPrim p -> SPrim p
+  HLit li -> SLit (fmap (embed l) li)
+  HRepr t -> SRepr (embed l t)
+  HUnrepr t -> SUnrepr (embed l t)
