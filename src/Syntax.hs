@@ -47,8 +47,12 @@ module Syntax
     vGetSpine,
     pattern VVar,
     pattern VMeta,
+    HTm (..),
     pv,
+    HTy,
+    HCase,
     embed,
+    unembed,
   )
 where
 
@@ -71,6 +75,7 @@ import Common
     Qty,
     Spine,
     Tel,
+    idxToLvl,
     lvlToIdx,
     members,
     membersIn,
@@ -335,6 +340,7 @@ data HTm
   | HRepr HTm
   | HUnrepr HTm
 
+
 embedCase :: Lvl -> HCase -> SCase
 embedCase l (Case d ps s is t cs) =
   Case
@@ -367,3 +373,34 @@ embed l = \case
   HLit li -> SLit (fmap (embed l) li)
   HRepr t -> SRepr (embed l t)
   HUnrepr t -> SUnrepr (embed l t)
+
+unembedCase :: Env HTm -> SCase -> HCase
+unembedCase env (Case d ps s is t cs) =
+  Case
+    d
+    (fmap (fmap (unembed env)) ps)
+    (unembed env s)
+    (fmap (fmap (unembed env)) is)
+    (unembed env t)
+    (fmap unembedClause cs)
+  where
+    unembedClause :: Clause SPat STm -> Clause SPat ([HTm] -> HTm)
+    unembedClause (Clause p c) = Clause p (fmap (\c' bs -> unembed (reverse bs ++ env) c') c)
+
+unembed :: Env HTm -> STm -> HTm
+unembed env = \case
+  SPi m q n a b -> HPi m q n (unembed env a) (\x -> unembed (x : env) b)
+  SLam m q n t -> HLam m q n (\x -> unembed (x : env) t)
+  SLet q n ty a b -> HLet q n (unembed env ty) (unembed env a) (\x -> unembed (x : env) b)
+  SMeta m bs -> HMeta m bs
+  SApp m q t u -> HApp m q (unembed env t) (unembed env u)
+  SCase c -> HCase (unembedCase env c)
+  SVar (Idx i) -> env !! i
+  SU -> HU
+  SData d -> HData d
+  SCtor (c, sp) -> HCtor (c, fmap (fmap $ unembed env) sp)
+  SDef d -> HDef d
+  SPrim p -> HPrim p
+  SLit li -> HLit (fmap (unembed env) li)
+  SRepr t -> HRepr (unembed env t)
+  SUnrepr t -> HUnrepr (unembed env t)

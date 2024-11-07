@@ -39,7 +39,8 @@ import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
 import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), getDataGlobal, getDefGlobal, getPrimGlobal, indexArity, knownCtor, knownData, knownDef, lookupGlobal)
 import Presyntax
-  ( PCaseRep (..),
+  ( MaybeQty (..),
+    PCaseRep (..),
     PCtor (..),
     PCtorRep (..),
     PData (..),
@@ -56,10 +57,10 @@ import Presyntax
     pGatherApps,
     pGatherPis,
     pLams,
-    toPSpine, MaybeQty (..),
+    toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
+import Syntax (HTm (..), STm (..), STy, VNorm (..), VTm (..), VTy)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -88,6 +89,8 @@ import Typechecking
     unrepr,
     wild,
   )
+import Context (here)
+import Debug.Trace (traceM)
 
 -- Presyntax exists below here
 
