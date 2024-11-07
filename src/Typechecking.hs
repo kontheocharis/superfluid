@@ -1443,6 +1443,17 @@ data CaseTree
   | Split Ctx (Tel STy) STy Lvl Qty DataGlobal (Spine VTm) [CaseTree]
   | Refute Idx
 
+-- data Split = Split {
+--   ctx :: Ctx,
+--   tel :: Tel STy,
+--   ty :: STy,
+--   lvl :: Lvl,
+--   qty :: Qty,
+--   dat :: DataGlobal,
+--   sp :: Spine VTm,
+--   cs :: [CaseTree]
+--   }
+
 type Con = Tel STy
 
 -- getName :: Name -> Con -> Maybe (Param VTy)
@@ -1477,7 +1488,7 @@ type Con = Tel STy
 --       return $ VPatB (VV (Lvl i)) [(q, n)] : ps
 
 data Lhs = Lhs
-  { elims :: [(VTm, Pat)],
+  { elims :: [Pat],
     constr :: [Constraint]
   }
 
@@ -1545,7 +1556,7 @@ specialise = undefined
 
 data Elim = Elim
 
--- basicAnalysis : (Ξ : Tel Γ) -> (e : Ξ-Elim n)
+-- basicAnalysis : [Ξ : Tel Γ] -> (e : Ξ-Elim n)
 --                  -> (Δ : Tel Γ) -> (T : Ty (Γ, Δ)) -> (t : Tms (Γ, Δ) Ξ)
 --                  -> Vec n (\i => Π (e.Δ(i), Δ, Ξ ~ t) T)
 --                  -> (Π Δ T)
@@ -1568,8 +1579,7 @@ treeToElims (Split s te ty l q d sp ts) = do
     mapM
       ( \t -> do
           t' <- treeToElims t
-          return undefined
-          -- specialise s t'
+          specialise t'
       )
       ts
   return $ basicAnalysis (caseElim d) te ty (sp :|> Arg Explicit q (VV l)) ms
@@ -1584,8 +1594,8 @@ matchBind s = do
       cls' <-
         mapM
           ( \case
-              Clause (Lhs ((ty, p) : ps) cs) t -> do
-                let c = Constraint l p a ty
+              Clause (Lhs (p : ps) cs) t -> do
+                let c = Constraint l p a
                 return $ Clause (Lhs ps (c : cs)) t
               Clause (Lhs [] _) _ -> throwError ExpectedApp
           )
@@ -1596,7 +1606,7 @@ matchBind s = do
 
 -- Unify result is basically
 --
--- δ ~? γ : ((Γ' : Con) * ((Γ , δ ~ γ) ~= Γ')) + ((Γ' : Con) -> (Γ , δ ~ γ) ~= Γ') + 1
+-- δ ~? γ : ((Γ' : Con) * (Γ' ~= (Γ , δ ~ γ))) + ((Γ' : Con) -> (Γ , δ ~ γ) |- Γ') + 1
 --
 -- For failure, any Γ' will do.
 -- For success, we are given a Γ'
@@ -1637,28 +1647,28 @@ matchSplit s = do
     (Clause (Lhs {constr = []}) _ : _) -> return Nothing
     (Clause (Lhs {constr = (Constraint l (CtorP (c, pp) sp) ty : cs)}) _ : ps) -> do
       lvl <- lift getLvl
-      lift $
-        ifIsData
-          lvl
-          lty
-          ( \d sp -> do
-              di <- access (getDataGlobal d)
-              cs <-
-                mapM
+      xs <-
+        lift $
+          ifIsData
+            lvl
+            ty
+            ( \d sp -> do
+                di <- access (getDataGlobal d)
+                xs :: [UnifyResult] <- mapM
                   ( \c -> do
-                    ci <- access (getCtorGlobal c)
-                    ty' <- ci.ty $$> pp
-                    let args' = getPiDatRetArgs ty'
-                    let args = getDatArgs ty
-                    let c' = ctorAppliedHere c
-                    reason <- unifyWithReason (args :|> ) (args' :|> c')
-
-                    return _
+                      ci <- access (getCtorGlobal c)
+                      ty' <- ci.ty $$> pp
+                      let args' = getPiDatRetArgs ty'
+                      let args = getDatArgs ty
+                      -- let c' = ctorAppliedHere c
+                      return undefined
+                      -- unifyWithReason (args :|> c') (args' :|> c')
                   )
                   di.ctors
-              return undefined
-          )
-          (return Nothing)
+                return $ Just xs
+            )
+            (return undefined)
+      return undefined
     (Clause lhs@Lhs {constr = (Constraint _ (VarP n q) lty : cs)} c : ps) -> do
       match (s {cls = Clause (lhs {constr = cs}) c : ps, patVars = bind n q lty s.patVars})
     (Clause lhs@Lhs {constr = (Constraint _ WildP _ : cs)} c : ps) -> do
