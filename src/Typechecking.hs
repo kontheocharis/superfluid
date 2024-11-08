@@ -87,6 +87,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
+import Constructions (dataConstructions, hElimTy, hMotiveTy)
 import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -828,48 +829,59 @@ dataItem n ts te ty = do
     i <- getLvl >>= (`isTypeFamily` vty)
     unless i (tcError $ InvalidDataFamily vty)
     return ty'
-  cty <- closeHere (length te') ty'
-  fty <- evalHere $ sPis te' ty'
-  modify (addItem n (DataInfo (DataGlobalInfo n te' fty cty [] Nothing Nothing Empty)) ts)
+  modify
+    ( addItem
+        n
+        ( DataInfo
+            ( DataGlobalInfo
+                { name = n,
+                  params = te',
+                  familyTy = ty',
+                  ctors = [],
+                  constructions = Nothing
+                }
+            )
+        )
+        ts
+    )
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
-  (motiveTy, elimTy, arity) <- buildElimTy dat
-
-  di <- access (getDataGlobal dat)
-  e' <- hElimTy dat
-
-  e'' <- pretty (embed (Lvl 0) $ hPis (unembedTel [] di.params) e')
-  msg $ "ElimTy: " ++ e''
-
-  modify
-    ( modifyDataItem
-        dat
-        ( \d ->
-            d
-              { elimTy = Just elimTy,
-                motiveTy = Just motiveTy,
-                indexArity = arity
-              }
-        )
-    )
+  cs <- dataConstructions dat
+  modify (modifyDataItem dat (\d -> d {constructions = Just cs}))
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Maybe Qty -> Set Tag -> Child m -> m ()
 ctorItem dat n mq ts ty = do
   let q' = fromMaybe Many mq
   di <- access (getDataGlobal dat)
   idx <- access (\s -> length (getDataGlobal dat s).ctors)
-  (sp, ty', q) <- enterTel di.params $ do
+  (ty', q) <- enterTel di.params $ do
     ensureNewName n
     (ty', _) <- expect Zero $ ty (Check (VNorm VU))
-    let sp = fmap (\p -> Arg p.mode p.qty ()) $ fst (sGatherPis ty')
     vty <- evalHere ty'
     i <- getLvl >>= (\l -> isCtorTy l dat vty)
     case i of
       Nothing -> tcError $ InvalidCtorType ty'
-      Just (_, q) -> return (sp, ty', q)
-  cty <- closeHere (length di.params) ty'
-  modify (addItem n (CtorInfo (CtorGlobalInfo n q' cty idx q dat sp)) ts)
+      Just (_, q) -> do
+        ty'' <- unfoldHere vty >>= quoteHere
+        return (ty'', q)
+  modify
+    ( addItem
+        n
+        ( CtorInfo
+            ( CtorGlobalInfo
+                { name = n,
+                  qty = q',
+                  ty = ty',
+                  index = idx,
+                  qtySum = q,
+                  dataGlobal = dat,
+                  constructions = Nothing
+                }
+            )
+        )
+        ts
+    )
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Maybe Qty -> Set Tag -> Child m -> m ()
@@ -934,162 +946,6 @@ reprCaseItem te dat ts c = do
       ts
       c
   return ()
-
-spineForTel :: Int -> Tel STm -> Spine STm
-spineForTel dist te =
-  S.fromList $ zipWith (curry (\(Param m q _ _, i) -> Arg m q (SVar (Idx (dist + length te - i - 1))))) (toList te) [0 ..]
-
-telWithUniqueNames :: (Tc m) => Tel a -> m (Tel a)
-telWithUniqueNames = do
-  mapM
-    ( \(Param m q n a) -> do
-        case n of
-          Name "_" -> do
-            n' <- uniqueName
-            return (Param m q n' a)
-          Name _ -> return (Param m q n a)
-    )
-
-hMethodTy :: (Tc m) => CtorGlobal -> m (Spine HTm -> HTm -> HTm)
-hMethodTy c = do
-  ci <- access (getCtorGlobal c)
-  di <- access (getDataGlobal ci.dataGlobal)
-
-  -- Access the relevant info
-  sTy <- evalInOwnCtxHere ci.ty >>= vUnfold (Lvl (length di.params)) >>= quote (Lvl (length di.params))
-  let (sArgs, sRet) = sGatherPis sTy
-  let (_, sRetSp) = sGatherApps sRet
-  let sRetIndexSp = S.drop (length di.params) sRetSp
-  sUniqueArgs <- telWithUniqueNames sArgs
-
-  -- Convert to HOAS
-  return $ \ps motive ->
-    let penv = reverse $ spineValues ps
-     in let args = unembedTel penv sUniqueArgs
-         in let retSp as = mapSpine (unembed (reverse (spineValues as) ++ penv)) sRetIndexSp
-             in hPis args (\as -> hApp motive (retSp as :|> Arg Explicit Zero (hApp (HCtor (c, ps)) as)))
-
-hIndicesTel :: (Tc m) => DataGlobal -> m (Spine HTm -> HTel)
-hIndicesTel d = do
-  di <- access (getDataGlobal d)
-
-  -- Access the relevant info
-  sTy <- evalInOwnCtxHere di.ty >>= vUnfold (Lvl (length di.params)) >>= quote (Lvl (length di.params))
-  let (sIndices, _) = sGatherPis sTy
-  sUniqueIndices <- telWithUniqueNames sIndices
-
-  -- Convert to HOAS
-  return $ \ps -> unembedTel (reverse $ spineValues ps) sUniqueIndices
-
-hElimTy :: (Tc m) => DataGlobal -> m (Spine HTm -> HTy)
-hElimTy d = do
-  di <- access (getDataGlobal d)
-
-  -- Get HOAS indices and methods
-  indicesTel <- hIndicesTel d
-  methodTys <- mapM hMethodTy di.ctors
-
-  let motiveTy ps = hPis (indicesTel ps) (const HU)
-  let methodsTel ps m = hSimpleTel . S.fromList $ map (\c -> Param Explicit Many (Name "_") (c ps m)) methodTys
-  let subjectTy ps is = hApp (HData d) (ps <> is)
-
-  return $ \ps ->
-    HPi
-      Explicit
-      Zero
-      (Name "P")
-      (motiveTy ps)
-      ( \m ->
-          hPis
-            (methodsTel ps m)
-            ( \_ ->
-                hPis
-                  (indicesTel ps)
-                  ( \is ->
-                      HPi
-                        Explicit
-                        Many
-                        (Name "s")
-                        (subjectTy ps is)
-                        (\s -> hApp m (is :|> Arg Explicit Zero s))
-                  )
-            )
-      )
-
-buildElimTy :: (Tc m) => DataGlobal -> m (Closure, Closure, Spine ())
-buildElimTy dat = do
-  -- @@Cleanup: this is a mess, ideally should hide all the index acrobatics..
-  datInfo <- access (getDataGlobal dat)
-
-  let sTyParams = datInfo.params
-  let sTyParamsV = map (VNeu . VVar . Lvl) $ take (length datInfo.params) [0 ..]
-
-  let motiveLvl = length datInfo.params
-  let methodTyLvl i = motiveLvl + 1 + i
-  let sTyIndicesLvl = methodTyLvl (length datInfo.ctors)
-
-  sTy <- datInfo.ty $$ sTyParamsV >>= quote (Lvl sTyIndicesLvl)
-  let (mTyIndices, _) = sGatherPis datInfo.ty.body
-  mTyIndicesBinds <- telWithUniqueNames mTyIndices
-
-  let (sTyIndices, _) = sGatherPis sTy
-  sTyIndicesBinds <- telWithUniqueNames sTyIndices
-
-  let spToData i j = sAppSpine (SData dat) (spineForTel i sTyParams >< spineForTel j mTyIndicesBinds)
-
-  motiveSubjName <- uniqueName
-  elimTyName <- uniqueName
-  subjectTyName <- uniqueName
-  methodTys <- mapM (ctorMethodTy (length sTyParams)) datInfo.ctors
-
-  let motiveTy = sPis (mTyIndicesBinds :|> Param Explicit Zero motiveSubjName (spToData (length mTyIndicesBinds) 0)) SU
-  let subjSpToData = spToData (length mTyIndicesBinds + length methodTys + 1) 0
-
-  let elimTy =
-        sPis
-          ( foldr
-              (><)
-              Empty
-              [ S.singleton (Param Explicit Zero elimTyName motiveTy),
-                S.fromList
-                  ( zipWith
-                      (\i (methodTy, methodName) -> Param Explicit Many methodName (methodTy i))
-                      [0 ..]
-                      methodTys
-                  ),
-                sTyIndicesBinds,
-                S.singleton (Param Explicit Many subjectTyName subjSpToData)
-              ]
-          )
-          (sAppSpine (SVar (Idx (1 + length sTyIndicesBinds + length methodTys))) (spineForTel 1 sTyIndicesBinds S.|> Arg Explicit Zero (SVar (Idx 0))))
-
-  elimTy' <- closeHere (length datInfo.params) elimTy
-  motiveTy' <- closeHere (length datInfo.params) motiveTy
-  return (motiveTy', elimTy', fmap (\p -> Arg p.mode p.qty ()) sTyIndicesBinds)
-  where
-    ctorMethodTy :: (Tc m) => Int -> CtorGlobal -> m (Int -> STy, Name)
-    ctorMethodTy sTyParamLen ctor = do
-      ctorInfo <- access (getCtorGlobal ctor)
-      sTy <- (ctorInfo.ty $$ map (VNeu . VVar . Lvl) [0 .. sTyParamLen - 1]) >>= quote (Lvl (sTyParamLen + 1 + ctorInfo.idx))
-      let (sTyBinds', sTyRet) = sGatherPis sTy
-      sTyBinds <- telWithUniqueNames sTyBinds'
-      let (_, sTyRetSp) = sGatherApps sTyRet
-
-      let spToCtor =
-            sAppSpine
-              ( SCtor
-                  ( ctor,
-                    S.take sTyParamLen sTyRetSp
-                  )
-              )
-              (spineForTel 0 sTyBinds)
-      n <- uniqueName
-      return . (,n) $ \sMotiveIdx ->
-        let methodRetTy =
-              sAppSpine
-                (SVar (Idx (sMotiveIdx + length sTyBinds)))
-                (S.drop sTyParamLen sTyRetSp S.|> Arg Explicit Zero spToCtor)
-         in sPis sTyBinds methodRetTy
 
 global :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
 global n i = case i of

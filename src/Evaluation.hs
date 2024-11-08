@@ -341,21 +341,31 @@ caseToSpine sToT uniqueLams withDataParams c = do
       c.clauses
   return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit Many (sToT c.subject))
 
-mapDataGlobalInfoM :: (Eval m) => (STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
-mapDataGlobalInfoM f (DataGlobalInfo n params fullTy ty ctors motiveTy elimTy indexArity) = do
-  params' <- traverse (traverse f) params
-  fullTy' <- quote (Lvl 0) fullTy >>= f >>= eval []
-  ty' <- mapClosureM f ty
-  motiveTy' <- traverse (mapClosureM f) motiveTy
-  elimTy' <- traverse (mapClosureM f) elimTy
-  return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy' indexArity
+mapTelM :: (Eval m) => Lvl -> (Lvl -> STm -> m STm) -> Tel STm -> m (Tel STm)
+mapTelM l f Empty = return Empty
+mapTelM l f (Param m q x a :<| tel) = do
+  a' <- f l a
+  tel' <- mapTelM (nextLvl l) f tel
+  return $ Param m q x a' :<| tel'
 
-mapCtorGlobalInfoM :: (Eval m) => (STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
+mapDataGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
+mapDataGlobalInfoM f (DataGlobalInfo n params ty ctors constructions) = do
+  params' <- mapTelM (Lvl 0) f params
+  ty' <- f (Lvl 0) ty
+  constructions' <- dataConstructions (DataGlobalInfo n params ty ctors Nothing)
+  -- constructions' <- makeDa
+  -- motiveTy' <- traverse (mapClosureM f) constructions
+  -- elimTy' <- traverse (mapClosureM f) elimTy
+  _
+  -- return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy'
+
+mapCtorGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
 mapCtorGlobalInfoM f (CtorGlobalInfo n q ty idx p dataGlobal argArity) = do
-  ty' <- mapClosureM f ty
-  return $ CtorGlobalInfo n q ty' idx p dataGlobal argArity
+  _
+  -- ty' <- mapClosureM f ty
+  -- return $ CtorGlobalInfo n q ty' idx p dataGlobal argArity
 
-mapDefGlobalInfoM :: (Eval m) => (STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
+mapDefGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
 mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
   vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
@@ -363,12 +373,12 @@ mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do
   tm' <- if b then traverse (quote (Lvl 0)) vtm' else traverse f tm
   return $ DefGlobalInfo n q ty' vtm' tm'
 
-mapPrimGlobalInfoM :: (Eval m) => (STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
+mapPrimGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
 mapPrimGlobalInfoM f (PrimGlobalInfo n q ty) = do
   ty' <- quote (Lvl 0) ty >>= f >>= eval []
   return $ PrimGlobalInfo n q ty'
 
-mapGlobalInfoM :: (Eval m) => (STm -> m STm) -> GlobalInfo -> m GlobalInfo
+mapGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> GlobalInfo -> m GlobalInfo
 mapGlobalInfoM f i = case i of
   DataInfo d -> DataInfo <$> mapDataGlobalInfoM f d
   CtorInfo c -> CtorInfo <$> mapCtorGlobalInfoM f c
@@ -423,7 +433,7 @@ reprInfSig :: (Eval m) => m ()
 reprInfSig = do
   s <- view
   let s' = removeRepresentedItems s
-  s'' <- mapSigContentsM (mapGlobalInfoM $ sReprInf (Lvl 0)) s'
+  s'' <- mapSigContentsM (mapGlobalInfoM sReprInf) s'
   modify (const s'')
 
 sReprInfGlob :: (Eval m) => Lvl -> Glob -> Spine STm -> m STm

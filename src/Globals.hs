@@ -26,6 +26,8 @@ module Globals
     getDefRepr,
     modifyDataItem,
     KnownGlobal (..),
+    DataConstructions (..),
+    CtorConstructions (..),
     knownData,
     knownCtor,
     removeRepresentedItems,
@@ -62,27 +64,37 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
-import Syntax (Closure, STm (..), STy, VTm (..), VTy)
+import Syntax (Closure, HTel, HTm, HTy, STm (..), STy, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
     qty :: Qty,
-    ty :: Closure,
-    idx :: Int,
+    ty :: STy,
+    index :: Int,
     qtySum :: Qty,
     dataGlobal :: DataGlobal,
-    argArity :: Spine ()
+    constructions :: Maybe CtorConstructions
+  }
+
+data CtorConstructions = CtorConstructions
+  { args :: Spine HTm -> Tel HTy,
+    returnIndices :: Spine HTm -> Spine HTm -> HTm,
+    returnTy :: Spine HTm -> Spine HTm -> HTm
   }
 
 data DataGlobalInfo = DataGlobalInfo
   { name :: Name,
     params :: Tel STy,
-    fullTy :: VTy,
-    ty :: Closure,
+    familyTy :: STy,
     ctors :: [CtorGlobal],
-    motiveTy :: Maybe Closure,
-    elimTy :: Maybe Closure,
-    indexArity :: Spine () -- might not be set yet
+    constructions :: Maybe DataConstructions
+  }
+
+data DataConstructions = DataConstructions
+  { params :: Tel HTy,
+    motive :: Spine HTm -> HTm,
+    elim :: Spine HTm -> HTm,
+    indices :: Spine HTm -> HTel
   }
 
 data DefGlobalInfo = DefGlobalInfo

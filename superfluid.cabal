@@ -29,6 +29,7 @@ library
       Codegen
       Common
       Compiler
+      Constructions
       Context
       Elaboration
       Evaluation
