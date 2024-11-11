@@ -56,6 +56,9 @@ module Common
     enterLoc,
     minus,
     membersIn,
+    uniqueTel,
+    telToBinds,
+    nameSpineToTel,
   )
 where
 
@@ -303,6 +306,23 @@ type Tel t = Seq (Param t)
 
 telWithNames :: Tel a -> [Name] -> Tel a
 telWithNames te ns = S.zipWith (\(Param m q _ t) n -> Param m q n t) te (S.fromList ns)
+
+uniqueTel :: (HasNameSupply m) => Tel a -> m (Tel a)
+uniqueTel = do
+  mapM
+    ( \(Param m q n a) -> do
+        case n of
+          Name "_" -> do
+            n' <- uniqueName
+            return (Param m q n' a)
+          Name _ -> return (Param m q n a)
+    )
+
+nameSpineToTel :: Spine Name -> Tel ()
+nameSpineToTel = fmap (\(Arg m q n) -> Param m q n ())
+
+telToBinds :: Tel a -> [(Qty, Name)]
+telToBinds = toList . fmap (\(Param _ q n _) -> (q, n))
 
 -- Metas
 

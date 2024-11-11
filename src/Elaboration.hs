@@ -30,14 +30,29 @@ import Common
     Tel,
     enterLoc,
     mapSpine,
+    nameSpineToTel,
     unName,
+    uniqueTel,
     pattern Possible,
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
+import Data.Maybe (fromJust)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
-import Globals (DataGlobalInfo (..), GlobalInfo (..), KnownGlobal (..), getDataGlobal, getDefGlobal, getPrimGlobal, indexArity, knownCtor, knownData, knownDef, lookupGlobal)
+import Globals
+  ( DataGlobalInfo (..),
+    GlobalInfo (..),
+    KnownGlobal (..),
+    DataConstructions (..),
+    getDataGlobal,
+    getDefGlobal,
+    getPrimGlobal,
+    knownCtor,
+    knownData,
+    knownDef,
+    lookupGlobal,
+  )
 import Presyntax
   ( MaybeQty (..),
     PCaseRep (..),
@@ -60,7 +75,7 @@ import Presyntax
     toPSpine,
   )
 import Printing (Pretty (..))
-import Syntax (HTm (..), STm (..), STy, VNorm (..), VTm (..), VTy)
+import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
 import Typechecking
   ( Mode (..),
     Tc (..),
@@ -89,8 +104,6 @@ import Typechecking
     unrepr,
     wild,
   )
-import Context (here)
-import Debug.Trace (traceM)
 
 -- Presyntax exists below here
 
@@ -275,7 +288,7 @@ elabDataRep r = do
   g <- access (lookupGlobal h)
   case g of
     Just (DataInfo info) -> do
-      let target' = pLams sp r.target
+      let target' = pLams (nameSpineToTel sp) r.target
       let dat = DataGlobal h
       te <-
         reprDataItem
@@ -298,17 +311,18 @@ elabCtorRep te r = do
   g <- access (lookupGlobal h)
   case g of
     Just (CtorInfo _) -> do
-      let target' = pLams sp r.target
+      let target' = pLams (nameSpineToTel sp) r.target
       reprCtorItem te (CtorGlobal h) r.tags (elabAndAccount target')
     _ -> elabError (ExpectedCtorGlobal h)
 
 elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
 elabCaseRep te dat info r = do
-  srcSubject <- Arg Explicit Many <$> ensurePatIsBind r.srcSubject
-  srcBranches <- S.fromList . map (Arg Explicit Many) <$> mapM (ensurePatIsBind . snd) r.srcBranches
+  srcSubject <- Param Explicit Zero <$> ensurePatIsBind r.srcSubject <*> return ()
+  srcBranches <- S.fromList . map (\t -> Param Explicit Many t ()) <$> mapM (ensurePatIsBind . snd) r.srcBranches
   ensurePatIsFullyApplied (length info.ctors) (length r.srcBranches)
-  elimTy <- Arg Explicit Zero <$> maybe uniqueName ensurePatIsBind r.srcElim
-  tyIndices <- mapM (traverse (const uniqueName)) info.indexArity
+  elimTy <- Param Explicit Zero <$> maybe uniqueName ensurePatIsBind r.srcElim <*> return ()
+  let dc = fromJust info.constructions
+  tyIndices <- uniqueTel dc.indicesArity
   let target' =
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)

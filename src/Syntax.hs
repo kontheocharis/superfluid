@@ -58,6 +58,8 @@ module Syntax
     hPis,
     hApp,
     hSimpleTel,
+    hOwnSpine,
+    embedClosure,
   )
 where
 
@@ -354,6 +356,8 @@ unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
 unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
 
+
+
 hApp :: HTm -> Spine HTm -> HTm
 hApp = foldl (\f (Arg m q u) -> HApp m q f u)
 
@@ -375,6 +379,16 @@ embedCase l (Case d ps s is t cs) =
     embedClause (Clause p c) =
       let pvs = map HVar $ membersIn l (Lvl (length p.binds))
        in Clause p (fmap (embed l . ($ pvs)) c)
+
+hOwnSpine :: Lvl -> Tel () -> Spine HTm
+hOwnSpine _ Empty = Empty
+hOwnSpine l (Param m q _ () :<| xs) = Arg m q (HVar l) :<| hOwnSpine (nextLvl l) xs
+
+embedClosure :: Env VTm -> Tel () -> (Spine HTm -> HTm) -> Closure
+embedClosure env n f =
+  let ownSpine = hOwnSpine (Lvl (length env)) n in
+  let fHere = f ownSpine in
+  Closure (length n) [] (embed (Lvl (length n + length env)) fHere)
 
 embed :: Lvl -> HTm -> STm
 embed l = \case

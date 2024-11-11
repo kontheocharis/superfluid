@@ -1,7 +1,19 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Constructions (telWithUniqueNames, hMethodTy, hIndicesTel, hElimTy, hMotiveTy, dataConstructions, ctorConstructions) where
+module Constructions
+  ( hMethodTy,
+    hIndicesTel,
+    hElimTy,
+    hMotiveTy,
+    dataConstructions,
+    ctorConstructions,
+    ctorParamsClosure,
+    dataElimParamsClosure,
+    dataFullVTy,
+    dataMotiveParamsClosure,
+  )
+where
 
 import Common
   ( Arg (..),
@@ -16,10 +28,13 @@ import Common
     Tel,
     mapSpine,
     spineValues,
+    telToBinds,
+    uniqueTel, Lvl (..),
   )
 import Context
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
+import Evaluation (Eval, close, ($$>), eval)
 import Globals
   ( CtorConstructions (..),
     CtorGlobalInfo (..),
@@ -31,33 +46,26 @@ import Globals
     getDataGlobal,
   )
 import Syntax
-  ( Env,
+  ( Closure (Closure),
+    Env,
     HTel (..),
     HTm (..),
     HTy,
+    VTm,
+    VTy,
     hApp,
     hPis,
     hSimpleTel,
     sGatherApps,
     sGatherPis,
     unembed,
-    unembedTel,
+    unembedTel, sPis, hOwnSpine, embed, embedClosure,
   )
+import Data.Maybe (fromJust)
 
 -- Various constructions on datatypes using HOAS
 
-type Constr m = (Has m Ctx, HasNameSupply m, Has m Sig)
-
-telWithUniqueNames :: (Constr m) => Tel a -> m (Tel a)
-telWithUniqueNames = do
-  mapM
-    ( \(Param m q n a) -> do
-        case n of
-          Name "_" -> do
-            n' <- uniqueName
-            return (Param m q n' a)
-          Name _ -> return (Param m q n a)
-    )
+type Constr m = (Eval m, Has m Ctx, HasNameSupply m, Has m Sig)
 
 ctorConstructions :: (Constr m) => CtorGlobalInfo -> m CtorConstructions
 ctorConstructions ci = do
@@ -80,6 +88,26 @@ dataConstructions di = do
         motive = motiveTy,
         elim = elimTy
       }
+
+ctorParamsClosure :: (Constr m) => CtorGlobalInfo -> m Closure
+ctorParamsClosure ci = do
+  let dc = fromJust ci.constructions
+  di <- access (getDataGlobal ci.dataGlobal)
+  let dd = fromJust di.constructions
+  return $ embedClosure [] dd.paramsArity dc.ty
+
+dataFullVTy :: (Constr m) => DataGlobalInfo -> m VTy
+dataFullVTy di = eval [] $ sPis di.params di.familyTy
+
+dataElimParamsClosure :: (Constr m) => DataGlobalInfo -> m Closure
+dataElimParamsClosure di = do
+  let dc = fromJust di.constructions
+  return $ embedClosure [] dc.paramsArity dc.elim
+
+dataMotiveParamsClosure :: (Constr m) => DataGlobalInfo -> m Closure
+dataMotiveParamsClosure di = do
+  let dc = fromJust di.constructions
+  return $ embedClosure [] dc.paramsArity dc.motive
 
 type HCtorArgs = Spine HTm -> HTel
 
@@ -115,7 +143,7 @@ hMethodTy c = do
 
   -- Access the relevant info
   let (sArgs, sRet) = sGatherPis ci.ty
-  sUniqueArgs <- telWithUniqueNames sArgs
+  sUniqueArgs <- uniqueTel sArgs
 
   -- Convert to HOAS
   return $ \ps motive ->
@@ -136,7 +164,7 @@ hIndicesTel di = do
 
   -- Access the relevant info
   let (sIndices, _) = sGatherPis di.familyTy
-  sUniqueIndices <- telWithUniqueNames sIndices
+  sUniqueIndices <- uniqueTel sIndices
 
   -- Convert to HOAS
   return $ \ps -> unembedTel (spineToEnv ps) sUniqueIndices

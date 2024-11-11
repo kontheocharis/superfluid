@@ -79,6 +79,8 @@ data CtorGlobalInfo = CtorGlobalInfo
 
 data CtorConstructions = CtorConstructions
   { args :: Spine HTm -> HTel,
+    argsArity :: Tel (),
+    ty :: Spine HTm -> HTy,
     returnIndices :: Spine HTm -> Spine HTm -> Spine HTm,
     returnTy :: Spine HTm -> Spine HTm -> HTm
   }
@@ -96,9 +98,12 @@ dataGlobalFromInfo di = DataGlobal di.name
 
 data DataConstructions = DataConstructions
   { params :: HTel,
+    fullTy :: HTy,
+    paramsArity :: Tel (),
     motive :: Spine HTm -> HTm,
     elim :: Spine HTm -> HTm,
-    indices :: Spine HTm -> HTel
+    indices :: Spine HTm -> HTel,
+    indicesArity :: Tel ()
   }
 
 data DefGlobalInfo = DefGlobalInfo

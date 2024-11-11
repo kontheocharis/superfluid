@@ -24,7 +24,6 @@ import Common
     Param (..),
     PiMode (..),
     PrimGlobal (..),
-    Qty (..),
     Tag,
     Tel,
     mapSpineM,
@@ -171,7 +170,7 @@ unelabSig = do
     unelabData n d ts = do
       sig <- view
       te' <- unelabTel [] d.params
-      ty' <- unelab (telNames d.params) d.ty.body
+      ty' <- unelab (telNames d.params) d.familyTy
       ctors' <-
         mapM
           ( \n' ->
@@ -186,7 +185,7 @@ unelabSig = do
 
     unelabCtor :: (Unelab m) => Name -> CtorGlobalInfo -> [Name] -> Set Tag -> m PCtor
     unelabCtor n c dataParams ts = do
-      ty' <- unelab dataParams c.ty.body
+      ty' <- unelab dataParams c.ty
       return $ MkPCtor n (MaybeQty (Just c.qty)) ty' ts
 
     unelabDef :: (Unelab m) => Name -> DefGlobalInfo -> Set Tag -> m PDef

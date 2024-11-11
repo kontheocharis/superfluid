@@ -23,6 +23,7 @@ import Common
     mapSpineM,
     spineValues,
     unName,
+    uniqueTel,
     pattern Possible,
   )
 import Control.Monad.Extra (when)
@@ -33,7 +34,9 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation (Eval)
 import Globals
-  ( CtorGlobalInfo (..),
+  ( CtorConstructions (..),
+    CtorGlobalInfo (..),
+    DataConstructions (..),
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
@@ -99,8 +102,8 @@ jsLam v q b = do
     Zero -> return $ JsExpr b'
     _ -> return . JsExpr $ "(" ++ v' ++ ") => " ++ b'
 
-jsLams :: (Gen m) => Spine Name -> m JsExpr -> m JsExpr
-jsLams vs b = foldr (\t -> jsLam t.arg t.qty) b (toList vs)
+jsLams :: (Gen m) => Tel a -> m JsExpr -> m JsExpr
+jsLams vs b = foldr (\t -> jsLam t.name t.qty) b (toList vs)
 
 jsLet :: (Gen m) => Name -> Qty -> m JsExpr -> m [JsStat] -> m [JsStat]
 jsLet v q t ts = do
@@ -143,8 +146,8 @@ generateDeclItem d = do
   t <- generateExpr (fromJust d.tm)
   addDecl $ jsConst (jsName d.name) t
 
-jsLamsForSpine :: (Gen m) => Spine Name -> Spine JsExpr -> ([JsExpr] -> m JsExpr) -> m JsExpr
-jsLamsForSpine ns sp f = do
+jsLamsForTel :: (Gen m) => Tel a -> Spine JsExpr -> ([JsExpr] -> m JsExpr) -> m JsExpr
+jsLamsForTel ns sp f = do
   jsLams (S.drop (length sp) ns) $ do
     sp2 <- mapM (jsVar . Idx) [length sp .. length ns - 1]
     f (spineValues sp ++ sp2)
@@ -152,17 +155,18 @@ jsLamsForSpine ns sp f = do
 generateData :: (Gen m) => DataGlobal -> Spine JsExpr -> m JsExpr
 generateData d sp = do
   di <- access (getDataGlobal d)
-  indices <- mapSpineM (const uniqueName) (onlyRelevantArgs di.indexArity)
-  let params = fmap (\s -> Arg s.mode s.qty s.name) (onlyRelevantParams di.params)
-  jsLamsForSpine (params S.>< indices) sp $ \_ -> return jsNull
+  let dc = fromJust di.constructions
+  indices <- uniqueTel (onlyRelevantParams dc.indicesArity)
+  params <- uniqueTel (onlyRelevantParams dc.paramsArity)
+  jsLamsForTel (params S.>< indices) sp $ \_ -> return jsNull
 
 generateCtor :: (Gen m) => CtorGlobal -> Spine JsExpr -> m JsExpr
 generateCtor c sp = do
   ci <- access (getCtorGlobal c)
+  let cc = fromJust ci.constructions
   di <- access (getDataGlobal ci.dataGlobal)
-  let relevantArgArity = onlyRelevantArgs ci.argArity
-  ns <- mapSpineM (const uniqueName) relevantArgArity
-  jsLamsForSpine ns sp $ \ps -> do
+  ns <- uniqueTel $ onlyRelevantParams cc.argsArity
+  jsLamsForTel ns sp $ \ps -> do
     let args = [jsStringLit ci.name.unName | length di.ctors > 1] ++ ps
     case args of
       [a] -> return a
@@ -188,7 +192,7 @@ generateCase c = do
                   _ -> error "Case not supported"
                 _ -> error "Case not supported"
               let relevantBinds = onlyRelevantBinds p.binds
-              ls <- jsLams (S.fromList $ map (uncurry $ Arg Explicit) relevantBinds) $ generateExpr t
+              ls <- jsLams (S.fromList $ map (\(q, n) -> Param Explicit q n ()) relevantBinds) $ generateExpr t
               let tag = jsStringLit ci.name.unName
               let offset = if length di.ctors <= 1 then 0 else 1
 

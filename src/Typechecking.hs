@@ -8,6 +8,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use bimap" #-}
 
 module Typechecking
   ( Tc (..),
@@ -87,7 +89,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Constructions (dataConstructions, hElimTy, hMotiveTy)
+import Constructions (dataConstructions, hElimTy, hMotiveTy, ctorParamsClosure, dataFullVTy, dataElimParamsClosure, dataMotiveParamsClosure)
 import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -742,8 +744,8 @@ caseOf mode s r cs = do
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
 
       di <- access (getDataGlobal d)
-      let motive = fromJust di.motiveTy
-      motiveApplied <- motive $$ map (\a -> a.arg) (toList paramSp)
+      motive <- dataMotiveParamsClosure di
+      motiveApplied <- motive $$> paramSp
       rr <- case r of
         Just r' -> expect Zero $ fst <$> r' (Check motiveApplied)
         Nothing -> constLamsForPis motiveApplied ty
@@ -847,7 +849,8 @@ dataItem n ts te ty = do
 
 endDataItem :: (Tc m) => DataGlobal -> m ()
 endDataItem dat = do
-  cs <- dataConstructions dat
+  di <- access (getDataGlobal dat)
+  cs <- dataConstructions di
   modify (modifyDataItem dat (\d -> d {constructions = Just cs}))
 
 ctorItem :: (Tc m) => DataGlobal -> Name -> Maybe Qty -> Set Tag -> Child m -> m ()
@@ -907,7 +910,7 @@ reprDataItem dat ts c = do
     reprItem
       Zero
       Empty
-      (reprHere 1 di.fullTy)
+      (dataFullVTy di >>= reprHere 1 )
       (addDataRepr dat)
       ts
       c
@@ -922,7 +925,7 @@ reprCtorItem te ctor ts c = do
     reprItem
       (if irr then Zero else Many)
       te
-      (evalInOwnCtxHere ci.ty >>= reprHere 1)
+      (ctorParamsClosure ci >>= evalInOwnCtxHere >>= reprHere 1)
       (addCtorRepr ctor)
       ts
       c
@@ -941,24 +944,32 @@ reprCaseItem te dat ts c = do
     reprItem
       Many
       te
-      (evalInOwnCtxHere (fromJust di.elimTy))
+      (dataElimParamsClosure di >>= evalInOwnCtxHere)
       (addCaseRepr dat)
       ts
       c
   return ()
+
+instantiateTel :: (Tc m) => Tel a -> m (Spine STm, Spine VTm)
+instantiateTel Empty = return (Empty, Empty)
+instantiateTel (Param m q n _ :<| ts) = do
+  mta <- freshMeta q
+  mtas <- enterCtx (typelessBind n q) $ instantiateTel ts
+  vmta <- evalHere mta
+  return (Arg m q mta :<| fst mtas, Arg m q vmta :<| snd mtas)
 
 global :: (Tc m) => Name -> GlobalInfo -> m (STm, VTy)
 global n i = case i of
   DefInfo d -> do
     return (SDef (DefGlobal n), d.ty)
   DataInfo d -> do
-    ty' <- evalHere $ sPis d.params d.ty.body
+    ty' <- dataFullVTy d
     return (SData (DataGlobal n), ty')
   CtorInfo c -> do
     di <- access (getDataGlobal c.dataGlobal)
-    metas <- traverse (\p -> Arg p.mode p.qty <$> freshMeta p.qty) di.params
-    vmetas <- mapSpineM evalHere metas
-    ty' <- c.ty $$> vmetas
+    (metas, vmetas) <- instantiateTel di.params
+    tyCl <- ctorParamsClosure c
+    ty' <- tyCl $$> vmetas
     return (SCtor (CtorGlobal n, metas), ty')
   PrimInfo p -> return (SPrim (PrimGlobal n), p.ty)
 

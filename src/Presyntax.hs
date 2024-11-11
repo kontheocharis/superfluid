@@ -179,9 +179,9 @@ pLamsToList (PLam m n t) = let (ns, b) = pLamsToList t in (Arg m Many n : ns, b)
 pLamsToList (PLocated _ t) = pLamsToList t
 pLamsToList t = ([], t)
 
-pLams :: Spine Name -> PTm -> PTm
+pLams :: Tel a -> PTm -> PTm
 pLams Empty b = b
-pLams (Arg m _ n :<| xs) b = PLam m (PName n) (pLams xs b)
+pLams (Param m _ n _ :<| xs) b = PLam m (PName n) (pLams xs b)
 
 pGatherApps :: PTm -> (PTm, Spine PTm)
 pGatherApps (PApp m t u) = let (t', us) = pGatherApps t in (t', us :|> Arg m Many u)

@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MonoLocalBinds #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE MonoLocalBinds #-}
 
 module Accounting
   ( Acc (..),
@@ -19,10 +19,12 @@ import Common
     Loc (..),
     Name,
     Param (..),
+    Parent (child),
     Qty (..),
     Spine,
     Tel,
-    minus, Parent (child),
+    minus,
+    telToBinds,
   )
 import Context
   ( Ctx (..),
@@ -30,13 +32,15 @@ import Context
     accessCtx,
     coindexCtx,
     enterCtx,
-    need,
     evalHere,
     evalInOwnCtxHere,
+    expect,
     modifyCtx,
+    need,
+    qty,
     setCtxEntryQty,
     typelessBind,
-    typelessBinds, expect, qty,
+    typelessBinds,
   )
 import Data.Foldable (Foldable (..), traverse_)
 import Data.Maybe (fromJust)
@@ -225,12 +229,11 @@ instance (Account a) => Account (Tel a) where
 instance Account DataGlobalInfo where
   account di = do
     account di.params
-    expect Zero $ account di.fullTy
-    let bs = map (\p -> (p.qty, p.name)) (toList di.params)
+    expect Zero $ account di.familyTy
     traverse_
       ( \c -> do
           ci <- access (getCtorGlobal c)
-          expect Zero $ account (ci.ty, bs)
+          enterCtx (typelessBinds (telToBinds di.params)) $ account ci.ty
       )
       di.ctors
 
