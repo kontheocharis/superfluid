@@ -19,22 +19,21 @@ import Common
   ( Arg (..),
     CtorGlobal (..),
     Has (..),
-    HasNameSupply (uniqueName),
+    HasNameSupply (..),
     Name (..),
     Param (..),
     PiMode (..),
     Qty (..),
     Spine,
-    Tel,
     mapSpine,
     spineValues,
-    telToBinds,
-    uniqueTel, Lvl (..),
+    uniqueTel,
   )
-import Context
+import Control.Monad (void)
+import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
-import Evaluation (Eval, close, ($$>), eval)
+import Evaluation (Eval, eval)
 import Globals
   ( CtorConstructions (..),
     CtorGlobalInfo (..),
@@ -46,33 +45,42 @@ import Globals
     getDataGlobal,
   )
 import Syntax
-  ( Closure (Closure),
-    Env,
+  ( Env,
     HTel (..),
     HTm (..),
     HTy,
-    VTm,
     VTy,
+    embedClosure,
     hApp,
     hPis,
     hSimpleTel,
+    piArgsArity,
     sGatherApps,
     sGatherPis,
+    sPis,
     unembed,
-    unembedTel, sPis, hOwnSpine, embed, embedClosure,
+    unembedTel, Closure,
   )
-import Data.Maybe (fromJust)
 
 -- Various constructions on datatypes using HOAS
 
-type Constr m = (Eval m, Has m Ctx, HasNameSupply m, Has m Sig)
+type Constr m = (Eval m, HasNameSupply m, Has m Sig)
 
 ctorConstructions :: (Constr m) => CtorGlobalInfo -> m CtorConstructions
 ctorConstructions ci = do
   ctorArgs <- hCtorArgs ci
   ctorReturnTy <- hCtorReturnTy ci
   ctorReturnIndices <- hCtorReturnIndices ci
-  return $ CtorConstructions {args = ctorArgs, returnTy = ctorReturnTy, returnIndices = ctorReturnIndices}
+  let argsArity = piArgsArity ci.ty
+  ctorTy <- hCtorTy ci
+  return $
+    CtorConstructions
+      { args = ctorArgs,
+        returnTy = ctorReturnTy,
+        returnIndices = ctorReturnIndices,
+        argsArity = argsArity,
+        ty = ctorTy
+      }
 
 dataConstructions :: (Constr m) => DataGlobalInfo -> m DataConstructions
 dataConstructions di = do
@@ -81,12 +89,16 @@ dataConstructions di = do
   motiveTy <- hMotiveTy indicesTel
   methodTys <- mapM hMethodTy di.ctors
   elimTy <- hElimTy di indicesTel motiveTy methodTys
+  let indicesArity = piArgsArity di.familyTy
+  let paramsArity = fmap void di.params
   return $
     DataConstructions
       { params = paramsTel,
         indices = indicesTel,
         motive = motiveTy,
-        elim = elimTy
+        elim = elimTy,
+        indicesArity = indicesArity,
+        paramsArity = paramsArity
       }
 
 ctorParamsClosure :: (Constr m) => CtorGlobalInfo -> m Closure
@@ -113,6 +125,9 @@ type HCtorArgs = Spine HTm -> HTel
 
 spineToEnv :: Spine HTm -> Env HTm
 spineToEnv = reverse . spineValues
+
+hCtorTy :: (Constr m) => CtorGlobalInfo -> m (Spine HTm -> HTy)
+hCtorTy ci = return $ \ps -> unembed (spineToEnv ps) ci.ty
 
 hCtorArgs :: (Constr m) => CtorGlobalInfo -> m HCtorArgs
 hCtorArgs ci = do
@@ -158,15 +173,8 @@ type HIndicesTel = Spine HTm -> HTel
 
 hIndicesTel :: (Constr m) => DataGlobalInfo -> m HIndicesTel
 hIndicesTel di = do
-  -- TODO: Create modules for the following:
-  --  1. Representation (reprInf goes here)
-  --  2. Mapping (over signatures)
-
-  -- Access the relevant info
   let (sIndices, _) = sGatherPis di.familyTy
   sUniqueIndices <- uniqueTel sIndices
-
-  -- Convert to HOAS
   return $ \ps -> unembedTel (spineToEnv ps) sUniqueIndices
 
 type HMotiveTy = Spine HTm -> HTm

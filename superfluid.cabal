@@ -40,7 +40,9 @@ library
       Persistence
       Presyntax
       Printing
+      Representation
       Syntax
+      Traversal
       Typechecking
       Unelaboration
   other-modules:

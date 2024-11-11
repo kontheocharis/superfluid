@@ -31,7 +31,7 @@ import Data.Sequence (Seq)
 import Data.String
 import Data.Text.IO (hPutStrLn)
 import Elaboration (Elab (..), ElabError, elabProgram)
-import Evaluation (Eval (..), reprInfSig)
+import Evaluation (Eval (..))
 import Globals (Sig, emptySig)
 import Meta (SolvedMetas, emptySolvedMetas)
 import Options.Applicative (auto, execParser, option, value, (<**>), (<|>))
@@ -66,6 +66,7 @@ import Typechecking
     prettyGoal,
   )
 import Unelaboration (Unelab, unelabSig)
+import Representation (reprInfSig)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 

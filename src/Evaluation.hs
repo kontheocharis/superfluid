@@ -25,13 +25,13 @@ module Evaluation
     vWhnf,
     vUnfold,
     vUnfoldLazy,
-    reprInfSig,
     uniqueVLams,
     evalInOwnCtx,
     extendEnvByNVars,
-    mapGlobalInfoM,
+    caseToSpine,
     close,
     ($$>),
+    closureToLam,
   )
 where
 
@@ -318,9 +318,6 @@ reprClosure :: Int -> Closure -> Closure
 -- reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))
 reprClosure = postCompose . sReprTimes
 
-sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
-sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const (Explicit, Many)) p.binds)) True
-
 vLazyCaseToSpine :: (Eval m) => VLazyCase -> m (Spine VTm)
 vLazyCaseToSpine = caseToSpine VLazy (\p -> uniqueVLams (map (const (Explicit, Many)) p.binds)) False
 
@@ -340,50 +337,6 @@ caseToSpine sToT uniqueLams withDataParams c = do
       ((if withDataParams then c.datParams else Empty) :|> Arg Explicit Zero c.elimTy)
       c.clauses
   return $ firstPart >< c.subjectIndices >< S.singleton (Arg Explicit Many (sToT c.subject))
-
-mapTelM :: (Eval m) => Lvl -> (Lvl -> STm -> m STm) -> Tel STm -> m (Tel STm)
-mapTelM l f Empty = return Empty
-mapTelM l f (Param m q x a :<| tel) = do
-  a' <- f l a
-  tel' <- mapTelM (nextLvl l) f tel
-  return $ Param m q x a' :<| tel'
-
-mapDataGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> DataGlobalInfo -> m DataGlobalInfo
-mapDataGlobalInfoM f (DataGlobalInfo n params ty ctors constructions) = do
-  params' <- mapTelM (Lvl 0) f params
-  ty' <- f (Lvl 0) ty
-  constructions' <- dataConstructions (DataGlobalInfo n params ty ctors Nothing)
-  -- constructions' <- makeDa
-  -- motiveTy' <- traverse (mapClosureM f) constructions
-  -- elimTy' <- traverse (mapClosureM f) elimTy
-  _
-  -- return $ DataGlobalInfo n params' fullTy' ty' ctors motiveTy' elimTy'
-
-mapCtorGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> CtorGlobalInfo -> m CtorGlobalInfo
-mapCtorGlobalInfoM f (CtorGlobalInfo n q ty idx p dataGlobal argArity) = do
-  _
-  -- ty' <- mapClosureM f ty
-  -- return $ CtorGlobalInfo n q ty' idx p dataGlobal argArity
-
-mapDefGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> DefGlobalInfo -> m DefGlobalInfo
-mapDefGlobalInfoM f (DefGlobalInfo n q ty vtm tm) = do
-  ty' <- quote (Lvl 0) ty >>= f >>= eval []
-  vtm' <- traverse (quote (Lvl 0) >=> f >=> eval []) vtm
-  b <- normaliseProgram
-  tm' <- if b then traverse (quote (Lvl 0)) vtm' else traverse f tm
-  return $ DefGlobalInfo n q ty' vtm' tm'
-
-mapPrimGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
-mapPrimGlobalInfoM f (PrimGlobalInfo n q ty) = do
-  ty' <- quote (Lvl 0) ty >>= f >>= eval []
-  return $ PrimGlobalInfo n q ty'
-
-mapGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> GlobalInfo -> m GlobalInfo
-mapGlobalInfoM f i = case i of
-  DataInfo d -> DataInfo <$> mapDataGlobalInfoM f d
-  CtorInfo c -> CtorInfo <$> mapCtorGlobalInfoM f c
-  DefInfo d -> DefInfo <$> mapDefGlobalInfoM f d
-  PrimInfo p -> PrimInfo <$> mapPrimGlobalInfoM f p
 
 vReprNTimes :: Int -> VHead -> VHead
 vReprNTimes i = composeZ i (VLazyHead . VRepr) (VNeuHead . VUnrepr)
@@ -429,87 +382,6 @@ vRepr l i t = do
       -- sp' <- mapSpineM (vRepr l i) sp
       vApp (headAsValue (vReprNTimes i (VLazyHead n))) sp
 
-reprInfSig :: (Eval m) => m ()
-reprInfSig = do
-  s <- view
-  let s' = removeRepresentedItems s
-  s'' <- mapSigContentsM (mapGlobalInfoM sReprInf) s'
-  modify (const s'')
-
-sReprInfGlob :: (Eval m) => Lvl -> Glob -> Spine STm -> m STm
-sReprInfGlob l g xs = do
-  d' <- access (getGlobalRepr g)
-  case d' of
-    Just r' -> do
-      r'' <- closureToLam r'
-      let res = sAppSpine r'' xs
-      sReprInf l res
-    Nothing -> do
-      xs' <- mapSpineM (sReprInf l) xs
-      return $ sGlobWithParams g xs'
-
-sReprInfCase :: (Eval m) => Lvl -> SCase -> m STm
-sReprInfCase l c = do
-  r <- access (getCaseRepr c.dat)
-  case r of
-    Just r' -> do
-      r'' <- closureToLam r'
-      sp <- sCaseToSpine c
-      let res = sAppSpine r'' sp
-      sReprInf l res
-    Nothing -> do
-      datParams' <- mapSpineM (sReprInf l) c.datParams
-      subject' <- sReprInf l c.subject
-      subjectIndices' <- mapSpineM (sReprInf l) c.subjectIndices
-      elimTy' <- sReprInf l c.elimTy
-      clauses' <-
-        traverse
-          ( \case
-              Clause p t -> do
-                t' <- traverse (sReprInf (nextLvls l (length p.binds))) t
-                return $ Clause p t'
-          )
-          c.clauses
-      return $ SCase (Case c.dat datParams' subject' subjectIndices' elimTy' clauses')
-
-sReprInf :: (Eval m) => Lvl -> STm -> m STm
-sReprInf l (SPi m q x a b) = do
-  a' <- sReprInf l a
-  b' <- sReprInf (nextLvl l) b
-  return $ SPi m q x a' b'
-sReprInf l (SLam m q x t) = do
-  t' <- sReprInf (nextLvl l) t
-  return $ SLam m q x t'
-sReprInf _ SU = return SU
-sReprInf l (SLit t) = SLit <$> traverse (sReprInf l) t
-sReprInf l (SApp m q a b) = do
-  a' <- sReprInf l a
-  b' <- sReprInf l b
-  return $ SApp m q a' b'
-sReprInf l (SData d) = sReprInfGlob l (DataGlob d) Empty
-sReprInf l (SCtor (c, xs)) = sReprInfGlob l (CtorGlob c) xs
-sReprInf l (SDef d) = do
-  ts <- access (getGlobalTags d.globalName)
-  if UnfoldTag `elem` ts
-    then do
-      g' <- access (unfoldDef d)
-      case g' of
-        Just t -> quote l t >>= sReprInf l
-        Nothing -> error "Found UnfoldTag but no syntax for def"
-    else sReprInfGlob l (DefGlob d) Empty
-sReprInf l (SPrim p) = sReprInfGlob l (PrimGlob p) Empty
-sReprInf l (SCase c) = sReprInfCase l c
-sReprInf l (SRepr x) = sReprInf l x
-sReprInf l (SUnrepr x) = sReprInf l x
-sReprInf _ (SMeta m bs) = do
-  warnMsg $ "found metavariable while representing program: " ++ show m
-  return $ SMeta m bs
-sReprInf l (SLet q x ty t y) = do
-  ty' <- sReprInf l ty
-  t' <- sReprInf l t
-  y' <- sReprInf (nextLvl l) y
-  return $ SLet q x ty' t' y'
-sReprInf _ (SVar i) = return $ SVar i
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t

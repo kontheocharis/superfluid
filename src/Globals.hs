@@ -98,7 +98,6 @@ dataGlobalFromInfo di = DataGlobal di.name
 
 data DataConstructions = DataConstructions
   { params :: HTel,
-    fullTy :: HTy,
     paramsArity :: Tel (),
     motive :: Spine HTm -> HTm,
     elim :: Spine HTm -> HTm,

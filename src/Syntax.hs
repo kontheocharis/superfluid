@@ -60,6 +60,7 @@ module Syntax
     hSimpleTel,
     hOwnSpine,
     embedClosure,
+    piArgsArity,
   )
 where
 
@@ -94,6 +95,7 @@ import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
+import Control.Monad (void)
 
 data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 
@@ -323,6 +325,11 @@ sGlobWithParams (DataGlob d) _ = SData d
 sGlobWithParams (CtorGlob c) xs = SCtor (c, xs)
 sGlobWithParams (DefGlob d) _ = SDef d
 sGlobWithParams (PrimGlob p) _ = SPrim p
+
+piArgsArity :: STm -> Tel ()
+piArgsArity ty = do
+  let (sArgs, _) = sGatherPis ty
+  fmap void sArgs
 
 -- HOAS
 
