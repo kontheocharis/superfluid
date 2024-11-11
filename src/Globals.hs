@@ -44,6 +44,7 @@ module Globals
     getPrimGlobal,
     modifyPrimItem,
     modifyCtorItem,
+    dataGlobalFromInfo,
   )
 where
 
@@ -77,8 +78,8 @@ data CtorGlobalInfo = CtorGlobalInfo
   }
 
 data CtorConstructions = CtorConstructions
-  { args :: Spine HTm -> Tel HTy,
-    returnIndices :: Spine HTm -> Spine HTm -> HTm,
+  { args :: Spine HTm -> HTel,
+    returnIndices :: Spine HTm -> Spine HTm -> Spine HTm,
     returnTy :: Spine HTm -> Spine HTm -> HTm
   }
 
@@ -90,8 +91,11 @@ data DataGlobalInfo = DataGlobalInfo
     constructions :: Maybe DataConstructions
   }
 
+dataGlobalFromInfo :: DataGlobalInfo -> DataGlobal
+dataGlobalFromInfo di = DataGlobal di.name
+
 data DataConstructions = DataConstructions
-  { params :: Tel HTy,
+  { params :: HTel,
     motive :: Spine HTm -> HTm,
     elim :: Spine HTm -> HTm,
     indices :: Spine HTm -> HTel
