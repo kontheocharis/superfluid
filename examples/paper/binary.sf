@@ -85,8 +85,8 @@ data FinLeq : [n : Nat] -> Fin n -> Fin n -> Type {
   fin-leq-s : [n : Nat] -> [a : Fin n, b : Fin n] -> FinLeq a b -> FinLeq (fs a) (fs b),
 }
 
-repr data Inventory n as RISigma (ByteVec n) (AllBytes (\i => FinLeq i 4n)) {
-  empty as ri-pair bvnil all-bvnil,
+repr data Inventory n as Subset (ByteVec n) (AllBytes (\i => FinLeq i 4n)) {
+  empty as element bvnil all-bvnil,
   add-item i inv as ?add-item,
 
   case i to E {
@@ -101,7 +101,7 @@ def IsValidPlayer : ByteList -> Type {
   ?is-valid-player
 }
 
-repr data Player as RISigma ByteList IsValidPlayer {
+repr data Player as Subset ByteList IsValidPlayer {
   player pos dir size inv as ?player,
   case i to E {
     player => pl,

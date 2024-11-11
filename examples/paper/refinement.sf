@@ -3,23 +3,23 @@ data Vec (T : Type) : Nat -> Type {
   vec-cons : [n : Nat] -> T -> Vec T n -> Vec T (s n)
 }
 
-def vec-length : [T : Type, * n : Nat] -> Vec T n -> Nat {
+def vec-length : [T : Type, ! n : Nat] -> Vec T n -> Nat {
   \[_] [n] _ => n
 }
 
 def 0 Vec' : Type -> Nat -> Type {
-  \T n => RISigma (List T) (\l => Equal (length l) n)
+  \T n => Subset (List T) (\l => Equal (length l) n)
 }
 
 #unfold
 def vec-nil' : [T : Type] -> Vec' T 0 {
-  ri-pair nil refl
+  element nil refl
 }
 
 #unfold
 def vec-cons' : [T : Type, n : Nat] -> T -> Vec' T n -> Vec' T (s n) {
   \[T] [n] x xs => {
-    ri-pair (cons x (ri-fst xs)) (cong s (ri-snd xs))
+    element (cons x (inclusion xs)) (cong s (membership xs))
   }
 }
 
@@ -27,25 +27,25 @@ def vec-cons' : [T : Type, n : Nat] -> T -> Vec' T n -> Vec' T (s n) {
 def vec-ind' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
     -> E 0 vec-nil'
     -> ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))
-    -> [* n : Nat] -> (b : Vec' T n) -> E n b
+    -> [! n : Nat] -> (b : Vec' T n) -> E n b
 {
   \E ni co [n] b' => {
-    let l = ri-fst b';
-    let 0 p = ri-snd b';
+    let l = inclusion b';
+    let 0 p = membership b';
 
     subst
-      (\t => E n t) (sym ri-sigma-eta)
-      ((case l to (\l => (p : Equal (length l) n) -> E n (ri-pair l p)) {
-        nil => case n to (\n' => (p : Equal z n') -> E n' (ri-pair nil p)) {
-          z => \p => subst (\p' => E z (ri-pair nil p')) (sym (uip p)) ni,
+      (\t => E n t) (sym subset-eta)
+      ((case l to (\l => (p : Equal (length l) n) -> E n (element l p)) {
+        nil => case n to (\n' => (p : Equal z n') -> E n' (element nil p)) {
+          z => \p => subst (\p' => E z (element nil p')) (sym (uip p)) ni,
           s n' => \p => case z-neq-s p {},
         },
-        cons x xs => case n to (\n' => (p : Equal (s (length xs)) n') -> E n' (ri-pair (cons x xs) p)) {
+        cons x xs => case n to (\n' => (p : Equal (s (length xs)) n') -> E n' (element (cons x xs) p)) {
           z => \p => case z-neq-s (sym p) {},
           s n'' => \p => {
-            subst (\p' => E (s n'') (ri-pair (cons x xs) p'))
+            subst (\p' => E (s n'') (element (cons x xs) p'))
               (equality-is-prop (cong s (s-inj p)) p)
-              (co x (ri-pair xs (s-inj p)))
+              (co x (element xs (s-inj p)))
           }
         },
       }) p)
@@ -65,7 +65,7 @@ def 0 vec-ind-nil' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
 def 0 vec-ind-cons' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
     -> [ni : E 0 vec-nil']
     -> [co : ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))]
-    -> [* n : Nat] -> (x : T) -> (xs : Vec' T n)
+    -> [! n : Nat] -> (x : T) -> (xs : Vec' T n)
     -> Equal (vec-ind' E ni co (vec-cons' x xs)) (co x xs)
 {
   \x xs => ?vec-ind-cons'
@@ -105,7 +105,7 @@ def vec-index : [T : Type, n : Nat] -> Vec T n -> Fin n -> T {
 }
 
 def safe-index : [T : Type, n : Nat] -> (l : List T) -> 0 Equal (length l) n -> (i : Fin n) -> T {
-  \l p i => vec-index (unrepr (ri-pair l p)) i
+  \l p i => vec-index (unrepr (element l p)) i
 }
 
 def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
@@ -115,7 +115,7 @@ def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
   }
 }
 
-repr def vec-to-list as \v => ri-fst (repr v)
+repr def vec-to-list as \v => inclusion (repr v)
 
 def main : IO () {
   let v = vec-cons 1 (vec-cons 2 (vec-cons 3 vec-nil));
