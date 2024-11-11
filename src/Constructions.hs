@@ -45,7 +45,8 @@ import Globals
     getDataGlobal,
   )
 import Syntax
-  ( Env,
+  ( Closure (..),
+    Env,
     HTel (..),
     HTm (..),
     HTy,
@@ -59,7 +60,7 @@ import Syntax
     sGatherPis,
     sPis,
     unembed,
-    unembedTel, Closure,
+    unembedTel,
   )
 
 -- Various constructions on datatypes using HOAS
@@ -86,7 +87,7 @@ dataConstructions :: (Constr m) => DataGlobalInfo -> m DataConstructions
 dataConstructions di = do
   let paramsTel = unembedTel [] di.params
   indicesTel <- hIndicesTel di
-  motiveTy <- hMotiveTy indicesTel
+  motiveTy <- hMotiveTy di indicesTel
   methodTys <- mapM hMethodTy di.ctors
   elimTy <- hElimTy di indicesTel motiveTy methodTys
   let indicesArity = piArgsArity di.familyTy
@@ -103,10 +104,8 @@ dataConstructions di = do
 
 ctorParamsClosure :: (Constr m) => CtorGlobalInfo -> m Closure
 ctorParamsClosure ci = do
-  let dc = fromJust ci.constructions
   di <- access (getDataGlobal ci.dataGlobal)
-  let dd = fromJust di.constructions
-  return $ embedClosure [] dd.paramsArity dc.ty
+  return $ Closure (length di.params) [] ci.ty
 
 dataFullVTy :: (Constr m) => DataGlobalInfo -> m VTy
 dataFullVTy di = eval [] $ sPis di.params di.familyTy
@@ -139,7 +138,7 @@ type HCtorReturnTy = Spine HTm -> Spine HTm -> HTm
 hCtorReturnTy :: (Constr m) => CtorGlobalInfo -> m HCtorReturnTy
 hCtorReturnTy ci = do
   let (_, sRet) = sGatherPis ci.ty
-  return $ \ps is -> unembed (spineToEnv (ps <> is) ++ spineToEnv ps) sRet
+  return $ \ps is -> unembed (spineToEnv (ps <> is)) sRet
 
 type HCtorReturnIndices = Spine HTm -> Spine HTm -> Spine HTm
 
@@ -147,7 +146,7 @@ hCtorReturnIndices :: (Constr m) => CtorGlobalInfo -> m HCtorReturnIndices
 hCtorReturnIndices ci = do
   let (_, sRet) = sGatherPis ci.ty
   let (_, sRetSp) = sGatherApps sRet
-  return $ \ps is -> mapSpine (unembed (spineToEnv (ps <> is) ++ spineToEnv ps)) sRetSp
+  return $ \ps is -> mapSpine (unembed (spineToEnv (ps <> is))) sRetSp
 
 type HMethodTy = Spine HTm -> HTm -> HTm
 
@@ -179,8 +178,9 @@ hIndicesTel di = do
 
 type HMotiveTy = Spine HTm -> HTm
 
-hMotiveTy :: (Constr m) => HIndicesTel -> m HMotiveTy
-hMotiveTy te = return $ \ps -> hPis (te ps) (const HU)
+hMotiveTy :: (Constr m) => DataGlobalInfo -> HIndicesTel -> m HMotiveTy
+hMotiveTy di te = return $ \ps ->
+  hPis (te ps) (\is -> HPi Explicit Zero (Name "_") (hApp (HData (dataGlobalFromInfo di)) (ps <> is)) (const HU))
 
 hElimTy :: (Constr m) => DataGlobalInfo -> HIndicesTel -> HMotiveTy -> [HMethodTy] -> m (Spine HTm -> HTy)
 hElimTy di indicesTel motiveTy methodTys = do

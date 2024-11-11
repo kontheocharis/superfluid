@@ -395,7 +395,7 @@ embedClosure :: Env VTm -> Tel () -> (Spine HTm -> HTm) -> Closure
 embedClosure env n f =
   let ownSpine = hOwnSpine (Lvl (length env)) n in
   let fHere = f ownSpine in
-  Closure (length n) [] (embed (Lvl (length n + length env)) fHere)
+  Closure (length n) env (embed (Lvl (length n + length env)) fHere)
 
 embed :: Lvl -> HTm -> STm
 embed l = \case

@@ -948,9 +948,9 @@ reprCaseItem te dat ts c = do
 
 instantiateTel :: (Tc m) => Tel a -> m (Spine STm, Spine VTm)
 instantiateTel Empty = return (Empty, Empty)
-instantiateTel (Param m q n _ :<| ts) = do
+instantiateTel (Param m q _ _ :<| ts) = do
   mta <- freshMeta q
-  mtas <- enterCtx (typelessBind n q) $ instantiateTel ts
+  mtas <- instantiateTel ts
   vmta <- evalHere mta
   return (Arg m q mta :<| fst mtas, Arg m q vmta :<| snd mtas)
 
