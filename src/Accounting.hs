@@ -229,13 +229,14 @@ instance (Account a) => Account (Tel a) where
 instance Account DataGlobalInfo where
   account di = do
     account di.params
-    expect Zero $ account di.familyTy
-    traverse_
-      ( \c -> do
-          ci <- access (getCtorGlobal c)
-          enterCtx (typelessBinds (telToBinds di.params)) $ account ci.ty
-      )
-      di.ctors
+    enterCtx (typelessBinds (telToBinds di.params)) $ do
+      expect Zero $ account di.familyTy
+      traverse_
+        ( \c -> do
+            ci <- access (getCtorGlobal c)
+            account ci.ty
+        )
+        di.ctors
 
 instance Account DefGlobalInfo where
   account f = do

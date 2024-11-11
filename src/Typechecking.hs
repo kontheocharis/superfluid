@@ -9,6 +9,7 @@
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use bimap" #-}
 
 module Typechecking
@@ -89,7 +90,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Constructions (dataConstructions, hElimTy, hMotiveTy, ctorParamsClosure, dataFullVTy, dataElimParamsClosure, dataMotiveParamsClosure)
+import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure, hElimTy, hMotiveTy)
 import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -868,23 +869,18 @@ ctorItem dat n mq ts ty = do
       Just (_, q) -> do
         ty'' <- unfoldHere vty >>= quoteHere
         return (ty'', q)
-  modify
-    ( addItem
-        n
-        ( CtorInfo
-            ( CtorGlobalInfo
-                { name = n,
-                  qty = q',
-                  ty = ty',
-                  index = idx,
-                  qtySum = q,
-                  dataGlobal = dat,
-                  constructions = Nothing
-                }
-            )
-        )
-        ts
-    )
+  let ci =
+        CtorGlobalInfo
+          { name = n,
+            qty = q',
+            ty = ty',
+            index = idx,
+            qtySum = q,
+            dataGlobal = dat,
+            constructions = Nothing
+          }
+  constructions <- ctorConstructions ci
+  modify (addItem n (CtorInfo (ci {constructions = Just constructions})) ts)
   modify (modifyDataItem dat (\d -> d {ctors = d.ctors ++ [CtorGlobal n]}))
 
 primItem :: (Tc m) => Name -> Maybe Qty -> Set Tag -> Child m -> m ()
@@ -910,7 +906,7 @@ reprDataItem dat ts c = do
     reprItem
       Zero
       Empty
-      (dataFullVTy di >>= reprHere 1 )
+      (dataFullVTy di >>= reprHere 1)
       (addDataRepr dat)
       ts
       c

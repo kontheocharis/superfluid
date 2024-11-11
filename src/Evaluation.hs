@@ -40,7 +40,6 @@ import Common
     Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
-    DefGlobal (..),
     Glob (..),
     Has (..),
     HasNameSupply (..),
@@ -52,7 +51,6 @@ import Common
     PiMode (..),
     Qty (Many, Zero),
     Spine,
-    Tag (..),
     Tel,
     composeZ,
     lvlToIdx,
@@ -63,7 +61,7 @@ import Common
     pattern Impossible,
     pattern Possible,
   )
-import Control.Monad (foldM, (>=>))
+import Control.Monad (foldM)
 import Control.Monad.Extra (firstJustM)
 import Control.Monad.State (StateT (..))
 import Control.Monad.State.Class (MonadState (..))
@@ -74,17 +72,9 @@ import Data.Semiring (Semiring (..))
 import Data.Sequence (Seq (..), fromList, (><))
 import qualified Data.Sequence as S
 import Globals
-  ( CtorGlobalInfo (..),
-    DataGlobalInfo (..),
-    DefGlobalInfo (..),
-    GlobalInfo (..),
-    PrimGlobalInfo (..),
-    Sig (..),
+  ( Sig (..),
     getCaseRepr,
     getGlobalRepr,
-    getGlobalTags,
-    mapSigContentsM,
-    removeRepresentedItems,
     unfoldDef,
   )
 import Literals (unfoldLit)
@@ -95,7 +85,6 @@ import Syntax
     Case (..),
     Closure (..),
     Env,
-    SCase,
     SPat (..),
     STm (..),
     VBlockedCase,
@@ -111,9 +100,7 @@ import Syntax
     VTm (..),
     VTy,
     headAsValue,
-    mapClosureM,
     sAppSpine,
-    sGlobWithParams,
     sLams,
     sReprTimes,
     uniqueSLams,
@@ -296,26 +283,7 @@ vCase c = do
 postCompose :: (STm -> STm) -> Closure -> Closure
 postCompose f (Closure n env t) = Closure n env (f t)
 
--- preCompose :: Closure -> (STm -> STm) -> Closure
--- preCompose (Closure n env t) f =
---   assert (n == 1) $
---     Closure
---       n
---       env
---       ( SApp
---           Explicit
---           ( sAppSpine
---               ( sLams
---                   (S.fromList $ map (\i -> Arg Explicit $ Name ("c" ++ show i)) [1 .. length env])
---                   (SLam Explicit (Name "x") t)
---               )
---               (S.fromList $ map (Arg Explicit . SVar . Idx) (reverse [1 .. length env]))
---           )
---           (f (SVar (Idx 0)))
---       )
-
 reprClosure :: Int -> Closure -> Closure
--- reprClosure i t = preCompose (postCompose (sReprTimes i) t) (sReprTimes (-i))
 reprClosure = postCompose . sReprTimes
 
 vLazyCaseToSpine :: (Eval m) => VLazyCase -> m (Spine VTm)
@@ -352,7 +320,6 @@ vRepr l i t = do
   where
     vReprNorm :: (Eval m) => VNorm -> m VTm
     vReprNorm (VPi m q v a b) = do
-      -- ty' <- vRepr l i a
       let b' = reprClosure i b
       return . VNorm $ VPi m q v a b'
     vReprNorm (VLam m q v a) = do
@@ -360,16 +327,12 @@ vRepr l i t = do
       return . VNorm $ VLam m q v t'
     vReprNorm VU = return (VNorm VU)
     vReprNorm (VData (d, sp)) = do
-      -- sp' <- mapSpineM (vRepr l i) sp
       vApp (headAsValue (vReprNTimes i (VDataHead d))) sp
     vReprNorm (VCtor ((c, pp), sp)) = do
-      -- pp' <- mapM (vRepr l i) pp
-      -- sp' <- mapSpineM (vRepr l i) sp
       vApp (headAsValue (vReprNTimes i (VCtorHead (c, pp)))) sp
 
     vReprNeu :: (Eval m) => VNeu -> m VTm
     vReprNeu (n, sp) = do
-      -- sp' <- mapSpineM (vRepr l i) sp
       case n of
         VUnrepr x | i > 0 -> do
           x' <- vRepr l (i - 1) (headAsValue x)
@@ -379,9 +342,7 @@ vRepr l i t = do
 
     vReprLazy :: (Eval m) => VLazy -> m VTm
     vReprLazy (n, sp) = do
-      -- sp' <- mapSpineM (vRepr l i) sp
       vApp (headAsValue (vReprNTimes i (VLazyHead n))) sp
-
 
 close :: (Eval m) => Int -> Env VTm -> STm -> m Closure
 close n env t = return $ Closure n env t
