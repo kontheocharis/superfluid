@@ -19,7 +19,7 @@
       "match": "\\b\\d+\\b"
     },
     {
-      "name": "meta.embedded.superfluid",
+      "name": "entity.name.tag.superfluid",
       "match": "#(\\w|-)+"
     },
     {

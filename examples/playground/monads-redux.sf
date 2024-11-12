@@ -70,23 +70,37 @@ def list-is-monad : Monad List {
   ?m
 }
 
--- def voidM : [M : Type -> Type] [[Monad M]] [A : Type] -> M A -> M () {
---   \f => {
---     do f;
---     return ()
---   }
+-- def voidM : [M : Type -> Type] [[Monad M]] -> M () {
+--   \[_] [[md]] => return [_] ()
 -- }
 
-def main : IO () {
-  let mo : Maybe Nat -> Maybe Nat = \m => {
-    let x : Nat <- m;
-    let x' = add 3 x;
-    return x'
-  };
-  case mo (just 3) {
-    nothing => io-return (),
-    just t => print t,
-  }
+data Display (T : Type) : Type {
+  display : (T -> String) -> Display T
+}
+
+#instance
+def nat-display : Display Nat {
+  ?nat-display
+}
+
+#instance
+def list-display : [T : Type] [[Display T]] -> Display (List T) {
+  ?list-display
+}
+
+def show : [T : Type] [[Display T]] -> T -> String {
+  \[[display f]] a => f a
+}
+
+def main : () {
+  -- let mo : Maybe Nat -> Maybe Nat = \m => {
+  --   let x : Nat <- m;
+  --   let x' = add 3 x;
+  --   return x'
+  -- };
+  let x : String = show [1, 2, 3];
+
+  ()
 }
 
 -- def main : () {

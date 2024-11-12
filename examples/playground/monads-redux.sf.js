@@ -242,6 +242,7 @@ var reprs_subst_p_ = (r2) => (b3) => (() => {
 })();
 var list_is_functor = null;
 var list_is_monad = null;
+var voidM = (_1) => (f3) => (((x16704) => (r5) => (b6) => r5)((_1)[0])((_1)[1])((_1)[2]))([]);
 var main = (() => {
   var mo0 = (m0) => (() => {
     switch ((m0)[0]) {

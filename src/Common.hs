@@ -432,7 +432,7 @@ instance (Pretty m a) => Pretty m (Spine a) where
   pretty Empty = return ""
   pretty (a :<| Empty) = pretty a
   pretty (a :<| sp) = do
-    a' <- pretty a
+    a' <- singlePretty a
     sp' <- pretty sp
     return $ a' ++ " " ++ sp'
 

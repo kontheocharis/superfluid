@@ -51,6 +51,7 @@ module Typechecking
     reprCaseItem,
     reprDefItem,
     ensureAllProblemsSolved,
+    synthesizeProblem,
   )
 where
 
@@ -105,6 +106,7 @@ import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
 import qualified Data.Set as SET
+import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
     close,
@@ -182,6 +184,7 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
+import Control.Exception (handle)
 
 data TcError
   = Mismatch [UnifyError]
@@ -196,7 +199,7 @@ data TcError
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
-  | CannotSynthesizeType VTy [(STm, VTy)]
+  | CannotSynthesizeType VTy [([Problem], STm, VTy)]
   | ExpectedCtor VPatB CtorGlobal
   | UnexpectedPattern VPatB
   | MissingCtor CtorGlobal
@@ -220,7 +223,7 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           t' <- pretty t
           cs' <-
             mapM
-              ( \(a, b) -> do
+              ( \(_, a, b) -> do
                   a' <- pretty a
                   b' <- pretty b
                   return $ a' ++ " : " ++ b'
@@ -353,6 +356,7 @@ ensureAllProblemsSolved = do
     then return ()
     else tcError $ RemainingProblems (toList ps)
 
+
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
 
@@ -408,7 +412,25 @@ freshMetaOrPatBind ty = orPatBind ty $ do
   return (n', vn)
 
 synthesizeOrPatBind :: (Tc m) => VTy -> m (STm, VTm)
-synthesizeOrPatBind ty = orPatBind ty $ synthesize ty
+synthesizeOrPatBind ty = do
+  orPatBind ty $ do
+    q <- qty
+    n' <- freshMeta q
+    vn <- evalHere n'
+    synthesize (vn, ty)
+
+insertFullRecord :: (Tc m) => (STm, VTy) -> m ([ProblemKind], STm, VTy)
+insertFullRecord (tm, ty) = do
+  f <- unfoldHere ty
+  case f of
+    VNorm (VPi m q _ a b) | m == Implicit || m == Instance -> do
+      (v, vv) <- need q (freshMetaOrPatBind a)
+      ty' <- b $$ [vv]
+      (ps, tm'', ty'') <- insertFullRecord (SApp m q tm v, ty')
+      case m of
+        Instance -> return (Synthesize vv a : ps, tm'', ty'')
+        _ -> return (ps, tm'', ty'')
+    _ -> return ([], tm, ty)
 
 insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
@@ -612,21 +634,21 @@ letIn mode q x a t u = do
   (u', ty) <- enterCtx (define x q' vt va) $ u mode
   return (SLet q' x a' t' u', ty)
 
-synthesize :: (Tc m) => VTy -> m (STm, VTy)
-synthesize ty =
-  trySynthesize ty >>= \case
+synthesize :: (Tc m) => (VTm, VTy) -> m (STm, VTy)
+synthesize (tm, ty) =
+  trySynthesize (tm, ty) >>= \case
     Right (v, vv) -> return (v, vv)
     Left _ -> do
-      q <- qty
-      m <- freshMeta q
-      vm <- evalHere m
-      addSynthesizeProblem vm ty
-      return (m, ty)
+      addSynthesizeProblem tm ty
+      stm <- quoteHere tm
+      return (stm, ty)
 
-trySynthesize :: (Tc m) => VTy -> m (Either TcError (STm, VTy))
-trySynthesize ty = do
+trySynthesize :: (Tc m) => (VTm, VTy) -> m (Either TcError (STm, VTy))
+trySynthesize (tm, ty) = do
   linsts <- access localInstances
   insts <- access instances
+  ty' <- pretty ty
+  traceM $ "Finding instances for " ++ ty'
   is <-
     findMatchingInstance
       ( map (\(i, t) -> (SVar i, t)) linsts
@@ -634,20 +656,31 @@ trySynthesize ty = do
       )
 
   case is of
-    [(itm, ity')] -> do
+    [(ps, itm, ity')] -> do
+      vitm <- evalHere itm
+      unifyHere tm vitm
       unifyHere ty ity'
+      mapM_ insertProblem ps >> solveRemainingProblems
       return $ Right (itm, ity')
     _ -> return $ Left (CannotSynthesizeType ty is)
   where
-    findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m [(STm, VTy)]
+    findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m [([Problem], STm, VTy)]
     findMatchingInstance [] = return []
     findMatchingInstance ((itm, ity) : rest) = do
-      (itm', ity') <- insertFull (itm, ity)
-      unification <- child . try $ unifyHere ty ity'
+      itm'' <- pretty itm
+      traceM $ "Potentially term is " ++ itm''
+      (ps, itm', ity') <- insertFullRecord (itm, ity)
+      unification <- child . try $ do
+        vitm' <- evalHere itm
+        unifyHere tm vitm'
+        unifyHere ty ity'
+        ps' <- mapM (makeProblem []) ps
+        mapM_ insertProblem ps' >> solveRemainingProblems
+        return ps'
       is <- findMatchingInstance rest
       case unification of
-        Right () -> do
-          return $ (itm', ity') : is
+        Right ps' -> do
+          return $ (ps', itm', ity') : is
         Left _ -> return is
 
 spine :: (Tc m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
@@ -1288,24 +1321,31 @@ instance (Tc m) => Pretty m Problem where
     errs' <- intercalate ", " <$> mapM pretty errs
     return $ "synthesize term: " ++ t' ++ "\ntype: " ++ ty' ++ "\nerrors: " ++ errs'
 
-addProblem :: (Tc m) => Problem -> m ()
-addProblem p = modify (S.|> p)
+addProblem :: (Tc m) => [UnifyError] -> ProblemKind -> m ()
+addProblem err k = makeProblem err k >>= insertProblem
+
+insertProblem :: (Tc m) => Problem -> m ()
+insertProblem p = modify (:|> p)
+
+makeProblem :: (Tc m) => [UnifyError] -> ProblemKind -> m Problem
+makeProblem err k = do
+  q <- qty
+  c <- getCtx
+  l <- view
+  return $ Problem {qty = q, ctx = c, loc = l, kind = k, errs = err}
+
+synthesizeProblem :: (Tc m) => VTm -> VTy -> m Problem
+synthesizeProblem t ty = do
+  q <- qty
+  c <- getCtx
+  l <- view
+  return $ Problem {qty = q, ctx = c, loc = l, kind = Synthesize t ty, errs = []}
 
 addSynthesizeProblem :: (Tc m) => VTm -> VTy -> m ()
-addSynthesizeProblem t ty = do
-  q <- qty
-  c <- getCtx
-  l <- view
-  let p = Problem {qty = q, ctx = c, loc = l, kind = Synthesize t ty, errs = []}
-  addProblem $ p {errs = [SolveError (WithProblem p Synthesis)]}
+addSynthesizeProblem t ty = addProblem [] $ Synthesize t ty
 
 addUnifyProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
-addUnifyProblem t t' e = do
-  q <- qty
-  c <- getCtx
-  l <- view
-  let p = Problem {qty = q, ctx = c, loc = l, kind = Unify t t', errs = []}
-  addProblem $ p {errs = [SolveError (WithProblem p e)]}
+addUnifyProblem t t' e = do addProblem [SolveError e] $ Unify t t'
 
 removeProblem :: (Tc m) => Int -> m ()
 removeProblem i = modify (\(p :: Seq Problem) -> S.deleteAt i p)
@@ -1316,17 +1356,21 @@ getProblems = view
 enterProblem :: (Tc m) => Problem -> m a -> m a
 enterProblem p = enterPat NotInPat . enterCtx (const p.ctx) . enterLoc p.loc
 
-newtype SolveAttempts = SolveAttempts {n :: Int}
+data SolveAttempts = SolveAttempts Int | InSolveAttempts Int
 
 solveRemainingProblems :: (Tc m) => m ()
 solveRemainingProblems = do
   att <- view
-  solveRemainingProblems' att
+  case att of
+    InSolveAttempts _ -> return ()
+    SolveAttempts n -> enter (const (InSolveAttempts n)) $ solveRemainingProblems' n
   where
-    solveRemainingProblems' :: (Tc m) => SolveAttempts -> m ()
-    solveRemainingProblems' (SolveAttempts 0) = return ()
-    solveRemainingProblems' (SolveAttempts n) = do
+    solveRemainingProblems' :: (Tc m) => Int -> m ()
+    solveRemainingProblems' 0 = return ()
+    solveRemainingProblems' n = do
       ps <- getProblems
+      ps' <- mapM pretty (toList ps)
+      traceM $ "Remaining problems: " ++ indentedFst (intercalate "\n" ps')
       if null ps
         then return ()
         else do
@@ -1337,21 +1381,24 @@ solveRemainingProblems = do
                     Unify lhs rhs -> do
                       lhs' <- resolveHere lhs
                       rhs' <- resolveHere rhs
-                      unifyHere lhs' rhs'
-                      removeProblem i
+                      u <- child . try $ canUnifyHere lhs' rhs'
+                      case u of
+                        Right Yes -> do
+                          unifyHere lhs' rhs'
+                          removeProblem i
+                        _ -> return ()
                     Synthesize t ty -> do
                       t' <- resolveHere t
                       ty' <- resolveHere ty
-                      s <- trySynthesize ty'
+                      s <- child . try $ trySynthesize (t', ty')
                       case s of
-                        Right (stm, _) -> do
-                          t'' <- evalHere stm
-                          unifyHere t' t''
+                        Right (Right (_, _)) -> do
+                          _ <- synthesize (t', ty')
                           removeProblem i
-                        Left _ -> return ()
+                        _ -> return ()
               )
               ps
-          solveRemainingProblems' (SolveAttempts (n - 1))
+          solveRemainingProblems' (n - 1)
 
 runSolveT :: (Tc m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
 runSolveT m sp t f = do
