@@ -647,14 +647,11 @@ trySynthesize :: (Tc m) => (VTm, VTy) -> m (Either TcError (STm, VTy))
 trySynthesize (tm, ty) = do
   linsts <- access localInstances
   insts <- access instances
-  ty' <- pretty ty
-  traceM $ "Finding instances for " ++ ty'
   is <-
     findMatchingInstance
       ( map (\(i, t) -> (SVar i, t)) linsts
           ++ map (\(_, i) -> (SDef i.origin, i.ty)) insts
       )
-
   case is of
     [(ps, itm, ity')] -> do
       vitm <- evalHere itm
@@ -667,8 +664,6 @@ trySynthesize (tm, ty) = do
     findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m [([Problem], STm, VTy)]
     findMatchingInstance [] = return []
     findMatchingInstance ((itm, ity) : rest) = do
-      itm'' <- pretty itm
-      traceM $ "Potentially term is " ++ itm''
       (ps, itm', ity') <- insertFullRecord (itm, ity)
       unification <- child . try $ do
         vitm' <- evalHere itm
@@ -1369,8 +1364,6 @@ solveRemainingProblems = do
     solveRemainingProblems' 0 = return ()
     solveRemainingProblems' n = do
       ps <- getProblems
-      ps' <- mapM pretty (toList ps)
-      traceM $ "Remaining problems: " ++ indentedFst (intercalate "\n" ps')
       if null ps
         then return ()
         else do
