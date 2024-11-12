@@ -47,7 +47,6 @@ def maybe-is-monad : Monad Maybe {
   ?m
 }
 
-
 #instance
 def list-is-functor : Functor List {
   ?m
@@ -59,8 +58,8 @@ def list-is-monad : Monad List {
 }
 
 def main2 : Maybe Nat {
-  let x <- return 4;
-  let m <- return (add 3 x);
+  let x : Nat <- return 4;
+  let m = add 3 x;
   return m
 }
 

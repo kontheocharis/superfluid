@@ -180,8 +180,9 @@ elab p mode = do
         Right p' -> do
           n <- uniqueName
           letIn md q n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
-    (PDoLet (MaybeQty _) x _ t u, md) -> do -- @@Todo: handle type
-      elab (pKnownDef KnownBind [t, PLam Explicit x u]) md
+    (PDoLet m x a t u, md) -> do
+      n <- uniqueName
+      elab (pKnownDef KnownBind [t, PLam Explicit (PName n) (PLet m x a (PName n) u)]) md
     (PRepr t, md) -> repr md (elab t)
     (PUnrepr t, md) -> unrepr md (elab t)
     (PHole n, md) -> meta md (Just n)
