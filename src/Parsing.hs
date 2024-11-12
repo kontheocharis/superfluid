@@ -554,15 +554,16 @@ lets = curlies $ do
     ty <- optionMaybe $ do
       colon
       term
-    reservedOp "="
+    isMonadic <- (try (reservedOp "=") >> return False) <|> (reservedOp "<-" >> return True)
     t <- term
     reservedOp ";"
-    return (q, v, ty, t)
+    return (q, isMonadic, v, ty, t)
   ret <- term
   return $
     foldr
-      ( \((q, v, ty, t), loc) acc ->
-          PLocated loc (PLet q v (fromMaybe PWild ty) t acc)
+      ( \a acc -> case a of
+          ((q, False, v, ty, t), loc) -> PLocated loc (PLet q v (fromMaybe PWild ty) t acc)
+          ((q, True, v, ty, t), loc) -> PLocated loc (PDoLet q v (fromMaybe PWild ty) t acc)
       )
       ret
       bindings

@@ -58,10 +58,16 @@ def list-is-monad : Monad List {
   ?m
 }
 
-def main : () {
-  let x = fmap s (bind (return 3) (\n => return (add 3 n)));
-  ()
+def main2 : Maybe Nat {
+  let x <- return 4;
+  let m <- return (add 3 x);
+  return m
 }
+
+-- def main : () {
+--   let x = fmap s (bind (return 3) (\n => return (add 3 n)));
+--   ()
+-- }
 
 -- def bind : [M : Type -> Type] -> Monad M -> [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B {
 --   \m => case m {

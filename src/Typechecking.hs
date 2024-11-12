@@ -72,6 +72,7 @@ import Common
     MetaVar,
     Name (..),
     Param (..),
+    Parent (..),
     PiMode (..),
     PrimGlobal (..),
     Qty (..),
@@ -116,13 +117,14 @@ import Evaluation
     isTypeFamily,
     quote,
     quotePat,
+    quoteSpine,
     resolve,
     vApp,
     vRepr,
     vUnfold,
     vUnfoldLazy,
     ($$),
-    ($$>), quoteSpine,
+    ($$>),
   )
 import Globals
   ( CtorGlobalInfo (..),
@@ -194,7 +196,7 @@ data TcError
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
-  | CannotSynthesizeType VTy
+  | CannotSynthesizeType VTy [(STm, VTy)]
   | ExpectedCtor VPatB CtorGlobal
   | UnexpectedPattern VPatB
   | MissingCtor CtorGlobal
@@ -214,9 +216,17 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         Mismatch us -> do
           us' <- mapM pretty us
           return $ intercalate "\n" us'
-        CannotSynthesizeType t -> do
+        CannotSynthesizeType t cs -> do
           t' <- pretty t
-          return $ "Cannot synthesize type: " <> t'
+          cs' <-
+            mapM
+              ( \(a, b) -> do
+                  a' <- pretty a
+                  b' <- pretty b
+                  return $ a' ++ " : " ++ b'
+              )
+              cs
+          return $ "Cannot synthesize type: " <> t' <> "\nCandidates:\n" <> indentedFst (intercalate "\n" cs')
         PotentialMismatch t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -293,6 +303,7 @@ class
     Unelab m,
     Has m Loc,
     Try m,
+    Parent m,
     Has m Qty,
     Has m (Seq Problem),
     Has m InPat,
@@ -604,35 +615,44 @@ letIn mode q x a t u = do
 synthesize :: (Tc m) => VTy -> m (STm, VTy)
 synthesize ty =
   trySynthesize ty >>= \case
-    Just (v, vv) -> return (v, vv)
-    Nothing -> do
+    Right (v, vv) -> return (v, vv)
+    Left _ -> do
       q <- qty
-      m <- freshMeta q >>= evalHere
-      addSynthesizeProblem m ty
-      tcError $ CannotSynthesizeType ty
+      m <- freshMeta q
+      vm <- evalHere m
+      addSynthesizeProblem vm ty
+      return (m, ty)
 
-trySynthesize :: (Tc m) => VTy -> m (Maybe (STm, VTy))
+trySynthesize :: (Tc m) => VTy -> m (Either TcError (STm, VTy))
 trySynthesize ty = do
   linsts <- access localInstances
   insts <- access instances
-  findMatchingInstance
-    ( map (\(i, t) -> (SVar i, t)) linsts
-        ++ map (\(_, i) -> (SDef i.origin, i.ty)) insts
-    )
+  is <-
+    findMatchingInstance
+      ( map (\(i, t) -> (SVar i, t)) linsts
+          ++ map (\(_, i) -> (SDef i.origin, i.ty)) insts
+      )
+
+  case is of
+    [(itm, ity')] -> do
+      unifyHere ty ity'
+      return $ Right (itm, ity')
+    _ -> return $ Left (CannotSynthesizeType ty is)
   where
-    findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m (Maybe (STm, VTy))
-    findMatchingInstance [] = return Nothing
+    findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m [(STm, VTy)]
+    findMatchingInstance [] = return []
     findMatchingInstance ((itm, ity) : rest) = do
       (itm', ity') <- insertFull (itm, ity)
-      unification <- try $ unifyHere ty ity'
+      unification <- child . try $ unifyHere ty ity'
+      is <- findMatchingInstance rest
       case unification of
-        Right () -> return $ Just (itm', ity')
-        Left _ -> findMatchingInstance rest
+        Right () -> do
+          return $ (itm', ity') : is
+        Left _ -> return is
 
 spine :: (Tc m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
 spine (t, ty) Empty = return (t, ty)
 spine (t, ty) (Arg m _ u :<| sp) = do
-
   (t', ty') <- case m of
     Implicit -> return (t, ty)
     Instance -> return (t, ty)
@@ -1324,11 +1344,11 @@ solveRemainingProblems = do
                       ty' <- resolveHere ty
                       s <- trySynthesize ty'
                       case s of
-                        Just (stm, _) -> do
+                        Right (stm, _) -> do
                           t'' <- evalHere stm
                           unifyHere t' t''
                           removeProblem i
-                        Nothing -> return ()
+                        Left _ -> return ()
               )
               ps
           solveRemainingProblems' (SolveAttempts (n - 1))
