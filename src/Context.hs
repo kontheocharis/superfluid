@@ -31,10 +31,11 @@ module Context
     evalInOwnCtxHere,
     setCtxEntryQty,
     here,
+    localInstances,
   )
 where
 
-import Common (Has (..), Idx (..), Lvl (..), Name, Param (..), Qty, Tel, idxToLvl, lvlToIdx, members, nextLvl)
+import Common (Has (..), Idx (..), Lvl (..), Name, Param (..), PiMode (..), Qty (..), Tel, idxToLvl, lvlToIdx, members, nextLvl)
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -65,6 +66,7 @@ data Ctx = Ctx
     qtys :: [Qty],
     bounds :: Bounds,
     nameList :: [Name],
+    instances :: [Bool],
     names :: Map Name Lvl
   }
   deriving (Show)
@@ -74,13 +76,13 @@ instance (Monad m, Pretty m VTm) => Pretty m CtxTy where
   pretty TyUnneeded = return "_"
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
-  pretty (CtxEntry name ty tm _ q bound) = do
+  pretty (CtxEntry name ty tm _ q i bound) = do
     name' <- pretty name
     ty' <- pretty ty
     tm' <- case bound of
       Defined -> (" = " ++) <$> pretty tm
       Bound _ -> return ""
-    return $ show q ++ name' ++ " : " ++ ty' ++ tm'
+    return $ (if i then "#instance " else "") ++ (if q /= Many then show q else "") ++ name' ++ " : " ++ ty' ++ tm'
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =
@@ -98,6 +100,7 @@ emptyCtx =
       types = [],
       bounds = [],
       nameList = [],
+      instances = [],
       qtys = [],
       names = M.empty
     }
@@ -108,11 +111,12 @@ data CtxEntry = CtxEntry
     tm :: VTm,
     lvl :: Lvl,
     qty :: Qty,
+    inst :: Bool,
     bound :: BoundState
   }
 
-bind :: Name -> Qty -> VTy -> Ctx -> Ctx
-bind x q ty ctx =
+bind :: PiMode -> Name -> Qty -> VTy -> Ctx -> Ctx
+bind m x q ty ctx =
   addCtxEntry
     ( CtxEntry
         { name = x,
@@ -120,13 +124,21 @@ bind x q ty ctx =
           tm = VNeu (VVar ctx.lvl),
           lvl = ctx.lvl,
           qty = q,
+          inst = m == Instance,
           bound = Bound q
         }
     )
     ctx
 
-insertedBind :: Name -> Qty -> VTy -> Ctx -> Ctx
+insertedBind :: PiMode -> Name -> Qty -> VTy -> Ctx -> Ctx
 insertedBind = bind
+
+localInstances :: Ctx -> [(Idx, VTy)]
+localInstances ctx =
+  [ (Idx i, assertIsNeeded ty)
+    | (i, (ty, inst)) <- zip [0 ..] (zip ctx.types ctx.instances),
+      inst
+  ]
 
 define :: Name -> Qty -> VTm -> VTy -> Ctx -> Ctx
 define x q t ty ctx =
@@ -137,6 +149,7 @@ define x q t ty ctx =
           bound = Defined,
           lvl = ctx.lvl,
           qty = q,
+          inst = False,
           name = x
         }
     )
@@ -151,6 +164,7 @@ typelessBind x q ctx =
           lvl = ctx.lvl,
           bound = Bound q,
           qty = q,
+          inst = False,
           name = x
         }
     )
@@ -165,6 +179,7 @@ addCtxEntry e ctx =
       bounds = e.bound : ctx.bounds,
       names = M.insert e.name ctx.lvl ctx.names,
       qtys = e.qty : ctx.qtys,
+      instances = e.inst : ctx.instances,
       nameList = e.name : ctx.nameList
     }
 
@@ -192,6 +207,7 @@ indexCtx ctx idx@(Idx i) = do
       tm = ctx.env !! i,
       lvl = idxToLvl ctx.lvl idx,
       qty = ctx.qtys !! i,
+      inst = ctx.instances !! i,
       bound = ctx.bounds !! i
     }
 
@@ -252,7 +268,7 @@ enterTel :: (Eval m, Has m Ctx) => Tel STy -> m a -> m a
 enterTel Empty f = f
 enterTel (t :<| ts) f = do
   t' <- evalHere t.ty
-  enterCtx (bind t.name t.qty t') (enterTel ts f)
+  enterCtx (bind t.mode t.name t.qty t') (enterTel ts f)
 
 quoteHere :: (Eval m, Has m Ctx) => VTm -> m STm
 quoteHere t = do

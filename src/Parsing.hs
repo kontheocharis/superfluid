@@ -42,7 +42,8 @@ import Presyntax
     PTm (..),
     PTy,
     pApp,
-    tagged, un,
+    tagged,
+    un,
   )
 import Printing (Pretty (..))
 import Text.Parsec
@@ -101,6 +102,9 @@ curlies = between (reservedOp "{") (reservedOp "}")
 
 square :: Parser a -> Parser a
 square = between (reservedOp "[") (reservedOp "]")
+
+dsquare :: Parser a -> Parser a
+dsquare = between (reservedOp "[[") (reservedOp "]]")
 
 commaSep :: Parser a -> Parser [a]
 commaSep p = p `sepEndBy` comma
@@ -442,18 +446,32 @@ tel :: Parser [(Param PTy, Loc)]
 tel =
   ( concatMap NE.toList
       <$> many1
-        ((try . parens) (typings Explicit) <|> (try . square) (typings Implicit))
+        ( (try . parens) (typings Explicit)
+            <|> (try . dsquare) (namelessTyping Instance)
+            <|> (try . dsquare) (typings Instance)
+            <|> (try . square) (typings Implicit)
+        )
   )
-    <|> NE.toList <$> namelessTyping
+    <|> NE.toList <$> namelessTyping Explicit
   where
-    namelessTyping :: Parser (NonEmpty (Param PTy, Loc))
-    namelessTyping =
+    namelessTyping :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
+    namelessTyping m =
       located
-        (\(q, n, t) l -> singleton (Param Explicit q n t, l))
+        (\(q, n, t) l -> singleton (Param m q n t, l))
         ( do
             q <- qty
             t <- app
-            return (fromMaybe Many q.un, Name "_", t)
+            return
+              ( fromMaybe
+                  ( case m of
+                      Explicit -> Many
+                      Implicit -> Zero
+                      Instance -> Many
+                  )
+                  q.un,
+                Name "_",
+                t
+              )
         )
 
     typings :: PiMode -> Parser (NonEmpty (Param PTy, Loc))
@@ -506,7 +524,12 @@ piTOrSigmaT = try $ do
 app :: Parser PTy
 app = do
   t <- singleTerm
-  ts <- many ((Arg Implicit Many <$> try (square term)) <|> (Arg Explicit Many <$> try singleTerm))
+  ts <-
+    many
+      ( (Arg Instance Many <$> try (dsquare term))
+          <|> (Arg Implicit Many <$> try (square term))
+          <|> (Arg Explicit Many <$> try singleTerm)
+      )
   return $ pApp t ts
 
 -- | Parse a representation term
@@ -553,7 +576,12 @@ lam = do
   reservedOp "\\"
   v <-
     Left <$> try (reserved "case")
-      <|> Right <$> many1 (((Implicit,) <$> try (square (located (,) pat))) <|> ((Explicit,) <$> located (,) singlePat))
+      <|> Right
+        <$> many1
+          ( ((Instance,) <$> try (dsquare (located (,) pat)))
+              <|> ((Implicit,) <$> try (square (located (,) pat)))
+              <|> ((Explicit,) <$> located (,) singlePat)
+          )
   case v of
     Left () -> do
       clauses <- curlies (commaSep caseClause)

@@ -129,13 +129,13 @@ liftPRenN qs ren = foldl (flip liftPRen) ren qs
 
 type VPat = VTm
 
-data VPatB = VPatB {vPat :: VPat, binds :: [(Qty, Name)]} deriving (Show)
+data VPatB = VPatB {vPat :: VPat, binds :: [(Qty, Name)]} deriving (Show, Eq, Ord)
 
 type VTy = VTm
 
 type Env v = [v]
 
-data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
+data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show, Eq, Ord)
 
 mapClosureM :: (Monad m) => (STm -> m STm) -> Closure -> m Closure
 mapClosureM f (Closure n env t) = Closure n env <$> f t
@@ -148,7 +148,7 @@ data Case s t p c = Case
     elimTy :: t,
     clauses :: [Clause p c]
   }
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 type SCase = Case STm STm SPat STm
 
@@ -172,7 +172,7 @@ data VNeuHead
   | VBlockedCase VBlockedCase
   | VPrim PrimGlobal
   | VUnrepr VHead
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VLazyHead
   = VDef DefGlobal
@@ -180,14 +180,14 @@ data VLazyHead
   | VLazyCase VLazyCase
   | VLet Qty Name VTy VTm Closure
   | VRepr VHead
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VHead
   = VNeuHead VNeuHead
   | VLazyHead VLazyHead
   | VDataHead DataGlobal
   | VCtorHead (CtorGlobal, Spine VTm)
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 mapHeadM :: (Monad m) => (VTm -> m VTm) -> VHead -> m VHead
 mapHeadM f h = do
@@ -219,18 +219,18 @@ data VNorm
   | VData VData
   | VCtor VCtor
   | VU
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VTm
   = VNorm VNorm
   | VLazy VLazy
   | VNeu VNeu
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data WTm
   = WNorm VNorm
   | WNeu VNeu
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 weakAsValue :: WTm -> VTm
 weakAsValue (WNorm n) = VNorm n
@@ -251,9 +251,9 @@ pattern VMeta m = (VFlex m, Empty)
 
 type STy = STm
 
-data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show)
+data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show, Eq, Ord)
 
-data BoundState = Bound Qty | Defined deriving (Eq, Show)
+data BoundState = Bound Qty | Defined deriving (Eq, Show, Ord)
 
 type Bounds = [BoundState]
 
@@ -273,7 +273,7 @@ data STm
   | SLit (Lit STm)
   | SRepr STm
   | SUnrepr STm
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 sReprTimes :: Int -> STm -> STm
 sReprTimes 0 t = t

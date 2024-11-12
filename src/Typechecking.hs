@@ -11,6 +11,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use bimap" #-}
+{-# HLINT ignore "Use first" #-}
 
 module Typechecking
   ( Tc (..),
@@ -60,13 +61,13 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (DefGlobal),
+    Glob (DefGlob),
     Has (..),
     HasNameSupply (uniqueName),
     HasProjectFiles,
     Idx (..),
     Lit (..),
     Loc,
-    Logger (..),
     Lvl (..),
     MetaVar,
     Name (..),
@@ -75,22 +76,20 @@ import Common
     PrimGlobal (..),
     Qty (..),
     Spine,
-    Tag,
+    Tag (..),
     Tel,
     Try (..),
     composeZ,
     enterLoc,
     lvlToIdx,
-    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
-    spineValues,
     telWithNames,
     pattern Impossible,
     pattern Possible,
   )
-import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure, hElimTy, hMotiveTy)
+import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
 import Control.Applicative (Alternative (empty))
 import Control.Monad (replicateM, unless)
@@ -100,10 +99,11 @@ import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
+import qualified Data.Set as SET
 import Evaluation
   ( Eval (..),
     close,
@@ -122,28 +122,32 @@ import Evaluation
     vUnfold,
     vUnfoldLazy,
     ($$),
-    ($$>),
+    ($$>), quoteSpine,
   )
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
+    InstanceInfo (..),
     KnownGlobal (..),
     PrimGlobalInfo (..),
-    Sig,
+    Sig (..),
     addCaseRepr,
     addCtorRepr,
     addDataRepr,
     addDefRepr,
+    addInstanceItem,
     addItem,
     dataIsIrrelevant,
     getCtorGlobal,
     getDataGlobal,
     getDefGlobal,
     hasName,
+    instances,
     knownData,
     lookupGlobal,
+    lookupInstance,
     modifyDataItem,
     modifyDefItem,
   )
@@ -153,9 +157,6 @@ import Syntax
   ( Case (..),
     Closure (body, numVars),
     Env,
-    HTel (..),
-    HTm (..),
-    HTy,
     PRen (..),
     SPat (..),
     STm (..),
@@ -169,20 +170,11 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
-    embed,
-    hApp,
-    hPis,
-    hSimpleTel,
     headAsValue,
     isEmptySub,
     liftPRenN,
-    sAppSpine,
-    sGatherApps,
     sGatherLams,
     sGatherPis,
-    sPis,
-    unembed,
-    unembedTel,
     uniqueSLams,
     vGetSpine,
     pattern VVar,
@@ -202,6 +194,7 @@ data TcError
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
+  | CannotSynthesizeType VTy
   | ExpectedCtor VPatB CtorGlobal
   | UnexpectedPattern VPatB
   | MissingCtor CtorGlobal
@@ -221,6 +214,9 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         Mismatch us -> do
           us' <- mapM pretty us
           return $ intercalate "\n" us'
+        CannotSynthesizeType t -> do
+          t' <- pretty t
+          return $ "Cannot synthesize type: " <> t'
         PotentialMismatch t1 t2 -> do
           t1' <- pretty t1
           t2' <- pretty t2
@@ -359,7 +355,7 @@ prettyGoal :: (Tc m) => Goal -> m String
 prettyGoal (Goal c n _ q ty) = enterCtx (const c) $ do
   c' <- getCtx >>= pretty
   ty' <- pretty ty
-  let g = show q ++ maybe "_" (\n' -> "?" ++ n'.unName) n ++ " : " ++ ty'
+  let g = (if q /= Many then show q else "") ++ maybe "_" (\n' -> "?" ++ n'.unName) n ++ " : " ++ ty'
   return $ indentedFst c' ++ "\n" ++ replicate (length g + 4) '―' ++ "\n" ++ indentedFst g ++ "\n"
 
 checkMeta :: (Tc m) => Maybe Name -> VTy -> Qty -> m (STm, VTy)
@@ -381,8 +377,8 @@ newMeta n q = do
 freshMeta :: (Tc m) => Qty -> m STm
 freshMeta = newMeta Nothing
 
-freshMetaOrPatBind :: (Tc m) => VTy -> m (STm, VTm)
-freshMetaOrPatBind ty = do
+orPatBind :: (Tc m) => VTy -> m (STm, VTm) -> m (STm, VTm)
+orPatBind ty f = do
   q <- qty
   ifInPat
     ( do
@@ -391,16 +387,26 @@ freshMetaOrPatBind ty = do
         vn <- evalPatHere (SPat n' [(q, n)])
         return (n', vn.vPat)
     )
-    ( do
-        n' <- freshMeta q
-        vn <- evalHere n'
-        return (n', vn)
-    )
+    f
+
+freshMetaOrPatBind :: (Tc m) => VTy -> m (STm, VTm)
+freshMetaOrPatBind ty = orPatBind ty $ do
+  q <- qty
+  n' <- freshMeta q
+  vn <- evalHere n'
+  return (n', vn)
+
+synthesizeOrPatBind :: (Tc m) => VTy -> m (STm, VTm)
+synthesizeOrPatBind ty = orPatBind ty $ synthesize ty
 
 insertFull :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insertFull (tm, ty) = do
   f <- unfoldHere ty
   case f of
+    VNorm (VPi Instance q _ a b) -> do
+      (v, vv) <- need q (synthesizeOrPatBind a)
+      ty' <- b $$ [vv]
+      insertFull (SApp Instance q tm v, ty')
     VNorm (VPi Implicit q _ a b) -> do
       (v, vv) <- need q (freshMetaOrPatBind a)
       ty' <- b $$ [vv]
@@ -410,6 +416,7 @@ insertFull (tm, ty) = do
 insert :: (Tc m) => (STm, VTy) -> m (STm, VTy)
 insert (tm, ty) = case tm of
   SLam Implicit _ _ _ -> return (tm, ty)
+  SLam Instance _ _ _ -> return (tm, ty)
   _ -> insertFull (tm, ty)
 
 handleUnification :: (Tc m) => VTm -> VTm -> CanUnify -> m ()
@@ -418,15 +425,15 @@ handleUnification t1 t2 r = do
   case p of
     InImpossiblePat -> case r of
       Yes -> tcError $ ImpossibleCaseIsPossible t1 t2
-      Maybe -> addNewProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
+      Maybe -> addUnifyProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
       No _ -> return ()
     InPossiblePat _ -> case r of
       Yes -> return ()
-      Maybe -> addNewProblem t1 t2 Blocking -- applySubToCtx s
+      Maybe -> addUnifyProblem t1 t2 Blocking -- applySubToCtx s
       No errs -> tcError $ ImpossibleCase t1 errs
     NotInPat -> case r of
       Yes -> return ()
-      Maybe -> addNewProblem t1 t2 Blocking
+      Maybe -> addUnifyProblem t1 t2 Blocking
       No errs -> tcError $ Mismatch errs
 
 canUnifyHere :: (Tc m) => VTm -> VTm -> m CanUnify
@@ -484,7 +491,7 @@ ifForcePiType m ty the els = do
       a <- freshMeta Zero >>= evalHere
       x <- uniqueName
       q <- qty
-      b <- enterCtx (bind x q a) (freshMeta Zero) >>= closeHere 1
+      b <- enterCtx (bind m x q a) (freshMeta Zero) >>= closeHere 1
       unifyHere ty (VNorm (VPi m q x a b))
       the m q x a b
 
@@ -505,7 +512,7 @@ inferPatBind x = do
 checkPatBind :: (Tc m) => Name -> VTy -> m (STm, VTy)
 checkPatBind x ty = do
   q <- qty
-  modifyCtx (bind x q ty)
+  modifyCtx (bind Explicit x q ty)
   whenInPat
     ( \case
         InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [(q, x)]))
@@ -556,31 +563,32 @@ lam :: (Tc m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
 lam mode m x t = do
   forbidPat
   case mode of
-    Check ty ->
+    Check ty -> do
       ifForcePiType
         m
         ty
         ( \_ q x' a b -> do
             vb <- evalInOwnCtxHere b
-            (t', _) <- enterCtx (bind x q a) (t (Check vb))
+            (t', _) <- enterCtx (bind m x q a) (t (Check vb))
             return (SLam m q x t', VNorm (VPi m q x' a b))
         )
         ( \m' q x' a b -> case m' of
-            Implicit -> insertLam q x' a b (\s -> lam s m x t)
+            Implicit -> insertLam Implicit q x' a b (\s -> lam s m x t)
+            Instance -> insertLam Instance q x' a b (\s -> lam s m x t)
             _ -> tcError $ ImplicitMismatch m m'
         )
     Infer -> do
       a <- freshMeta Zero >>= evalHere
       let q = Many
-      (t', b) <- enterCtx (bind x q a) $ t Infer >>= insert
+      (t', b) <- enterCtx (bind m x q a) $ t Infer >>= insert
       b' <- closeValHere 1 b
       return (SLam m q x t', VNorm (VPi m q x a b'))
 
-insertLam :: (Tc m) => Qty -> Name -> VTy -> Closure -> Child m -> m (STm, VTy)
-insertLam q x' a b t = do
+insertLam :: (Tc m) => PiMode -> Qty -> Name -> VTy -> Closure -> Child m -> m (STm, VTy)
+insertLam m q x' a b t = do
   vb <- evalInOwnCtxHere b
-  (t', _) <- enterCtx (insertedBind x' q a) (t (Check vb))
-  return (SLam Implicit q x' t', VNorm (VPi Implicit q x' a b))
+  (t', _) <- enterCtx (insertedBind m x' q a) (t (Check vb))
+  return (SLam m q x' t', VNorm (VPi m q x' a b))
 
 letIn :: (Tc m) => Mode -> Maybe Qty -> Name -> Child m -> Child m -> Child m -> m (STm, VTy)
 letIn mode q x a t u = do
@@ -593,13 +601,42 @@ letIn mode q x a t u = do
   (u', ty) <- enterCtx (define x q' vt va) $ u mode
   return (SLet q' x a' t' u', ty)
 
+synthesize :: (Tc m) => VTy -> m (STm, VTy)
+synthesize ty =
+  trySynthesize ty >>= \case
+    Just (v, vv) -> return (v, vv)
+    Nothing -> do
+      q <- qty
+      m <- freshMeta q >>= evalHere
+      addSynthesizeProblem m ty
+      tcError $ CannotSynthesizeType ty
+
+trySynthesize :: (Tc m) => VTy -> m (Maybe (STm, VTy))
+trySynthesize ty = do
+  linsts <- access localInstances
+  insts <- access instances
+  findMatchingInstance
+    ( map (\(i, t) -> (SVar i, t)) linsts
+        ++ map (\(_, i) -> (SDef i.origin, i.ty)) insts
+    )
+  where
+    findMatchingInstance :: (Tc m) => [(STm, VTy)] -> m (Maybe (STm, VTy))
+    findMatchingInstance [] = return Nothing
+    findMatchingInstance ((itm, ity) : rest) = do
+      (itm', ity') <- insertFull (itm, ity)
+      unification <- try $ unifyHere ty ity'
+      case unification of
+        Right () -> return $ Just (itm', ity')
+        Left _ -> findMatchingInstance rest
+
 spine :: (Tc m) => (STm, VTy) -> Spine (Child m) -> m (STm, VTy)
 spine (t, ty) Empty = return (t, ty)
 spine (t, ty) (Arg m _ u :<| sp) = do
+
   (t', ty') <- case m of
     Implicit -> return (t, ty)
+    Instance -> return (t, ty)
     Explicit -> insertFull (t, ty)
-    Instance -> error "unimplemented"
   ifForcePiType
     m
     ty'
@@ -626,7 +663,7 @@ piTy m q x a b = do
   forbidPat
   (a', _) <- a (Check (VNorm VU))
   av <- evalHere a'
-  (b', _) <- enterCtx (bind x q av) $ b (Check (VNorm VU))
+  (b', _) <- enterCtx (bind m x q av) $ b (Check (VNorm VU))
   return (SPi m q x a' b', VNorm VU)
 
 repr :: (Tc m) => Mode -> Child m -> m (STm, VTy)
@@ -741,7 +778,7 @@ caseOf mode s r cs = do
       retTy <- freshMeta q >>= evalHere
       caseOf (Check retTy) s r cs
     Check ty -> do
-      (ss, ssTy) <- s Infer
+      (ss, ssTy) <- s Infer >>= insertFull
       (d, paramSp, indexSp, wideTyM) <- ensureDataAndGetWide ssTy (tcError $ InvalidCaseSubject ss ssTy)
 
       di <- access (getDataGlobal d)
@@ -811,6 +848,11 @@ defItem mq n ts ty tm = do
   b <- normaliseProgram
   stm <- if b then quote (Lvl 0) vtm else return tm'
 
+  -- Instances
+  when (InstanceTag `SET.member` ts) $ do
+    let inst = InstanceInfo (DefGlobal n) vty
+    modify (addInstanceItem vty inst)
+
   modify (modifyDefItem (DefGlobal n) (\d -> d {tm = Just stm, vtm = Just vtm}))
   return ()
 
@@ -819,7 +861,7 @@ tel Empty = return Empty
 tel (t :<| ts) = do
   (t', _) <- expect Zero $ t.ty (Check (VNorm VU))
   vt <- evalHere t'
-  ts' <- enterCtx (bind t.name t.qty vt) $ tel ts
+  ts' <- enterCtx (bind t.mode t.name t.qty vt) $ tel ts
   return (Param t.mode t.qty t.name t' :<| ts')
 
 dataItem :: (Tc m) => Name -> Set Tag -> Tel (Child m) -> Child m -> m ()
@@ -981,6 +1023,7 @@ data SolveError
   | OccursError MetaVar
   | EscapingVariable
   | Blocking
+  | Synthesis
   | WithProblem Problem SolveError
   deriving (Show)
 
@@ -1004,11 +1047,18 @@ instance (Tc m) => Pretty m SolveError where
   pretty EscapingVariable = do
     return "a variable in a term escapes the context of the meta it is being unified against"
   pretty Blocking = return "reduction is blocked"
-  pretty (WithProblem p e) = do
+  pretty Synthesis = return "synthesis failed"
+  pretty (WithProblem p@(Problem {kind = Unify lhs rhs}) e) = do
     p' <- enterProblem p $ do
-      lhs <- pretty p.lhs
-      rhs <- pretty p.rhs
-      return $ lhs ++ " =? " ++ rhs
+      lhs' <- pretty lhs
+      rhs' <- pretty rhs
+      return $ lhs' ++ " =? " ++ rhs'
+    e' <- pretty e
+    return $ p' ++ "\n" ++ e'
+  pretty (WithProblem p@(Problem {kind = Synthesize _ ty}) e) = do
+    p' <- enterProblem p $ do
+      ty' <- pretty ty
+      return $ "synthesize " ++ ty'
     e' <- pretty e
     return $ p' ++ "\n" ++ e'
 
@@ -1195,30 +1245,46 @@ unifyClause (Possible p t) (Possible p' t') = unifyClosure (map fst p.binds) t (
 unifyClause (Impossible _) (Impossible _) = return Yes
 unifyClause a b = return $ No [DifferentClauses [a] [b]]
 
+data ProblemKind = Unify VTm VTm | Synthesize VTm VTy deriving (Show)
+
 data Problem = Problem
   { ctx :: Ctx,
+    qty :: Qty,
     loc :: Loc,
-    lhs :: VTm,
-    rhs :: VTm,
+    kind :: ProblemKind,
     errs :: [UnifyError]
   }
   deriving (Show)
 
 instance (Tc m) => Pretty m Problem where
-  pretty (Problem ctx _ lhs rhs errs) = enterCtx (const ctx) $ do
+  pretty (Problem ctx _ _ (Unify lhs rhs) errs) = enterCtx (const ctx) $ do
     lhs' <- pretty lhs
     rhs' <- pretty rhs
     errs' <- intercalate ", " <$> mapM pretty errs
-    return $ "lhs: " ++ lhs' ++ "\nrhs: " ++ rhs' ++ "\nerrors: " ++ errs'
+    return $ "unify lhs: " ++ lhs' ++ "\rhs: " ++ rhs' ++ "\nerrors: " ++ errs'
+  pretty (Problem ctx _ _ (Synthesize t ty) errs) = enterCtx (const ctx) $ do
+    t' <- pretty t
+    ty' <- pretty ty
+    errs' <- intercalate ", " <$> mapM pretty errs
+    return $ "synthesize term: " ++ t' ++ "\ntype: " ++ ty' ++ "\nerrors: " ++ errs'
 
 addProblem :: (Tc m) => Problem -> m ()
 addProblem p = modify (S.|> p)
 
-addNewProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
-addNewProblem t t' e = do
+addSynthesizeProblem :: (Tc m) => VTm -> VTy -> m ()
+addSynthesizeProblem t ty = do
+  q <- qty
   c <- getCtx
   l <- view
-  let p = Problem {ctx = c, loc = l, lhs = t, rhs = t', errs = []}
+  let p = Problem {qty = q, ctx = c, loc = l, kind = Synthesize t ty, errs = []}
+  addProblem $ p {errs = [SolveError (WithProblem p Synthesis)]}
+
+addUnifyProblem :: (Tc m) => VTm -> VTm -> SolveError -> m ()
+addUnifyProblem t t' e = do
+  q <- qty
+  c <- getCtx
+  l <- view
+  let p = Problem {qty = q, ctx = c, loc = l, kind = Unify t t', errs = []}
   addProblem $ p {errs = [SolveError (WithProblem p e)]}
 
 removeProblem :: (Tc m) => Int -> m ()
@@ -1246,12 +1312,23 @@ solveRemainingProblems = do
         else do
           _ <-
             S.traverseWithIndex
-              ( \i p -> enterProblem p $ do
-                  lhs' <- resolveHere p.lhs
-                  rhs' <- resolveHere p.rhs
-                  c <- unify lhs' rhs'
-                  handleUnification lhs' rhs' c
-                  removeProblem i
+              ( \i p -> enterProblem p $
+                  case p.kind of
+                    Unify lhs rhs -> do
+                      lhs' <- resolveHere lhs
+                      rhs' <- resolveHere rhs
+                      unifyHere lhs' rhs'
+                      removeProblem i
+                    Synthesize t ty -> do
+                      t' <- resolveHere t
+                      ty' <- resolveHere ty
+                      s <- trySynthesize ty'
+                      case s of
+                        Just (stm, _) -> do
+                          t'' <- evalHere stm
+                          unifyHere t' t''
+                          removeProblem i
+                        Nothing -> return ()
               )
               ps
           solveRemainingProblems' (SolveAttempts (n - 1))
@@ -1261,7 +1338,7 @@ runSolveT m sp t f = do
   f' <- runExceptT f
   case f' of
     Left err -> do
-      addNewProblem (VNeu (VFlex m, sp)) t err
+      addUnifyProblem (VNeu (VFlex m, sp)) t err
       return Yes
     Right () -> solveRemainingProblems >> return Yes
 

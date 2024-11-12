@@ -572,7 +572,7 @@ isTypeFamily l t = do
     _ -> return False
 
 -- Returns the spine of the constructor type and sum of its quantities
-isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine (), Qty))
+isCtorTy :: (Eval m) => Lvl -> DataGlobal -> VTm -> m (Maybe (Spine VTm, Qty))
 isCtorTy l d t = do
   t' <- vUnfold l t
   case t' of
@@ -582,7 +582,7 @@ isCtorTy l d t = do
       case c of
         Just (sp, q') -> return . Just $ (sp, q' `plus` q)
         Nothing -> return Nothing
-    VNorm (VData (d', sp)) | d == d' -> return (Just (mapSpine (const ()) sp, Zero))
+    VNorm (VData (d', sp)) | d == d' -> return (Just (sp, Zero))
     _ -> return Nothing
 
 ifIsData :: (Eval m) => Lvl -> VTy -> (DataGlobal -> Spine VTm -> m a) -> m a -> m a
