@@ -40,8 +40,9 @@ reprInfSig :: (Eval m) => m ()
 reprInfSig = do
   s <- view
   let s' = removeRepresentedItems s
-  s'' <- mapSigContentsM (mapGlobalInfoM reprInf) s'
-  modify (const s'')
+  s'' <- mapSigContentsM (mapGlobalInfoM (const return)) s'
+  s''' <- mapSigContentsM (mapGlobalInfoM reprInf) s''
+  modify (const s''')
 
 sCaseToSpine :: (Eval m) => SCase -> m (Spine STm)
 sCaseToSpine = caseToSpine id (\p -> uniqueSLams (map (const (Explicit, Many)) p.binds)) True

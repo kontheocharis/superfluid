@@ -291,6 +291,10 @@ def debug-print : [A B : Type] -> A -> B -> B {
   }
 }
 
+def print : [A : Type] -> A -> IO () {
+  js-console-log
+}
+
 data Maybe (A : Type) : Type {
   nothing : Maybe A,
   just : A -> Maybe A

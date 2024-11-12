@@ -547,17 +547,25 @@ unrepTerm = locatedTerm $ do
 -- | Parse a series of let terms.
 lets :: Parser PTm
 lets = curlies $ do
-  bindings <- many . located (,) $ do
-    reserved "let"
-    q <- qty
-    v <- singlePat
-    ty <- optionMaybe $ do
-      colon
-      term
-    isMonadic <- (try (reservedOp "=") >> return False) <|> (reservedOp "<-" >> return True)
-    t <- term
-    reservedOp ";"
-    return (q, isMonadic, v, ty, t)
+  bindings <-
+    many . located (,) $
+      ( try (reserved "let") >> do
+          q <- qty
+          v <- singlePat
+          ty <- optionMaybe $ do
+            colon
+            term
+          isMonadic <- (try (reservedOp "=") >> return False) <|> (reservedOp "<-" >> return True)
+          t <- term
+          reservedOp ";"
+          return (q, isMonadic, v, ty, t)
+      )
+        <|> ( try (reserved "do") >> do
+                q <- qty
+                t <- term
+                reservedOp ";"
+                return (q, True, PWild, Nothing, t)
+            )
   ret <- term
   return $
     foldr

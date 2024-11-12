@@ -301,7 +301,7 @@ emptyCompiler =
       qty = Many,
       codegenStatements = [],
       problems = mempty,
-      solveAttempts = SolveAttempts 1
+      solveAttempts = SolveAttempts 10
     }
 
 runComp :: Comp a -> Compiler -> IO ()

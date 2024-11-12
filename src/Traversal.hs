@@ -58,7 +58,8 @@ mapDefGlobalInfoM f (DefGlobalInfo n q ty _ tm) = do
   ty' <- quote (Lvl 0) ty >>= f (Lvl 0) >>= eval []
   tm' <- traverse (f (Lvl 0)) tm
   vtm' <- traverse (eval []) tm'
-  return $ DefGlobalInfo n q ty' vtm' tm'
+  tm'' <- traverse (quote (Lvl 0)) vtm'
+  return $ DefGlobalInfo n q ty' vtm' tm''
 
 mapPrimGlobalInfoM :: (Eval m) => (Lvl -> STm -> m STm) -> PrimGlobalInfo -> m PrimGlobalInfo
 mapPrimGlobalInfoM f (PrimGlobalInfo n q ty) = do

@@ -37,14 +37,27 @@ def fmap : [F : Type -> Type] [[Functor F]] [A B : Type] -> (A -> B) -> (F A -> 
   }
 }
 
+#unfold
 #instance
 def maybe-is-functor : Functor Maybe {
-  ?m
+  functor (\[A] [B] f ma => {
+    let ma' : Maybe A = ma;
+    case ma' {
+      nothing => nothing,
+      just a => just (f a)
+    }
+  })
 }
 
+#unfold
 #instance
 def maybe-is-monad : Monad Maybe {
-  ?m
+  monad [[maybe-is-functor]] (\[A] a => just a) (\[A] [B] ma f => {
+    case ma {
+      nothing => nothing,
+      just a => f a
+    }
+  })
 }
 
 #instance
@@ -57,10 +70,23 @@ def list-is-monad : Monad List {
   ?m
 }
 
-def main2 : Maybe Nat {
-  let x : Nat <- return 4;
-  let m = add 3 x;
-  return m
+-- def voidM : [M : Type -> Type] [[Monad M]] [A : Type] -> M A -> M () {
+--   \f => {
+--     do f;
+--     return ()
+--   }
+-- }
+
+def main : IO () {
+  let mo : Maybe Nat -> Maybe Nat = \m => {
+    let x : Nat <- m;
+    let x' = add 3 x;
+    return x'
+  };
+  case mo (just 3) {
+    nothing => io-return (),
+    just t => print t,
+  }
 }
 
 -- def main : () {

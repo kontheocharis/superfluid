@@ -41,6 +41,7 @@ import Common
     CtorGlobal (..),
     DataGlobal (..),
     Glob (..),
+    DefGlobal (..),
     Has (..),
     HasNameSupply (..),
     Idx (..),
@@ -59,7 +60,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Tag (..),
   )
 import Control.Monad (foldM)
 import Control.Monad.Extra (firstJustM)
@@ -75,7 +76,7 @@ import Globals
   ( Sig (..),
     getCaseRepr,
     getGlobalRepr,
-    unfoldDef,
+    unfoldDef, getGlobalTags,
   )
 import Literals (unfoldLit)
 import Meta (SolvedMetas, lookupMetaVar)
@@ -107,6 +108,7 @@ import Syntax
     pattern VMeta,
     pattern VVar,
   )
+import Data.Maybe (fromMaybe)
 
 class (Logger m, Has m SolvedMetas, Has m Sig, HasNameSupply m) => Eval m where
   normaliseProgram :: m Bool
@@ -425,7 +427,16 @@ eval env (SCtor (c, pp)) = do
   pp' <- mapSpineM (eval env) pp
   return $ VNorm (VCtor ((c, pp'), Empty))
 eval _ (SDef d) = do
-  return $ VLazy (VDef d, Empty)
+  r <- reduceUnfoldDefs
+  if r
+    then do
+      ts <- access (getGlobalTags d.globalName)
+      if UnfoldTag `elem` ts
+        then do
+          de <- access (unfoldDef d)
+          return $ fromMaybe (VLazy (VDef d, Empty)) de
+        else  return $ VLazy (VDef d, Empty)
+    else return $ VLazy (VDef d, Empty)
 eval _ (SPrim p) = do
   return $ VNeu (VPrim p, Empty)
 eval env (SVar (Idx i)) = return $ env !! i

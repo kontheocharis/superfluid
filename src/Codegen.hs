@@ -197,7 +197,7 @@ generateCase c = do
               let offset = if length di.ctors <= 1 then 0 else 1
 
               let clauseArgs =
-                    if length relevantBinds == 1
+                    if length relevantBinds == 1 && length c.clauses == 1
                       then S.singleton $ Arg Explicit Many sub
                       else
                         S.fromList $
