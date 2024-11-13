@@ -13,6 +13,7 @@ where
 import Accounting (Acc, Account (runAccount))
 import Common
   ( Arg (..),
+    Clause (..),
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (..),
@@ -37,6 +38,7 @@ import Common
   )
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
+import Data.Bitraversable (Bitraversable (..))
 import Data.Maybe (fromJust)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
@@ -72,12 +74,13 @@ import Presyntax
     pGatherApps,
     pGatherPis,
     pLams,
-    toPSpine,
+    toPSpine, elements,
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
 import Typechecking
-  ( InPat (NotInPat),
+  ( Child,
+    InPat (NotInPat),
     Mode (..),
     Tc (..),
     app,
@@ -103,7 +106,7 @@ import Typechecking
     reprDefItem,
     univ,
     unrepr,
-    wild,
+    wild, clauses,
   )
 
 -- Presyntax exists below here
@@ -239,7 +242,16 @@ defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of
 
 elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
-  defItem def.qty.un def.name def.tags (elab def.ty) (elab PWild) -- @@Todo
+  let cs =
+        map
+          ( \(Clause ps t) -> Clause (map elab ps.elements) (elab <$> t))
+          def.clauses
+  defItem
+    def.qty.un
+    def.name
+    def.tags
+    (elab def.ty)
+    cs
   ensureAllProblemsSolved
   di <- access (getDefGlobal (DefGlobal def.name))
   runAccount di

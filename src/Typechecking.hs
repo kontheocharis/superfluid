@@ -23,6 +23,7 @@ module Typechecking
     Problem,
     Goal,
     SolveAttempts (..),
+    Child,
     prettyGoal,
     lam,
     letIn,
@@ -52,6 +53,7 @@ module Typechecking
     reprDefItem,
     ensureAllProblemsSolved,
     synthesizeProblem,
+    clauses,
   )
 where
 
@@ -185,6 +187,7 @@ import Syntax
   )
 import Unelaboration (Unelab)
 import Control.Exception (handle)
+import Presyntax (PPat)
 
 data TcError
   = Mismatch [UnifyError]
@@ -883,14 +886,20 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Child m -> m ()
-defItem mq n ts ty tm = do
+type Clauses x = [Clause [x] x]
+
+clauses :: (Tc m) => Clauses (Child m) -> VTy -> m (STm, VTy)
+clauses = undefined
+
+
+defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) -> m ()
+defItem mq n ts ty cl = do
   ensureNewName n
   let q = fromMaybe Many mq
   (ty', _) <- expect Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
   modify (addItem n (DefInfo (DefGlobalInfo n q vty Nothing Nothing)) ts)
-  (tm', _) <- expect q $ tm (Check vty)
+  (tm', _) <- expect q $ clauses cl vty
 
   vtm <- evalHere tm'
   b <- normaliseProgram

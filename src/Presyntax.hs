@@ -64,7 +64,7 @@ instance Show MaybeQty where
   show (MaybeQty Nothing) = ""
   show (MaybeQty (Just q)) = show q
 
-data PPats = PPats [PPat]
+data PPats = PPats { elements :: [PPat] }
   deriving (Eq, Show)
 
 data PDef = MkPDef
