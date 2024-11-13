@@ -61,10 +61,15 @@ module Syntax
     hSimpleTel,
     hOwnSpine,
     embedClosure,
+    embedCase,
     piArgsArity,
     hGatherApps,
     pattern VV,
     HPat,
+    embedTel,
+    hLams,
+    extendTel,
+    joinTels,
   )
 where
 
@@ -300,9 +305,9 @@ uniqueSLams ms t = do
   sp <- fromList <$> mapM (\(m, q) -> Param m q <$> uniqueName <*> return ()) ms
   return $ sLams sp t
 
-sLams :: Tel () -> STm -> STm
+sLams :: Tel a -> STm -> STm
 sLams Empty t = t
-sLams (Param m q x () :<| sp) t = SLam m q x (sLams sp t)
+sLams (Param m q x _ :<| sp) t = SLam m q x (sLams sp t)
 
 sGatherApps :: STm -> (STm, Spine STm)
 sGatherApps (SApp m q t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m q u)
@@ -368,11 +373,20 @@ data HTel = HEmpty | HWithParam PiMode Qty Name HTy (HTm -> HTel)
 hSimpleTel :: Tel HTy -> HTel
 hSimpleTel = foldr (\(Param m q n a) acc -> HWithParam m q n a (const acc)) HEmpty
 
+extendTel :: HTel -> (Spine HTm -> Param HTy) -> HTel
+extendTel = _
+
+joinTels :: HTel -> (Spine HTm -> HTel) -> HTel
+joinTels = _
+
 unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
 unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
 
-
+embedTel :: Lvl -> HTel -> Tel STy
+embedTel l = \case
+  HEmpty -> Empty
+  HWithParam m q n a f -> Param m q n (embed l a) :<| embedTel (nextLvl l) (f (HVar l))
 
 hApp :: HTm -> Spine HTm -> HTm
 hApp = foldl (\f (Arg m q u) -> HApp m q f u)
@@ -380,6 +394,12 @@ hApp = foldl (\f (Arg m q u) -> HApp m q f u)
 hPis :: HTel -> (Spine HTm -> HTy) -> HTy
 hPis HEmpty b = b Empty
 hPis (HWithParam m q n a f) b = HPi m q n a (\x -> hPis (f x) (\xs -> b (Arg m q x :<| xs)))
+
+hLams :: HTel -> (Spine HTm -> HTm) -> HTm
+hLams HEmpty b = b Empty
+hLams (HWithParam m q n _ f) b = HLam m q n (\x -> hLams (f x) (\xs -> b (Arg m q x :<| xs)))
+
+
 
 hGatherApps :: HTm -> (HTm, Spine HTm)
 hGatherApps (HApp m q t u) = let (t', sp) = hGatherApps t in (t', sp :|> Arg m q u)

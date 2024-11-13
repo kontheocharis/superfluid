@@ -90,6 +90,7 @@ import Common
     mapSpineM,
     nextLvl,
     nextLvls,
+    telToBinds,
     telWithNames,
     pattern Impossible,
     pattern Possible,
@@ -98,7 +99,7 @@ import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, d
 import Context
 import Control.Applicative (Alternative (empty), asum)
 import Control.Exception (assert, handle)
-import Control.Monad (foldM, replicateM, unless, (>=>))
+import Control.Monad (foldM, forM, replicateM, unless, (>=>))
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.Trans (MonadTrans (lift))
@@ -171,6 +172,7 @@ import Syntax
     Closure (body, numVars),
     Env,
     HPat,
+    HTel,
     HTm (..),
     HTy,
     PRen (..),
@@ -188,10 +190,15 @@ import Syntax
     VTm (..),
     VTy,
     embed,
+    embedCase,
+    embedTel,
+    extendTel,
     hApp,
     hGatherApps,
+    hLams,
     headAsValue,
     isEmptySub,
+    joinTels,
     liftPRenN,
     sGatherApps,
     sGatherLams,
@@ -200,9 +207,10 @@ import Syntax
     uniqueSLams,
     vGetSpine,
     pattern VV,
-    pattern VVar,
+    pattern VVar, sLams,
   )
 import Unelaboration (Unelab)
+import Prelude hiding (pi)
 
 data TcError
   = Mismatch [UnifyError]
@@ -952,7 +960,7 @@ binder m q x a f = do
   l <- accessCtx (\c -> c.lvl)
   enterCtx (bind m x q a) $ f l
 
-data Pat = WildP | LvlP Name Qty Lvl | CtorP VCtor (Spine Pat)
+data Pat = LvlP Name Qty Lvl | CtorP VCtor (Spine Pat)
 
 addVar :: (Tc m) => CaseElab -> m (Maybe STm)
 addVar (CaseElab con ty cls) = do
@@ -970,67 +978,167 @@ addVar (CaseElab con ty cls) = do
           return $ SLam m q x <$> rest
         _ -> return Nothing
 
+forceData :: (Tc m) => VTm -> m (DataGlobal, Spine HTm, Spine HTm)
+forceData d = undefined
+
+-- unifyPrfRelSp : (a : Tms Γ T) -> (b : Tms Γ T) -> (Γ' : Ctx) * (Γ' ~= Γ (a = b)) * m [enter Γ'] ()
+unifyPrfRelSp :: (Tc m) => Spine HTm -> Spine HTm -> m ()
+unifyPrfRelSp = undefined
+
+unifyPrfRel :: (Tc m) => HTm -> HTm -> m ()
+unifyPrfRel = undefined
+
+enterHTel :: (Tc m) => HTel -> (Spine HTm -> m a) -> m a
+enterHTel = undefined
+
+getDataGlobal' :: (Tc m) => DataGlobal -> m (DataGlobalInfo, DataConstructions)
+getDataGlobal' = undefined
+
+getCtorGlobal' :: (Tc m) => CtorGlobal -> m (CtorGlobalInfo, CtorConstructions)
+getCtorGlobal' = undefined
+
+eqTel :: Spine HTm -> Spine HTm -> HTel
+eqTel = undefined
+
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
 splitConstraint (CaseElab con ty cls) = do
-  -- Strategy:
-  --  Get a list of constructors
-  --  For each clause, unify with all constructors
-  --  Then we take the instantiated constructors and we apply the substitution to the rest of the stuff
-  ty' <- unfoldHere ty
-  case ty' of
-    VNorm (VPi m q x a b) -> do
-      l' <- getLvl
-      ifIsData
-        l'
-        a
-        ( \d sp -> do
-            dsp <- traverse (traverse (quoteHere >=> unembedHere)) sp
-            di <- access (getDataGlobal d)
-            let dpp = S.take (length di.params) dsp
-            let dix = S.drop (length di.params) dsp
-            let matches = Map.fromList $ map (,[]) di.ctors
-            res <-
-              foldM
-                ( \acc (c, csp) -> case c of
-                    SCtor (c', pp) -> do
-                      ci' <- access (getCtorGlobal c')
-                      let cc = fromJust ci'.constructions
-                      let susp = binder m q x a $ \l -> do
-                            b' <- b $$ [VV l]
-                            caseTree b' cls'
-                            return $ SLam m q x rest
-                      return $ Map.adjust (++ [susp]) c' acc
-                    SVar i -> do
-                      l' <- here (`idxToLvl` i)
-                      mapM_
-                        ( \c' -> do
-                            ci' <- access (getCtorGlobal c')
-                            let cc = fromJust ci'.constructions
-                            let susp = binder m q x a $ \l -> do
-                                  csp' <- traverse (traverse unembedHere) csp
-                                  hcpp <- traverse (traverse unembedHere) pp
-                                  s <-
-                                    equateSpines hcpp dpp
-                                      <> equateSpines (cc.returnIndices hcpp csp') dix
-                                      <> equateTerms (hApp (HCtor (c', hcpp)) csp') (HVar l)
-                                  enterSub s $ do
-                                    b' <- b $$ [VV l]
-                                    rest <- caseTree b' cls'
-                                    return $ SLam m q x <$> rest
-                            return $ Map.adjust (++ [susp]) c' acc
-                        )
-                        di.ctors
-                      return acc
-                    _ -> tcError $ InvalidPattern
-                )
-                matches
-                ps'
-            return undefined
-        )
-        (throwError InvalidPattern)
-    _ -> throwError InvalidPattern
+  -- Current context is:  Γχ (x : A)
+  -- Rest of the goal is: Π xΓ T
+  case con of
+    Constraints (c : cs) : ccs -> case c of
+      Constraint _ (VV x) (CtorP cg spg) param -> do -- @@Todo: deal with this
+        -- We have that A = D δ ψ and x = ci πg
 
-data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat}
+        -- Get the HOAS of the goal, i.e. Π xΓ T
+        ty' <- quoteHere ty >>= unembedHere
+
+        -- Get the current subject type, i.e. D δ ψ
+        (d, delta, psi) <- forceData param.ty
+        (di, dc) <- access (getDataGlobal' d)
+
+        -- Create the spine (ψ, x)
+        let psix = psi :|> Arg param.mode param.qty (HVar x)
+
+        -- For each constructor ci (π : Πi [δ]) : D δ (ξi [δ,π]):
+        elims <- forM di.ctors $ \c -> do
+          (_, cc) <- access (getCtorGlobal' c)
+
+          -- Enter the context of the constructor.
+          enterHTel (cc.args delta) $ \pi -> do
+            -- Current context is: Γχ (x : D δ ψ) (π : Πi)
+
+            -- Create the spine (ξi[δ,π], ci π)
+            let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
+
+            -- Unify (ψ, x) with (ξi[δ,π], ci π), which will enter a new context (Δ, σ)
+            -- that is isomorphic to
+            --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
+            -- through the substitution σ.
+            unifyPrfRelSp psix psix'
+
+            -- Build the rest of the clause, which will first give:
+            --    Δ |- e' : (Π xΓ T) σ
+            -- This is refined by specialisation by unification to:
+            --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : Π xΓ T
+            -- Here we are straight away given the e. -- @@Todo: explain how that works
+            e <- caseTree (CaseElab (Constraints cs : ccs) ty cls)
+
+            -- Now we build e'' which is:
+            --    Γχ (x : D δ ψ) (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) (Π xΓ T)
+            -- The equalities are explicitly given by the motive we will set up later.
+            eq <- here (`embedTel` eqTel psix psix')
+            let e'' = sLams eq e
+
+            -- The method is for constructor ci π
+            pt <- here (`embed` hApp (HCtor (c, delta)) pi)
+            let spt = SPat pt (telToBinds cc.argsArity)
+            return (Clause spt (Just e''))
+
+        -- Now we build the motive for the case.
+        -- First, we have the required data indices and subject:
+        --    (ψ' : Ψ[δ]) (x' : D δ ψ')
+        let psix' = extendTel (dc.indices delta) (\psi' -> Param Explicit Many (Name "x'") (hApp (HData d) (delta <> psi')))
+        -- We also add the equalities between the subject and the data indices
+        -- in the motive and the ones in the context.
+        --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
+        let indTel = joinTels psix' (eqTel psix)
+
+        caseBase <- here $ \lv ->
+          embedCase lv $
+            Case
+              { dat = d,
+                datParams = delta,
+                subject = HVar x,
+                subjectIndices = psi,
+                -- The final motive is:
+                --    Γχ (x : D δ ψ) |- Π ( (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x')) ) T
+                elimTy = hLams indTel (const ty'),
+                clauses = []
+              }
+        return . Just $ SCase (caseBase {clauses = elims})
+      Constraint _ (VV x) (LvlP _ _ x') _ -> do
+        -- Here we simply unify the level with the level in the pattern and move on.
+        unifyPrfRel (HVar x) (HVar x')
+        Just <$> caseTree (CaseElab (Constraints cs : ccs) ty cls)
+      _ -> return Nothing
+    _ -> return Nothing
+
+--
+-- ty' <- unfoldHere ty
+-- case ty' of
+--   VNorm (VPi m q x a b) -> do
+--     l' <- getLvl
+--     ifIsData
+--       l'
+--       a
+--       ( \d sp -> do
+--           dsp <- traverse (traverse (quoteHere >=> unembedHere)) sp
+--           di <- access (getDataGlobal d)
+--           let dpp = S.take (length di.params) dsp
+--           let dix = S.drop (length di.params) dsp
+--           let matches = Map.fromList $ map (,[]) di.ctors
+--           res <-
+--             foldM
+--               ( \acc (c, csp) -> case c of
+--                   SCtor (c', pp) -> do
+--                     ci' <- access (getCtorGlobal c')
+--                     let cc = fromJust ci'.constructions
+--                     let susp = binder m q x a $ \l -> do
+--                           b' <- b $$ [VV l]
+--                           caseTree b' cls'
+--                           return $ SLam m q x rest
+--                     return $ Map.adjust (++ [susp]) c' acc
+--                   SVar i -> do
+--                     l' <- here (`idxToLvl` i)
+--                     mapM_
+--                       ( \c' -> do
+--                           ci' <- access (getCtorGlobal c')
+--                           let cc = fromJust ci'.constructions
+--                           let susp = binder m q x a $ \l -> do
+--                                 csp' <- traverse (traverse unembedHere) csp
+--                                 hcpp <- traverse (traverse unembedHere) pp
+--                                 s <-
+--                                   equateSpines hcpp dpp
+--                                     <> equateSpines (cc.returnIndices hcpp csp') dix
+--                                     <> equateTerms (hApp (HCtor (c', hcpp)) csp') (HVar l)
+--                                 enterSub s $ do
+--                                   b' <- b $$ [VV l]
+--                                   rest <- caseTree b' cls'
+--                                   return $ SLam m q x <$> rest
+--                           return $ Map.adjust (++ [susp]) c' acc
+--                       )
+--                       di.ctors
+--                     return acc
+--                   _ -> tcError $ InvalidPattern
+--               )
+--               matches
+--               ps'
+--           return undefined
+--       )
+--       (throwError InvalidPattern)
+--   _ -> throwError InvalidPattern
+
+data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTm}
 
 data Constraints = Constraints {list :: [Constraint]}
 
@@ -1052,8 +1160,8 @@ data CaseElab = CaseElab
   }
 
 -- split
-caseTree :: (Tc m) => CaseElab -> m (Maybe STm)
-caseTree (CaseElab con ty cls) = asum <$> sequence [addVar (CaseElab con ty cls), splitConstraint (CaseElab con ty cls)]
+caseTree :: (Tc m) => CaseElab -> m STm
+caseTree c = asum <$> sequence [addVar c, splitConstraint c]
 
 toPat :: (Tc m) => STm -> m Pat
 toPat = _
