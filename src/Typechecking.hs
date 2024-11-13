@@ -6,12 +6,12 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# HLINT ignore "Use bimap" #-}
+{-# HLINT ignore "Use first" #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use bimap" #-}
-{-# HLINT ignore "Use first" #-}
 
 module Typechecking
   ( Tc (..),
@@ -85,6 +85,7 @@ import Common
     Try (..),
     composeZ,
     enterLoc,
+    idxToLvl,
     lvlToIdx,
     mapSpineM,
     nextLvl,
@@ -95,15 +96,18 @@ import Common
   )
 import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
-import Control.Applicative (Alternative (empty))
-import Control.Monad (replicateM, unless)
+import Control.Applicative (Alternative (empty), asum)
+import Control.Exception (assert, handle)
+import Control.Monad (foldM, replicateM, unless, (>=>))
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import qualified Data.IntMap as IM
 import Data.List (intercalate)
-import Data.Maybe (fromMaybe)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -131,7 +135,9 @@ import Evaluation
     ($$>),
   )
 import Globals
-  ( CtorGlobalInfo (..),
+  ( CtorConstructions (..),
+    CtorGlobalInfo (..),
+    DataConstructions (..),
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
@@ -158,16 +164,21 @@ import Globals
     modifyDefItem,
   )
 import Meta (freshMetaVar, solveMetaVar)
+import Presyntax (PPat, PTm)
 import Printing (Pretty (..), indentedFst)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
     Env,
+    HPat,
+    HTm (..),
+    HTy,
     PRen (..),
     SPat (..),
     STm (..),
     STy,
     Sub,
+    VCtor,
     VLazy,
     VLazyHead (..),
     VNeu,
@@ -176,18 +187,22 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
+    embed,
+    hApp,
+    hGatherApps,
     headAsValue,
     isEmptySub,
     liftPRenN,
+    sGatherApps,
     sGatherLams,
     sGatherPis,
+    unembed,
     uniqueSLams,
     vGetSpine,
+    pattern VV,
     pattern VVar,
   )
 import Unelaboration (Unelab)
-import Control.Exception (handle)
-import Presyntax (PPat)
 
 data TcError
   = Mismatch [UnifyError]
@@ -358,7 +373,6 @@ ensureAllProblemsSolved = do
   if S.null ps
     then return ()
     else tcError $ RemainingProblems (toList ps)
-
 
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
@@ -886,20 +900,199 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-type Clauses x = [Clause [x] x]
+type Clauses pat tm = [Clause (Spine pat) tm]
 
-clauses :: (Tc m) => Clauses (Child m) -> VTy -> m (STm, VTy)
-clauses = undefined
+type NextPat pat tm = (Maybe [pat], Clauses pat tm) -- nonempty
 
+nextPat :: (Tc m) => Clauses pat tm -> m (NextPat pat tm)
+nextPat = undefined
 
-defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) -> m ()
+type Matches m = Map CtorGlobal [(Sub, [m (HTm, HTy)])]
+
+instance Monoid (m Sub)
+
+equateSpines :: (Tc m) => Spine HTm -> Spine HTm -> m Sub
+equateSpines = undefined
+
+equateTerms :: (Tc m) => HTm -> HTm -> m Sub
+equateTerms = undefined
+
+getHoasEnv :: (Tc m) => m (Env HTm)
+getHoasEnv = do
+  es <- access ctxEntries
+  return $ map (\e -> HVar e.lvl) es
+
+unembedHere :: (Tc m) => STm -> m HTm
+unembedHere t = do
+  h <- getHoasEnv
+  return $ unembed h t
+
+embedHere :: (Tc m) => HTm -> m STm
+embedHere t = do
+  l <- getLvl
+  return $ embed l t
+
+enterSub :: (Tc m) => Sub -> m a -> m a
+enterSub = undefined
+
+class ApplySub m where
+  applySub :: Sub -> m -> m
+
+instance ApplySub VTm where
+  applySub = undefined
+
+instance (ApplySub a) => ApplySub (Spine a) where
+  applySub = undefined
+
+instance (ApplySub a, ApplySub b) => ApplySub (Clause a b) where
+  applySub = undefined
+
+binder :: (Has m Ctx) => PiMode -> Qty -> Name -> VTy -> (Lvl -> m a) -> m a
+binder m q x a f = do
+  l <- accessCtx (\c -> c.lvl)
+  enterCtx (bind m x q a) $ f l
+
+data Pat = WildP | LvlP Name Qty Lvl | CtorP VCtor (Spine Pat)
+
+addVar :: (Tc m) => CaseElab -> m (Maybe STm)
+addVar (CaseElab con ty cls) = do
+  (ps, cls') <- nextPat cls
+  case ps of
+    Nothing -> return Nothing
+    Just ps' -> do
+      ty' <- unfoldHere ty
+      case ty' of
+        VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
+          l <- getLvl
+          b' <- b $$ [VV l']
+          let con' = zipWith (addConstraint . Constraint l (VV l')) ps' con
+          rest <- caseTree (CaseElab con' b' cls')
+          return $ SLam m q x <$> rest
+        _ -> return Nothing
+
+splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
+splitConstraint (CaseElab con ty cls) = do
+  -- Strategy:
+  --  Get a list of constructors
+  --  For each clause, unify with all constructors
+  --  Then we take the instantiated constructors and we apply the substitution to the rest of the stuff
+  ty' <- unfoldHere ty
+  case ty' of
+    VNorm (VPi m q x a b) -> do
+      l' <- getLvl
+      ifIsData
+        l'
+        a
+        ( \d sp -> do
+            dsp <- traverse (traverse (quoteHere >=> unembedHere)) sp
+            di <- access (getDataGlobal d)
+            let dpp = S.take (length di.params) dsp
+            let dix = S.drop (length di.params) dsp
+            let matches = Map.fromList $ map (,[]) di.ctors
+            res <-
+              foldM
+                ( \acc (c, csp) -> case c of
+                    SCtor (c', pp) -> do
+                      ci' <- access (getCtorGlobal c')
+                      let cc = fromJust ci'.constructions
+                      let susp = binder m q x a $ \l -> do
+                            b' <- b $$ [VV l]
+                            caseTree b' cls'
+                            return $ SLam m q x rest
+                      return $ Map.adjust (++ [susp]) c' acc
+                    SVar i -> do
+                      l' <- here (`idxToLvl` i)
+                      mapM_
+                        ( \c' -> do
+                            ci' <- access (getCtorGlobal c')
+                            let cc = fromJust ci'.constructions
+                            let susp = binder m q x a $ \l -> do
+                                  csp' <- traverse (traverse unembedHere) csp
+                                  hcpp <- traverse (traverse unembedHere) pp
+                                  s <-
+                                    equateSpines hcpp dpp
+                                      <> equateSpines (cc.returnIndices hcpp csp') dix
+                                      <> equateTerms (hApp (HCtor (c', hcpp)) csp') (HVar l)
+                                  enterSub s $ do
+                                    b' <- b $$ [VV l]
+                                    rest <- caseTree b' cls'
+                                    return $ SLam m q x <$> rest
+                            return $ Map.adjust (++ [susp]) c' acc
+                        )
+                        di.ctors
+                      return acc
+                    _ -> tcError $ InvalidPattern
+                )
+                matches
+                ps'
+            return undefined
+        )
+        (throwError InvalidPattern)
+    _ -> throwError InvalidPattern
+
+data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat}
+
+data Constraints = Constraints {list :: [Constraint]}
+
+emptyConstraints :: Constraints
+emptyConstraints = Constraints []
+
+addConstraint :: Constraint -> Constraints -> Constraints
+addConstraint c (Constraints cs) = Constraints (c : cs)
+
+nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
+nextConstraint (Constraints []) = Nothing
+
+-- CaseElab : (Γ : Ctx) -> Set
+-- Operating in State Ctx
+data CaseElab = CaseElab
+  { constraints :: [Constraints], -- Unapplied constraints
+    ty :: VTy,
+    cls :: [Clause (Spine Pat) STm]
+  }
+
+-- split
+caseTree :: (Tc m) => CaseElab -> m (Maybe STm)
+caseTree (CaseElab con ty cls) = asum <$> sequence [addVar (CaseElab con ty cls), splitConstraint (CaseElab con ty cls)]
+
+toPat :: (Tc m) => STm -> m Pat
+toPat = _
+
+clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine Pat) STm)
+clause (_, ty) (Possible Empty t) = do
+  (t', _) <- t (Check ty)
+  return $ Possible Empty t'
+clause _ (Impossible Empty) = return $ Impossible Empty
+clause (tm, ty) (Possible ps t) = do
+  (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
+  (t', _) <- t (Check retTy)
+  let (_, sp) = sGatherApps ret
+  spp <- mapSpineM toPat sp
+  return $ Possible spp t'
+clause _ (Impossible _) = do
+  return undefined -- @@Todo
+  -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
+
+clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
+clauses d cls ty = enterCtx id $ do
+  -- Strategy:
+  -- - First we typecheck each clause
+  -- - Then we turn to case tree
+  -- - Invariant: in empty ctx
+  cls' <- mapM (clause (SDef d, ty)) cls
+  ct <- caseTree (CaseElab (map (const emptyConstraints) cls') ty cls')
+  case ct of
+    Nothing -> error "case build failed"
+    Just ct' -> return (ct', ty)
+
+defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()
 defItem mq n ts ty cl = do
   ensureNewName n
   let q = fromMaybe Many mq
   (ty', _) <- expect Zero $ ty (Check (VNorm VU))
   vty <- evalHere ty'
   modify (addItem n (DefInfo (DefGlobalInfo n q vty Nothing Nothing)) ts)
-  (tm', _) <- expect q $ clauses cl vty
+  (tm', _) <- expect q $ clauses (DefGlobal n) cl vty
 
   vtm <- evalHere tm'
   b <- normaliseProgram

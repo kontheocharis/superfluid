@@ -14,6 +14,7 @@ module Context
     assertIsNeeded,
     define,
     getCtx,
+    ctxEntries,
     typelessBind,
     typelessBinds,
     quoteHere,

@@ -7,7 +7,6 @@ module Presyntax
   ( PTy,
     PPat,
     Tag,
-    PPats (..),
     PDef (..),
     PCtor (..),
     PData (..),
@@ -64,24 +63,21 @@ instance Show MaybeQty where
   show (MaybeQty Nothing) = ""
   show (MaybeQty (Just q)) = show q
 
-data PPats = PPats { elements :: [PPat] }
-  deriving (Eq, Show)
-
 data PDef = MkPDef
   { name :: Name,
     qty :: MaybeQty,
     ty :: PTy,
-    clauses :: [Clause PPats PTm],
+    clauses :: [Clause (Spine PPat) PTm],
     tags :: Set Tag
   }
   deriving (Eq, Show)
 
-clausesAreSingleTerm :: [Clause PPats PTm] -> Maybe PTm
-clausesAreSingleTerm [Clause (PPats []) (Just t)] = Just t
+clausesAreSingleTerm :: [Clause (Spine PPat) PTm] -> Maybe PTm
+clausesAreSingleTerm [Clause Empty (Just t)] = Just t
 clausesAreSingleTerm _ = Nothing
 
-singleTermClause :: PTm -> Clause PPats PTm
-singleTermClause t = Clause (PPats []) (Just t)
+singleTermClause :: PTm -> Clause (Spine PPat) PTm
+singleTermClause t = Clause Empty (Just t)
 
 tagged :: Set Tag -> PItem -> PItem
 tagged ts (PData d) = PData $ d {tags = ts}
@@ -183,7 +179,7 @@ data PTm
   | PLocated Loc PTm
   deriving (Eq, Show)
 
-pApp :: PTm -> [Arg PTm] -> PTm
+pApp :: PTm -> Spine PTm -> PTm
 pApp = foldl (\g x -> PApp x.mode g x.arg)
 
 -- In all the above we don't care about the quantity
@@ -367,8 +363,6 @@ instance (Monad m) => Pretty m PData where
 instance (Monad m) => Pretty m (Tel PTy) where
   pretty ps = intercalate " " <$> mapM pretty (toList ps)
 
-instance (Monad m) => Pretty m PPats where
-  pretty (PPats ps) = intercalate " " <$> mapM singlePretty ps
 
 instance (Monad m) => Pretty m PDef where
   pretty (MkPDef n q ty cls ts) = do

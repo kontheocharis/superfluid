@@ -12,6 +12,7 @@ import Common
     PiMode (..),
     Pos (Pos),
     Qty (..),
+    Spine,
     Tag,
     Tel,
   )
@@ -22,6 +23,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as SE
+import qualified Data.Sequence as SEQ
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.String
@@ -37,7 +39,6 @@ import Presyntax
     PDefRep (MkPDefRep),
     PItem (..),
     PPat,
-    PPats (..),
     PPrim (MkPPrim),
     PProgram (..),
     PTm (..),
@@ -342,15 +343,15 @@ defItem = do
     try (curlies $ commaSep clause)
       <|> ( do
               t <- lets
-              return [Clause (PPats []) (Just t)]
+              return [Clause Empty (Just t)]
           )
   return $ MkPDef name q (fromMaybe PWild ty) t mempty
 
-clause :: Parser (Clause PPats PTm)
+clause :: Parser (Clause (Spine PPat) PTm)
 clause = do
-  ps <- many1 singlePat <* reservedOp "=>"
+  ps <- spine <* reservedOp "=>"
   t' <- (try (reserved "impossible") >> return Nothing) <|> Just <$> term
-  return $ Clause (PPats ps) t'
+  return $ Clause ps t'
 
 -- | Parse the type signature of a declaration.
 defSig :: Parser (Name, Maybe PTy)
@@ -532,16 +533,20 @@ piTOrSigmaT = try $ do
             return $ foldr (\(t, l) acc -> PLocated l (PSigma (MaybeQty (Just t.qty)) t.name t.ty q acc)) ret ns
         )
 
--- | Parse an application.
-app :: Parser PTy
-app = do
-  t <- singleTerm
-  ts <-
-    many
+spine :: Parser (Spine PTm)
+spine =
+  SEQ.fromList
+    <$> many
       ( (Arg Instance Many <$> try (dsquare term))
           <|> (Arg Implicit Many <$> try (square term))
           <|> (Arg Explicit Many <$> try singleTerm)
       )
+
+-- | Parse an application.
+app :: Parser PTy
+app = do
+  t <- singleTerm
+  ts <- spine
   return $ pApp t ts
 
 -- | Parse a representation term

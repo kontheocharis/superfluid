@@ -11,6 +11,7 @@ module Syntax
     sLams,
     sPis,
     Case (..),
+    VCtor,
     sGatherApps,
     sGatherPis,
     sGatherLams,
@@ -61,6 +62,9 @@ module Syntax
     hOwnSpine,
     embedClosure,
     piArgsArity,
+    hGatherApps,
+    pattern VV,
+    HPat,
   )
 where
 
@@ -246,6 +250,9 @@ vGetSpine _ = Empty
 pattern VVar :: Lvl -> VNeu
 pattern VVar l = (VRigid l, Empty)
 
+pattern VV :: Lvl -> VTm
+pattern VV l = VNeu (VRigid l, Empty)
+
 pattern VMeta :: MetaVar -> VNeu
 pattern VMeta m = (VFlex m, Empty)
 
@@ -337,6 +344,8 @@ type HCase = (Case HTm HTm SPat ([HTm] -> HTm))
 
 type HTy = HTm
 
+type HPat = HTm
+
 data HTm
   = HPi PiMode Qty Name HTy (HTm -> HTy)
   | HLam PiMode Qty Name (HTm -> HTm)
@@ -371,6 +380,10 @@ hApp = foldl (\f (Arg m q u) -> HApp m q f u)
 hPis :: HTel -> (Spine HTm -> HTy) -> HTy
 hPis HEmpty b = b Empty
 hPis (HWithParam m q n a f) b = HPi m q n a (\x -> hPis (f x) (\xs -> b (Arg m q x :<| xs)))
+
+hGatherApps :: HTm -> (HTm, Spine HTm)
+hGatherApps (HApp m q t u) = let (t', sp) = hGatherApps t in (t', sp :|> Arg m q u)
+hGatherApps t = (t, Empty)
 
 embedCase :: Lvl -> HCase -> SCase
 embedCase l (Case d ps s is t cs) =

@@ -74,7 +74,7 @@ import Presyntax
     pGatherApps,
     pGatherPis,
     pLams,
-    toPSpine, elements,
+    toPSpine,
   )
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
@@ -143,13 +143,13 @@ class (Tc m, Acc m) => Elab m where
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
-pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (map (Arg Explicit Many) ts)
+pKnownCtor k ts = pApp (PName (knownCtor k).globalName) (S.fromList $ map (Arg Explicit Many) ts)
 
 pKnownData :: KnownGlobal DataGlobal -> [PTm] -> PTm
-pKnownData d ts = pApp (PName (knownData d).globalName) (map (Arg Explicit Many) ts)
+pKnownData d ts = pApp (PName (knownData d).globalName) (S.fromList $ map (Arg Explicit Many) ts)
 
 pKnownDef :: KnownGlobal DefGlobal -> [PTm] -> PTm
-pKnownDef d ts = pApp (PName (knownDef d).globalName) (map (Arg Explicit Many) ts)
+pKnownDef d ts = pApp (PName (knownDef d).globalName) (S.fromList $ map (Arg Explicit Many) ts)
 
 patAsVar :: PPat -> Either Name PPat
 patAsVar (PName n) = Left n
@@ -244,7 +244,7 @@ elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
   let cs =
         map
-          ( \(Clause ps t) -> Clause (map elab ps.elements) (elab <$> t))
+          ( \(Clause ps t) -> Clause (fmap elab ps.elements) (elab <$> t))
           def.clauses
   defItem
     def.qty.un
