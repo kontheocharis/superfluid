@@ -108,11 +108,12 @@ import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, fromMaybe, catMaybes)
+import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
 import qualified Data.Set as SET
+import Data.Vector.Unboxed (MVector (MV_2))
 import Debug.Trace (traceM)
 import Evaluation
   ( Eval (..),
@@ -215,7 +216,6 @@ import Syntax
   )
 import Unelaboration (Unelab)
 import Prelude hiding (pi)
-import Data.Vector.Unboxed (MVector(MV_2))
 
 data TcError
   = Mismatch [UnifyError]
@@ -913,7 +913,9 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-type Clauses pat tm = [Clause (Spine pat) tm]
+type Clauses pat tm = [Cl pat tm]
+
+type Cl pat tm = Clause (Constraints, Spine pat) tm
 
 type NextPat pat tm = (Maybe [pat], Clauses pat tm) -- nonempty
 
@@ -965,10 +967,10 @@ binder m q x a f = do
   l <- accessCtx (\c -> c.lvl)
   enterCtx (bind m x q a) $ f l
 
-data Pat = LvlP Name Qty Lvl | CtorP VCtor (Spine Pat)
+data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
 
 addVar :: (Tc m) => CaseElab -> m (Maybe STm)
-addVar (CaseElab con ty cls) = do
+addVar (CaseElab ty cls) = do
   (ps, cls') <- nextPat cls
   case ps of
     Nothing -> return Nothing
@@ -978,9 +980,9 @@ addVar (CaseElab con ty cls) = do
         VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
           l <- getLvl
           b' <- b $$ [VV l']
-          let con' = zipWith (addConstraint . Constraint l (VV l')) ps' con
-          rest <- caseTree (CaseElab con' b' cls')
-          return $ SLam m q x <$> rest
+          let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
+          rest <- caseTree (CaseElab b' cls'')
+          return . Just $ SLam m q x rest
         _ -> return Nothing
 
 forceData :: (Tc m) => VTm -> m (DataGlobal, Spine HTm, Spine HTm)
@@ -1014,12 +1016,15 @@ reflSp = undefined
 patAsTm :: Pat -> HTm
 patAsTm = undefined
 
+tmAsPat :: HTm -> Pat
+tmAsPat = undefined
+
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
-splitConstraint (CaseElab con ty cls) = do
+splitConstraint (CaseElab ty cls) = do
   -- Current context is:  Γχ (x : A)
   -- Rest of the goal is: Π xΓ T
-  case con of
-    Constraints (co : cs) : ccs -> case co of
+  case cls of
+    Clause (Constraints (co : cs), _) _ : ccs -> case co of
       Constraint _ (VV x) (CtorP _ _) param -> do
         -- We have that A = D δ ψ and x = ci πg
 
@@ -1034,20 +1039,21 @@ splitConstraint (CaseElab con ty cls) = do
         let psix = psi :|> Arg param.mode param.qty (HVar x)
 
         -- For each constructor ci (π : Πi [δ]) : D δ (ξi [δ,π]):
-        elims <- forM (zip [0 ..] di.ctors) $ \(i, c) -> do
+        elims <- forM di.ctors $ \c -> do
           (_, cc) <- access (getCtorGlobal' c)
 
           -- Enter the context of the constructor.
           enterHTel (cc.args delta) $ \pi -> do
             -- For each clause with pattern pj
-            children <- fmap catMaybes $ forM (zip [0 ..] con) $ \(j, co') -> do
-              case co' of
-                Constraints [] -> return Nothing
-                Constraints (Constraint _ _ (LvlP _ _ p) _ : cs) -> do
-                  _
-                  -- return (CaseElab (joinConstraints (simpleConstraints pi sp) ccs) ty cls)
-                Constraints (Constraint _ _ (CtorP j _) _ : cs) | j /= i -> _
-                Constraints (Constraint _ _ (CtorP _ sp) _ : cs)  -> do
+            children <- fmap catMaybes . forM cls $ \cl' -> do
+              case cl' of
+                Clause (Constraints [], _) _ -> return Nothing
+                Clause (Constraints (Constraint _ _ (LvlP _ _ p) _ : cs'), ps) t -> do
+                  let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
+                  newConstraint <- simpleConstraint (HVar p) cpat
+                  return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
+                Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
+                Clause (Constraints (Constraint _ _ (CtorP _ sp) _ : cs'), ps) t -> do
                   -- Current context is: Γχ (x : D δ ψ) (π : Πi)
                   -- equate pi to pj, gives back simple constraints.
                   -- give those constraints to make the child case clause j.
@@ -1056,14 +1062,10 @@ splitConstraint (CaseElab con ty cls) = do
                   -- this constitutes a match for the constructor ci.
                   -- now to build the method for ci, call casetree recursively
                   -- with the configuration amended by the new constraints
-                  -- return (CaseElab (joinConstraints (simpleConstraints pi sp) ccs) ty cls) -- need single clause not all
-                  _
-              -- Create the spine (ξi[δ,π], ci π)
+                  newConstraints <- simpleConstraints pi sp
+                  return . Just $ Clause (joinConstraints newConstraints (Constraints cs'), ps) t
+            -- Create the spine (ξi[δ,π], ci π)
             let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
-
-            -- @@Todo:
-            -- For all the matches, call caseTree recursively (with the modified context including π)
-            -- That makes the method.
 
             -- Unify (ψ, x) with (ξi[δ,π], ci π), which will enter a new context (Δ, σ)
             -- that is isomorphic to
@@ -1076,7 +1078,7 @@ splitConstraint (CaseElab con ty cls) = do
             -- This is refined by specialisation by unification to:
             --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : Π xΓ T
             -- Here we are straight away given the e. -- @@Todo: explain how that works
-            e <- caseTree (CaseElab (Constraints cs : ccs) ty cls)
+            e <- caseTree (CaseElab ty children)
 
             -- Now we build e'' which is:
             --    Γχ (x : D δ ψ) (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) (Π xΓ T)
@@ -1092,7 +1094,7 @@ splitConstraint (CaseElab con ty cls) = do
         -- Now we build the motive for the case.
         -- First, we have the required data indices and subject:
         --    (ψ' : Ψ[δ]) (x' : D δ ψ')
-        let psixTe' = extendTel (dc.indices delta) (\psi' -> param {ty = hApp (HData d) (delta <> psi') })
+        let psixTe' = extendTel (dc.indices delta) (\psi' -> param {ty = hApp (HData d) (delta <> psi')})
         -- We also add the equalities between the subject and the data indices
         -- in the motive and the ones in the context.
         --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
@@ -1112,7 +1114,7 @@ splitConstraint (CaseElab con ty cls) = do
                 subject = HVar x,
                 subjectIndices = psi,
                 -- The final motive is:
-                --    Γχ (x : D δ ψ) |- Π ( (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x')) ) T
+                --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
                 elimTy = hLams indTel (const ty'),
                 clauses = []
               }
@@ -1124,11 +1126,14 @@ splitConstraint (CaseElab con ty cls) = do
       _ -> return Nothing
     _ -> return Nothing
 
-joinConstraints :: Constraints -> [Constraints] -> [Constraints]
+joinConstraints :: Constraints -> Constraints -> Constraints
 joinConstraints = _
 
-simpleConstraints :: Spine HTm -> Spine Pat -> Constraints
+simpleConstraints :: Spine HTm -> Spine Pat -> m Constraints
 simpleConstraints = _
+
+simpleConstraint :: HTm -> Pat -> m Constraint
+simpleConstraint = _
 
 --
 -- ty' <- unfoldHere ty
@@ -1192,8 +1197,8 @@ data Constraints = Constraints {list :: [Constraint]}
 emptyConstraints :: Constraints
 emptyConstraints = Constraints []
 
-addConstraint :: Constraint -> Constraints -> Constraints
-addConstraint c (Constraints cs) = Constraints (c : cs)
+addConstraint :: Constraint -> Cl Pat STm -> Cl Pat STm
+addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
 
 nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
 nextConstraint (Constraints []) = Nothing
@@ -1201,14 +1206,17 @@ nextConstraint (Constraints []) = Nothing
 -- CaseElab : (Γ : Ctx) -> Set
 -- Operating in State Ctx
 data CaseElab = CaseElab
-  { constraints :: [Constraints], -- Unapplied constraints
-    ty :: VTy,
-    cls :: [Clause (Spine Pat) STm]
+  { ty :: VTy,
+    cls :: [Clause (Constraints, Spine Pat) STm]
   }
 
 -- split
 caseTree :: (Tc m) => CaseElab -> m STm
-caseTree c = asum <$> sequence [addVar c, splitConstraint c]
+caseTree c = do
+  res <- asum <$> sequence [addVar c, splitConstraint c]
+  case res of
+    Just r -> return r
+    Nothing -> error "no case tree tactic matched"
 
 toPat :: (Tc m) => STm -> m Pat
 toPat = _
