@@ -108,7 +108,7 @@ import qualified Data.IntMap as IM
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, catMaybes)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
@@ -158,7 +158,9 @@ import Globals
     getDefGlobal,
     hasName,
     instances,
+    knownCtor,
     knownData,
+    knownDef,
     lookupGlobal,
     lookupInstance,
     modifyDataItem,
@@ -200,17 +202,20 @@ import Syntax
     isEmptySub,
     joinTels,
     liftPRenN,
+    sAppSpine,
     sGatherApps,
     sGatherLams,
     sGatherPis,
+    sLams,
     unembed,
     uniqueSLams,
     vGetSpine,
     pattern VV,
-    pattern VVar, sLams,
+    pattern VVar,
   )
 import Unelaboration (Unelab)
 import Prelude hiding (pi)
+import Data.Vector.Unboxed (MVector(MV_2))
 
 data TcError
   = Mismatch [UnifyError]
@@ -988,6 +993,9 @@ unifyPrfRelSp = undefined
 unifyPrfRel :: (Tc m) => HTm -> HTm -> m ()
 unifyPrfRel = undefined
 
+canUnifyPrfRel :: (Tc m) => HTm -> HTm -> m CanUnify
+canUnifyPrfRel = undefined
+
 enterHTel :: (Tc m) => HTel -> (Spine HTm -> m a) -> m a
 enterHTel = undefined
 
@@ -1000,13 +1008,19 @@ getCtorGlobal' = undefined
 eqTel :: Spine HTm -> Spine HTm -> HTel
 eqTel = undefined
 
+reflSp :: HTel -> Spine HTm -> Spine HTm
+reflSp = undefined
+
+patAsTm :: Pat -> HTm
+patAsTm = undefined
+
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
 splitConstraint (CaseElab con ty cls) = do
   -- Current context is:  Γχ (x : A)
   -- Rest of the goal is: Π xΓ T
   case con of
-    Constraints (c : cs) : ccs -> case c of
-      Constraint _ (VV x) (CtorP cg spg) param -> do -- @@Todo: deal with this
+    Constraints (co : cs) : ccs -> case co of
+      Constraint _ (VV x) (CtorP _ _) param -> do
         -- We have that A = D δ ψ and x = ci πg
 
         -- Get the HOAS of the goal, i.e. Π xΓ T
@@ -1020,15 +1034,36 @@ splitConstraint (CaseElab con ty cls) = do
         let psix = psi :|> Arg param.mode param.qty (HVar x)
 
         -- For each constructor ci (π : Πi [δ]) : D δ (ξi [δ,π]):
-        elims <- forM di.ctors $ \c -> do
+        elims <- forM (zip [0 ..] di.ctors) $ \(i, c) -> do
           (_, cc) <- access (getCtorGlobal' c)
 
           -- Enter the context of the constructor.
           enterHTel (cc.args delta) $ \pi -> do
-            -- Current context is: Γχ (x : D δ ψ) (π : Πi)
-
-            -- Create the spine (ξi[δ,π], ci π)
+            -- For each clause with pattern pj
+            children <- fmap catMaybes $ forM (zip [0 ..] con) $ \(j, co') -> do
+              case co' of
+                Constraints [] -> return Nothing
+                Constraints (Constraint _ _ (LvlP _ _ p) _ : cs) -> do
+                  _
+                  -- return (CaseElab (joinConstraints (simpleConstraints pi sp) ccs) ty cls)
+                Constraints (Constraint _ _ (CtorP j _) _ : cs) | j /= i -> _
+                Constraints (Constraint _ _ (CtorP _ sp) _ : cs)  -> do
+                  -- Current context is: Γχ (x : D δ ψ) (π : Πi)
+                  -- equate pi to pj, gives back simple constraints.
+                  -- give those constraints to make the child case clause j.
+                  -- add this to matched clauses for i.
+                  --
+                  -- this constitutes a match for the constructor ci.
+                  -- now to build the method for ci, call casetree recursively
+                  -- with the configuration amended by the new constraints
+                  -- return (CaseElab (joinConstraints (simpleConstraints pi sp) ccs) ty cls) -- need single clause not all
+                  _
+              -- Create the spine (ξi[δ,π], ci π)
             let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
+
+            -- @@Todo:
+            -- For all the matches, call caseTree recursively (with the modified context including π)
+            -- That makes the method.
 
             -- Unify (ψ, x) with (ξi[δ,π], ci π), which will enter a new context (Δ, σ)
             -- that is isomorphic to
@@ -1057,11 +1092,17 @@ splitConstraint (CaseElab con ty cls) = do
         -- Now we build the motive for the case.
         -- First, we have the required data indices and subject:
         --    (ψ' : Ψ[δ]) (x' : D δ ψ')
-        let psix' = extendTel (dc.indices delta) (\psi' -> Param Explicit Many (Name "x'") (hApp (HData d) (delta <> psi')))
+        let psixTe' = extendTel (dc.indices delta) (\psi' -> param {ty = hApp (HData d) (delta <> psi') })
         -- We also add the equalities between the subject and the data indices
         -- in the motive and the ones in the context.
         --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
-        let indTel = joinTels psix' (eqTel psix)
+        let eq = eqTel psix
+        let indTel = joinTels psixTe' eq
+
+        -- We also need the reflexivity proofs to apply to the motive.
+        --    refl [ψj] : Equal [Ψj] ψj ψj
+        -- Where ψj = ψ1, ..., ψn, x
+        psixRefl <- mapSpineM embedHere $ reflSp psixTe' psix
 
         caseBase <- here $ \lv ->
           embedCase lv $
@@ -1075,13 +1116,19 @@ splitConstraint (CaseElab con ty cls) = do
                 elimTy = hLams indTel (const ty'),
                 clauses = []
               }
-        return . Just $ SCase (caseBase {clauses = elims})
+        return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
       Constraint _ (VV x) (LvlP _ _ x') _ -> do
         -- Here we simply unify the level with the level in the pattern and move on.
         unifyPrfRel (HVar x) (HVar x')
         Just <$> caseTree (CaseElab (Constraints cs : ccs) ty cls)
       _ -> return Nothing
     _ -> return Nothing
+
+joinConstraints :: Constraints -> [Constraints] -> [Constraints]
+joinConstraints = _
+
+simpleConstraints :: Spine HTm -> Spine Pat -> Constraints
+simpleConstraints = _
 
 --
 -- ty' <- unfoldHere ty
@@ -1138,7 +1185,7 @@ splitConstraint (CaseElab con ty cls) = do
 --       (throwError InvalidPattern)
 --   _ -> throwError InvalidPattern
 
-data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTm}
+data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTy}
 
 data Constraints = Constraints {list :: [Constraint]}
 

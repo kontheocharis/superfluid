@@ -318,6 +318,8 @@ data KnownGlobal a where
   KnownAdd :: KnownGlobal DefGlobal
   KnownSub :: KnownGlobal DefGlobal
   KnownBind :: KnownGlobal DefGlobal
+  KnownRefl :: KnownGlobal CtorGlobal
+  KnownEqual :: KnownGlobal DataGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -332,6 +334,7 @@ knownData KnownList = DataGlobal (Name "List")
 knownData KnownString = DataGlobal (Name "String")
 knownData KnownUnit = DataGlobal (Name "Unit")
 knownData KnownBool = DataGlobal (Name "Bool")
+knownData KnownEqual = DataGlobal (Name "Equal")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -346,6 +349,7 @@ knownCtor KnownStr = CtorGlobal (Name "str")
 knownCtor KnownTt = CtorGlobal (Name "tt")
 knownCtor KnownTrue = CtorGlobal (Name "true")
 knownCtor KnownFalse = CtorGlobal (Name "false")
+knownCtor KnownRefl = CtorGlobal (Name "refl")
 
 knownPrim :: KnownGlobal PrimGlobal -> PrimGlobal
 knownPrim KnownJsImpossible = PrimGlobal (Name "js-impossible")
