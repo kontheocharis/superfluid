@@ -244,7 +244,7 @@ elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
   let cs =
         map
-          ( \(Clause ps t) -> Clause (fmap elab ps.elements) (elab <$> t))
+          ( \(Clause ps t) -> Clause (fmap (fmap elab) ps) (elab <$> t))
           def.clauses
   defItem
     def.qty.un

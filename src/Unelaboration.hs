@@ -67,6 +67,7 @@ import Syntax
     VTm (..),
     pattern VVar,
   )
+import qualified Data.Sequence as S
 
 class (Eval m) => Unelab m
 
@@ -103,7 +104,7 @@ unelabPat ns pat = do
       (SApp m q a b) -> do
         a' <- unelabPat' a
         b' <- unelabPat' b
-        return $ pApp a' [Arg m q b']
+        return $ pApp a' (S.singleton $ Arg m q b')
       (SVar (Idx 0)) ->
         state
           ( \case
@@ -122,7 +123,7 @@ unelab ns = \case
   (SLet q x ty t u) -> PLet (MaybeQty (Just q)) (PName x) <$> unelab ns ty <*> unelab ns t <*> unelab (x : ns) u
   (SMeta m bs) -> do
     (t, ts) <- unelabMeta ns m bs
-    return $ pApp t ts
+    return $ pApp t (S.fromList ts)
   (SVar v) -> do
     let i = ns !? v.unIdx
     case i of

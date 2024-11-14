@@ -216,6 +216,7 @@ import Syntax
   )
 import Unelaboration (Unelab)
 import Prelude hiding (pi)
+import Data.Bifunctor (Bifunctor(..))
 
 data TcError
   = Mismatch [UnifyError]
@@ -913,18 +914,18 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-type Clauses pat tm = [Cl pat tm]
+type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
-type Cl pat tm = Clause (Constraints, Spine pat) tm
+type Clauses pat tm = [Clause (Spine pat) tm]
 
-type NextPat pat tm = (Maybe [pat], Clauses pat tm) -- nonempty
+type ConstrainedClause pats tm = Clause (Constraints, pats) tm
 
-nextPat :: (Tc m) => Clauses pat tm -> m (NextPat pat tm)
+type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
+
+nextPat :: (Tc m) => ConstrainedClauses pat tm -> m (NextPat pat tm)
 nextPat = undefined
 
 type Matches m = Map CtorGlobal [(Sub, [m (HTm, HTy)])]
-
-instance Monoid (m Sub)
 
 equateSpines :: (Tc m) => Spine HTm -> Spine HTm -> m Sub
 equateSpines = undefined
@@ -1001,10 +1002,10 @@ canUnifyPrfRel = undefined
 enterHTel :: (Tc m) => HTel -> (Spine HTm -> m a) -> m a
 enterHTel = undefined
 
-getDataGlobal' :: (Tc m) => DataGlobal -> m (DataGlobalInfo, DataConstructions)
+getDataGlobal' :: DataGlobal -> Sig -> (DataGlobalInfo, DataConstructions)
 getDataGlobal' = undefined
 
-getCtorGlobal' :: (Tc m) => CtorGlobal -> m (CtorGlobalInfo, CtorConstructions)
+getCtorGlobal' :: CtorGlobal -> Sig -> (CtorGlobalInfo, CtorConstructions)
 getCtorGlobal' = undefined
 
 eqTel :: Spine HTm -> Spine HTm -> HTel
@@ -1024,7 +1025,13 @@ splitConstraint (CaseElab ty cls) = do
   -- Current context is:  Γχ (x : A)
   -- Rest of the goal is: Π xΓ T
   case cls of
-    Clause (Constraints (co : cs), _) _ : ccs -> case co of
+    Clause (Constraints (co : cs), _) _ : clss -> case co of
+      Constraint _ (VV x) (LvlP _ _ x') _ -> do
+        -- We have that x = x'
+        --
+        -- Here we simply unify the level with the level in the pattern and move on.
+        unifyPrfRel (HVar x) (HVar x')
+        Just <$> caseTree (CaseElab ty clss)
       Constraint _ (VV x) (CtorP _ _) param -> do
         -- We have that A = D δ ψ and x = ci πg
 
@@ -1119,10 +1126,6 @@ splitConstraint (CaseElab ty cls) = do
                 clauses = []
               }
         return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
-      Constraint _ (VV x) (LvlP _ _ x') _ -> do
-        -- Here we simply unify the level with the level in the pattern and move on.
-        unifyPrfRel (HVar x) (HVar x')
-        Just <$> caseTree (CaseElab (Constraints cs : ccs) ty cls)
       _ -> return Nothing
     _ -> return Nothing
 
@@ -1197,7 +1200,7 @@ data Constraints = Constraints {list :: [Constraint]}
 emptyConstraints :: Constraints
 emptyConstraints = Constraints []
 
-addConstraint :: Constraint -> Cl Pat STm -> Cl Pat STm
+addConstraint :: Constraint -> ConstrainedClause (Spine Pat) STm -> ConstrainedClause (Spine Pat) STm
 addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
 
 nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
@@ -1236,6 +1239,9 @@ clause _ (Impossible _) = do
   return undefined -- @@Todo
   -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
 
+clausesWithEmptyConstraints :: Clauses a b -> ConstrainedClauses a b
+clausesWithEmptyConstraints = map (bimap (emptyConstraints,) id)
+
 clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses d cls ty = enterCtx id $ do
   -- Strategy:
@@ -1243,10 +1249,8 @@ clauses d cls ty = enterCtx id $ do
   -- - Then we turn to case tree
   -- - Invariant: in empty ctx
   cls' <- mapM (clause (SDef d, ty)) cls
-  ct <- caseTree (CaseElab (map (const emptyConstraints) cls') ty cls')
-  case ct of
-    Nothing -> error "case build failed"
-    Just ct' -> return (ct', ty)
+  ct <- caseTree (CaseElab ty (clausesWithEmptyConstraints cls'))
+  return (ct, ty)
 
 defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()
 defItem mq n ts ty cl = do
