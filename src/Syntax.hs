@@ -374,10 +374,12 @@ hSimpleTel :: Tel HTy -> HTel
 hSimpleTel = foldr (\(Param m q n a) acc -> HWithParam m q n a (const acc)) HEmpty
 
 extendTel :: HTel -> (Spine HTm -> Param HTy) -> HTel
-extendTel = _
+extendTel HEmpty g = let Param m q x ty = g Empty in HWithParam m q x ty (const HEmpty)
+extendTel (HWithParam m q n a f) g = HWithParam m q n a (\x -> extendTel (f x) (\xs -> g (Arg m q x :<| xs)))
 
 joinTels :: HTel -> (Spine HTm -> HTel) -> HTel
-joinTels = _
+joinTels HEmpty g = g Empty
+joinTels (HWithParam m q n a f) g = HWithParam m q n a (\x -> joinTels (f x) (\xs -> g (Arg m q x :<| xs)))
 
 unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
