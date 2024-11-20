@@ -59,6 +59,7 @@ module Common
     uniqueTel,
     telToBinds,
     nameSpineToTel,
+    telShapes,
   )
 where
 
@@ -324,6 +325,9 @@ nameSpineToTel = fmap (\(Arg m q n) -> Param m q n ())
 
 telToBinds :: Tel a -> [(Qty, Name)]
 telToBinds = toList . fmap (\(Param _ q n _) -> (q, n))
+
+telShapes :: Tel a -> Tel ()
+telShapes = fmap (\(Param m q n _) -> Param m q n ())
 
 -- Metas
 

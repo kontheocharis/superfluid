@@ -1,8 +1,8 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Unification
   ( UnifyError (..),
@@ -20,21 +20,28 @@ import Common
   ( Arg (..),
     Clause (..),
     Has (..),
+    HasNameSupply (uniqueName),
     Lit (..),
     Lvl (..),
     MetaVar,
+    Param (..),
     PiMode (..),
     Qty (..),
     Spine,
+    Tel,
     composeZ,
     lvlToIdx,
     mapSpineM,
     nextLvl,
+    nextLvls,
+    telShapes,
     pattern Impossible,
     pattern Possible,
   )
+import Constructions (ctorConstructions)
 import Context
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Extra (findM, firstJustM)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import Data.IntMap (IntMap)
@@ -50,12 +57,15 @@ import Evaluation
     quotePat,
     vApp,
   )
+import Globals (getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Subst (..), composeSub, idSub, liftSubN)
+import Substitution (BiSub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, projN)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
+    HCtx,
+    HTm (..),
     SPat (..),
     STm (..),
     VLazy,
@@ -66,11 +76,14 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
+    hApp,
+    hGatherApps,
     headAsValue,
     uniqueSLams,
+    pattern VV,
     pattern VVar,
   )
-import Prelude hiding (pi)
+import Prelude hiding (cycle, pi)
 
 data MetaProblem = MetaProblem {m :: MetaVar, sp :: Spine VTm, rhs :: VTm}
 
@@ -433,20 +446,26 @@ rename m pren tm = case tm of
   VNeu n -> renameNeu m pren n
 
 -- Proof relevant unification
+--
+
+data UnifyPLError = UnifyPLError
 
 class (Eval m, Has m Ctx) => UnifyPL m where
+  throwUnifyError :: UnifyPLError -> m a
 
+  target :: m VTm
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
 -- was successful or not.
 data UnifyOutcome = Can | Cannot [UnifyError]
 
--- The variables in Δ are called flexible variables. (Not the same as VFlex!
--- @@Todo alleviate this)
---
--- A unification between terms a, b : Tm (Γ, Δ) A is a telescope Δ' and an
+-- A unification between terms a, b : Tm Γ A is a telescope Γ' and an
 -- invertible (with coherence proofs definitionally equal to refl)
--- substitution σ : Sub (Γ, Δ') (Γ, Δ, (a = b)).
+-- substitution σ : Sub Γ' (Γ, (a = b)).
+--
+-- Unification will not always succeed.
+--
+-- We also "remember" if Γ' is the bottom context (x : Empty) or not.
 type Unification = (UnifyOutcome, BiSub)
 
 instance Lattice UnifyOutcome where
@@ -458,12 +477,12 @@ instance Lattice UnifyOutcome where
   Cannot xs /\ Cannot ys = Cannot (xs ++ ys)
   _ /\ _ = Cannot []
 
--- -- Holds by definition, so the new context
--- definitional :: Lvl -> Unification
--- definitional l = (Can, BiSub {forward = idSub l, backward = idSub l})
-
-unifyPLSpines :: (UnifyPL m) => Spine VTm -> Spine VTm -> m Unification
+unifyPLSpines :: (UnifyPL m) => Spine HTm -> Spine HTm -> m Unification
 unifyPLSpines Empty Empty = do
+  -- Empty spines lead to identity substitutions
+  --
+  -- Γ () ≃ Γ
+  -- So solve with Γ' = Γ and σ = id
   l <- getLvl
   return
     ( Can,
@@ -473,10 +492,18 @@ unifyPLSpines Empty Empty = do
         }
     )
 unifyPLSpines (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
+  -- Solving unify Γ (x, ..xs) (y, ..ys)
+
+  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ x y
   (o, s) <- unifyPL x y
-  xs' <- sub s.forward xs
-  ys' <- sub s.forward ys
-  (o', s') <- unifyPLSpines xs' ys'
+
+  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' (xs σ) (ys σ)
+  (o', s') <- unifyPLSpines (sub s.forward xs) (sub s.forward ys)
+
+  -- return (Γ'', (
+  --     1 = lift (xs ..= ys) σ ∘ σ',
+  --    -1 = σ'⁻¹ ∘ lift (xs σ⁻¹ ..= ys σ⁻¹) σ⁻¹
+  -- ))
   return
     ( o /\ o',
       BiSub
@@ -486,144 +513,127 @@ unifyPLSpines (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
     )
 unifyPLSpines _ _ = error "Mismatching spines should never occur in well-typed terms"
 
-unifyPLClauses :: (UnifyPL m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m Unification
-unifyPLClauses = undefined
-
--- unifyPLClauses l [] [] = return Yes
--- unifyPLClauses l (c : cs) (c' : cs') = unifyPLClause l c c' /\ unifyPLClauses l cs cs'
--- unifyPLClauses l a b = return $ No [DifferentClauses a b]
-
-unifyPLClause :: (UnifyPL m) => Clause VPatB Closure -> Clause VPatB Closure -> m Unification
-unifyPLClause = undefined
-
--- unifyPLClause l (Possible p t) (Possible p' t') = unifyPLClosure l (map fst p.binds) t (map fst p'.binds) t'
--- unifyPLClause l (Impossible _) (Impossible _) = return Yes
--- unifyPLClause l a b = return $ No [DifferentClauses [a] [b]]
-
-canUnifyPLHere :: (UnifyPL m) => VTm -> VTm -> m Unification
-canUnifyPLHere = undefined
-
--- canUnifyPLHere l t1 t2 = do
---   t1' <- resolveHere t1
---   t2' <- resolveHere t2
---   unifyPL l t1' t2'
-
-unifyPLFlex :: (UnifyPL m) => MetaVar -> Spine VTm -> VTm -> m Unification
-unifyPLFlex = undefined
-
--- unifyPLFlex l m sp t = runSolveT m sp t $ do
---   pren <- invertSpine sp
---   rhs <- rename m pren t
---   solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, a.qty)) (toList sp)) rhs >>= eval []
---   lift $ solveMetaVar m solution
-
-unifyPLClosure :: (UnifyPL m) => [Qty] -> Closure -> [Qty] -> Closure -> m Unification
-unifyPLClosure = undefined
-
--- unifyPLClosure l qs1 cl1 _ cl2 = do
---   t1 <- evalInOwnCtx l cl1
---   t2 <- evalInOwnCtx l cl2
---   if cl1.numVars == cl2.numVars
---     then enterTypelessClosure qs1 cl1 $ unifyPL l t1 t2
---     else error "unifyPLClosure: different number of variables"
-
-unifyPL :: (UnifyPL m) => VTm -> VTm -> m Unification
+unifyPL :: (UnifyPL m) => HTm -> HTm -> m Unification
 unifyPL t1 t2 = do
-  t1' <- force t1
-  t2' <- force t2
-  unifyPLForced t1' t2'
+  let tactics = []
+  res <- firstJustM (\t -> t t1 t2) tactics
+  case res of
+    Just x -> return x
+    Nothing -> throwUnifyError UnifyPLError
 
-etaConvertPL :: (UnifyPL m) => VTm -> PiMode -> Qty -> Closure -> m Unification
-etaConvertPL t m q c = do
-  l <- getLvl
-  x <- evalInOwnCtxHere c
-  x' <- vApp t (S.singleton (Arg m q (VNeu (VVar l))))
+--- Simple equality
+--
+-- internally:
+-- Equal : [A : Type] -> A -> A -> Type
+equality :: HTm -> HTm -> HTm
+equality = undefined
+
+-- Fibered equality (shorthand = with types left as an exercise)
+--
+-- internally:
+-- HEqual : [A : Type] (s t : A) (e : Equal s t) (P : A -> Type) -> P s -> P t -> Type
+-- HEqual [A] s t e P u v = Equal [P t] (subst P e u) v
+hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
+hequality = undefined
+
+hequalitySp :: Spine HTm -> Spine HTm -> Tel STm
+hequalitySp = undefined
+
+-- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
+dcong :: (HTm -> HTm) -> HTm -> HTm
+dcong = undefined
+
+-- dcongSp : (f : Tm Γ (Πs Δ Τ)) -> {xs ys : Tms Γ Δ} -> Tms Γ (xs ..= ys) -> Tm Γ (f xs = f ys)
+dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
+dcongSp = undefined
+
+-- noConfusion : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
+noConfusion :: HTm -> HTm -> Spine HTm
+noConfusion = undefined
+
+solution :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
+solution a b = case (a, b) of
+  (_, HVar l) -> solution (HVar l) a
+  (HVar l, _) -> do
+    -- Plan of action:
+    -- 1. Check that no variable greater than l occurs in b
+    -- 2. Substitute b for l in the (rest of) the context, while removing l from
+    --    the context
+    -- 3. Form the appropriate substitution (need to turn context to a pi here)
+
+    return undefined
+  _ -> return Nothing
+
+injectivity :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
+  ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 == c2 -> do
+    -- Assume : length xs = length ys = n
+    -- Assume:  Data params are equal
+    -- Reason : Terms are well-typed *and* fully eta-expanded
+    let sh = telShapes ctx
+    let c = c1
+    cc <- access (getCtorGlobal c) >>= ctorConstructions
+    let n = cc.argsArity
+
+    -- (Γ', σ : Sub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
+    (o, s) <- unifyPLSpines xs ys
+
+    -- Make a new name and shape for the new context
+    x <- uniqueName
+    let csh = Param Explicit Many x ()
+
+    -- Now we need to construct an invertible substitution:
+    --
+    -- Sub Γ(xs ..= ys) Γ(c xs = c ys)
+    --
+    -- σ' = (πₙ id, dcongSp c (lastN n))
+    -- σ'⁻¹ = (π₁ id, noConfusion c here)
+    let s' =
+          BiSub
+            { forward =
+                mapSubN
+                  (sh <> n)
+                  (sh :|> csh)
+                  sh
+                  (\sp ps -> sp :|> Arg Explicit Many (dcongSp (hApp (HCtor (c, pp))) ps)),
+              backward =
+                mapSub1
+                  (sh :|> csh)
+                  (sh <> n)
+                  (\sp p -> sp <> noConfusion (HCtor (c, pp)) p)
+            }
+
+    -- return (Γ', (
+    --     1 = σ' ∘ σ,
+    --     -1 = σ⁻¹ ∘ σ'⁻¹
+    -- ))
+    return . Just $
+      ( o,
+        BiSub
+          { forward = composeSub s'.forward s.forward,
+            backward = composeSub s.backward s'.backward
+          }
+      )
+  _ -> return Nothing
+
+conflict :: (UnifyPL m) => (HTm) -> (HTm) -> m (Maybe Unification)
+conflict a b = case (hGatherApps a, hGatherApps b) of
+  ((HCtor (c1, _), xs), (HCtor (c2, _), ys)) | c1 /= c2 -> do
+    return undefined
+  _ -> return Nothing
+
+cycle :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
+cycle a b = case (a, b) of
+  (_, HVar l) -> cycle (HVar l) a
+  (HVar l, hGatherApps -> (HCtor (c1, _), ys)) ->
+    -- 1. Check if l occurs in xs
+    -- 2. If so, then we have a cycle so return Cannot with the appropriate sub.
+
+    return undefined
+  _ -> return Nothing
+
+deletion :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
+deletion a b = do
+  -- If we can unify a and b we can delete the equation since it will evaluate to refl.
+  -- (and that is why this is only valid with K)
   return undefined
-  -- unifyPL (nextLvl l) x x'
-
-unifyPLForced :: (UnifyPL m) => VTm -> VTm -> m Unification
-unifyPLForced t1 t2 = case (t1, t2) of
-  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' && q == q' -> unifyPLClosure [q] c [q'] c'
-  (t, VNorm (VLam m' q' _ c')) -> etaConvertPL t m' q' c'
-  (VNorm (VLam m q _ c), t) -> etaConvertPL t m q c
-  (VNorm n1, VNorm n2) -> unifyPLNormRest n1 n2
-  (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifyPLSpines sp sp' -- \/ iDontKnow
-  (VNeu (VFlex x, sp), _) -> unifyPLFlex x sp t2
-  (_, VNeu (VFlex x', sp')) -> unifyPLFlex x' sp' t1
-  (VNeu (VUnrepr c1, sp1), VNeu (VUnrepr c2, sp2)) -> unifyPL (headAsValue c1) (headAsValue c2) -- /\ unifyPLSpines sp1 sp2
-  (_, VNeu (VUnrepr _, _)) -> do
-    rt1 <- reprHere 1 t1
-    rt2 <- reprHere 1 t2
-    unifyPL rt1 rt2
-  (VNeu (VUnrepr _, _), _) -> do
-    rt1 <- reprHere 1 t1
-    rt2 <- reprHere 1 t2
-    unifyPL rt1 rt2
-  (VNeu n1, VNeu n2) -> unifyPLNeuRest n1 n2
-  (VLazy l1, VLazy l2) -> unifyPLLazy l1 l2
-  -- (VLazy l, t) -> unifyPLLazyWithTermOr l t (return Unclear)
-  -- (t, VLazy l) -> unifyPLLazyWithTermOr l t (return Unclear)
-  _ -> error "unreachable"
-
-unifyPLNormRest :: (UnifyPL m) => VNorm -> VNorm -> m Unification
-unifyPLNormRest = undefined
-
--- unifyPLNormRest l n1 n2 = case (n1, n2) of
---   (VPi m q _ t c, VPi m' q' _ t' c') | m == m' && q == q' -> unifyPL l t t' /\ unifyPLClosure l [q] c [q'] c'
---   (VU, VU) -> return Yes
---   (VData (d, sp), VData (d', sp')) | d == d' -> unifyPLSpines l sp sp'
---   (VCtor ((c, _), sp), VCtor ((c', _), sp'))
---     | c == c' -> unifyPLSpines l sp sp'
---   _ -> return $ No [Mismatching (VNorm n1) (VNorm n2)]
-
-unifyPLLazy :: (UnifyPL m) => VLazy -> VLazy -> m Unification
-unifyPLLazy = undefined
-
--- unifyPLLazy l (n1, sp1) (n2, sp2) =
---   ( ( case (n1, n2) of
---         (VDef d1, VDef d2) | d1 == d2 -> return Yes
---         (VLit l1, VLit l2) -> unifyPLLit l l1 l2
---         (VLazyCase c1, VLazyCase c2) -> unifyPLCases l VLazy c1 c2
---         (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> unifyPL l a1 a2 /\ unifyPL l t1 t2 /\ unifyPLClosure l [q1] u1 [q2] u2
---         (VRepr n1', VRepr n2') -> unifyPL l (headAsValue n1') (headAsValue n2')
---         _ -> iDontKnow
---     )
---       /\ unifyPLSpines l sp1 sp2
---   )
---     \/ tryUnfold
---   where
---     tryUnfold = unifyPLLazyWithTermOr l (n1, sp1) (VLazy (n2, sp2)) (unifyPLLazyWithTermOr l (n2, sp2) (VLazy (n1, sp1)) iDontKnow)
-
-unifyPLNeuRest :: (UnifyPL m) =>  VNeu -> VNeu -> m Unification
-unifyPLNeuRest = undefined
-
--- unifyPLNeuRest l (n1, sp1) (n2, sp2) = case (n1, n2) of
---   (VRigid x, VRigid x') | x == x' -> do
---     unifyPLSpines l sp1 sp2 \/ iDontKnow
---   (VBlockedCase c1, VBlockedCase c2) -> unifyPLCases l VNeu c1 c2 /\ unifyPLSpines l sp1 sp2
---   (VPrim p1, VPrim p2) | p1 == p2 -> unifyPLSpines l sp1 sp2
---   _ -> return $ No [Mismatching (VNeu (n1, sp1)) (VNeu (n2, sp2))]
-
-unifyPLLazyWithTermOr :: (UnifyPL m) =>  VLazy -> VTm -> m Unification -> m Unification
-unifyPLLazyWithTermOr = undefined
-
--- unifyPLLazyWithTermOr l l t els = do
---   l' <- unfoldLazyHere l
---   case l' of
---     Just l'' -> unifyPL l l'' t
---     Nothing -> els
-
-unifyPLCases :: (UnifyPL m) =>  (s -> VTm) -> Case s VTm VPatB Closure -> Case s VTm VPatB Closure -> m Unification
-unifyPLCases = undefined
-
--- unifyPLCases l f c1 c2 = unifyPL l (f c1.subject) (f c2.subject) /\ unifyPLClauses l c1.clauses c2.clauses
-
-unifyPLLit :: (UnifyPL m) =>  Lit VTm -> Lit VTm -> m Unification
-unifyPLLit = undefined
-
--- unifyPLLit l1 l2 = case (l1, l2) of
--- (StringLit x, StringLit y) | x == y -> return Yes
--- (CharLit x, CharLit y) | x == y -> return Yes
--- (NatLit x, NatLit y) | x == y -> return Yes
--- (FinLit d n, FinLit d' n') | d == d' -> unifyPL n n'
--- _ -> return $ No [Mismatching (VLazy (VLit l1, Empty)) (VLazy (VLit l2, Empty))]

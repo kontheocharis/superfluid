@@ -12,6 +12,7 @@ module Syntax
     sPis,
     Case (..),
     VCtor,
+    HCtx (..),
     sGatherApps,
     sGatherPis,
     sGatherLams,
@@ -333,6 +334,8 @@ data HTm
   | HUnrepr HTm
 
 data HTel = HEmpty | HWithParam PiMode Qty Name HTy (HTm -> HTel)
+
+type HCtx = Tel HTy
 
 hSimpleTel :: Tel HTy -> HTel
 hSimpleTel = foldr (\(Param m q n a) acc -> HWithParam m q n a (const acc)) HEmpty
