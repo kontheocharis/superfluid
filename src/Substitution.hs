@@ -5,23 +5,25 @@ module Substitution
   ( Sub,
     subbing,
     idSub,
-    proj,
-    compose,
+    Subst (..),
+    composeSub,
     emptySub,
     liftSub,
     nonEmptyDom,
     BiSub (..),
+    liftSubN,
   )
 where
 
-import Common (Lvl (..), nextLvl)
+import Common (Lvl (..), nextLvl, nextLvls, Spine)
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as S
 import Evaluation (Eval)
 import Syntax (HTm (HVar), VTm (..))
 
 -- Substitution
 
-data Sub = Sub {domLvl :: Lvl, mapping :: Seq HTm -> Seq HTm}
+data Sub = Sub {domLvl :: Lvl, codLvl :: Lvl, mapping :: Seq HTm -> Seq HTm}
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
 
@@ -32,30 +34,48 @@ nonEmptyDom f = \case
 
 -- ε : Sub Γ •
 emptySub :: Lvl -> Sub
-emptySub dom = Sub dom (const Empty)
+emptySub dom = Sub dom (Lvl 0) (const Empty)
 
 -- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ, Α)
 subbing :: Sub -> (Seq HTm -> HTm) -> Sub
-subbing s v = Sub s.domLvl (\g -> s.mapping g :|> v g)
+subbing s v = Sub s.domLvl (nextLvl s.codLvl) (\g -> s.mapping g :|> v g)
 
 -- id : Sub Γ Γ
 idSub :: Lvl -> Sub
-idSub dom = Sub dom id
+idSub dom = Sub dom dom id
 
 -- _◦_ : (σ : Sub Γ Δ) -> (τ : Sub Δ Θ) -> Sub Γ Θ
-compose :: Sub -> Sub -> Sub
-compose s1 s2 = Sub s1.domLvl $ \sp -> s2.mapping (s1.mapping sp)
+composeSub :: Sub -> Sub -> Sub
+composeSub s1 s2 = Sub s1.domLvl s2.codLvl $ \sp -> s2.mapping (s1.mapping sp)
 
--- lift : Sub Γ Δ -> Sub (Γ, Α) (Δ, Α)
+-- lift : (σ : Sub Γ Δ) -> Sub (Γ, Α σ) (Δ, Α)
 liftSub :: Sub -> Sub
-liftSub s = Sub (nextLvl s.domLvl) $ nonEmptyDom (\sp t -> s.mapping sp :|> t)
+liftSub s = Sub (nextLvl s.domLvl) (nextLvl s.codLvl) $ nonEmptyDom (\sp t -> s.mapping sp :|> t)
+
+-- liftN : (σ : Sub Γ Δ) -> Sub (Γ ++ Α σ) (Δ ++ Α)
+liftSubN :: Int -> Sub -> Sub
+liftSubN n s =
+  Sub
+    (nextLvls s.domLvl n)
+    (nextLvls s.codLvl n)
+    ( \sp ->
+        let beginning = s.domLvl.unLvl - n
+         in s.mapping (S.take beginning sp) <> S.drop beginning sp
+    )
 
 -- π : Sub Γ (Δ , A) -> Sub Γ Δ
-proj :: Sub -> Sub
-proj s = Sub s.domLvl $ \sp -> case s.mapping sp of
-  Empty -> error "Cannot project from empty substitution"
-  s' :|> _ -> s'
+-- proj :: Sub -> Sub
+-- proj s = Sub s.domLvl $ \sp -> case s.mapping sp of
+--   Empty -> error "Cannot project from empty substitution"
+--   s' :|> _ -> s'
 
 -- _[_] : Sub Γ Δ -> Tm Γ A -> Tm Δ A
-sub :: (Eval m) => Sub -> VTm -> m VTm
-sub s v = undefined
+
+class Subst a where
+  sub :: (Eval m) => Sub -> a -> m a
+
+instance (Subst VTm) where
+
+instance (Subst t) => (Subst (Spine t)) where
+-- sub :: (Eval m) => Sub -> VTm -> m VTm
+-- sub s v = undefined

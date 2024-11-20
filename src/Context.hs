@@ -3,7 +3,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Context
-  ( Ctx (..),
+  ( Ctx,
     emptyCtx,
     Goal (..),
     bind,
@@ -41,6 +41,9 @@ module Context
     closeValHere,
     resolveHere,
     reprHere,
+    getNames,
+    modifyNames,
+    bounds,
   )
 where
 
@@ -139,6 +142,12 @@ data CtxEntry = CtxEntry
     inst :: Bool,
     bound :: BoundState
   }
+
+getNames :: Ctx -> [Name]
+getNames c = c.nameList
+
+modifyNames :: ([Name] -> [Name]) -> Ctx -> Ctx
+modifyNames f c = c {nameList = f c.nameList}
 
 bind :: PiMode -> Name -> Qty -> VTy -> Ctx -> Ctx
 bind m x q ty ctx =
@@ -258,6 +267,9 @@ getCtx = view
 setCtx :: (Has m Ctx) => Ctx -> m ()
 setCtx = modify . const
 
+bounds :: Ctx -> Bounds
+bounds ctx = ctx.bounds
+
 modifyCtx :: (Has m Ctx) => (Ctx -> Ctx) -> m ()
 modifyCtx = modify
 
@@ -343,3 +355,21 @@ reprHere :: (Eval m, Has m Ctx) => Int -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
+
+instance Has m Ctx => Has m [Name] where
+  view = do
+    ctx <- accessCtx id
+    return (getNames ctx)
+
+  modify f = do
+    ctx <- accessCtx id
+    modifyCtx (modifyNames f)
+
+instance Has m Ctx => Has m (Env VTm) where
+  view = accessCtx (\c -> c.env)
+  modify f = modifyCtx (\c -> c {env = f c.env})
+
+instance Has m Ctx => Has m Lvl where
+  view = accessCtx (\c -> c.lvl)
+  modify f = modifyCtx (\c -> c {lvl = f c.lvl})
+

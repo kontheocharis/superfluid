@@ -140,7 +140,7 @@ import Globals
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Substitution (Sub, isEmptySub)
+import Substitution (Sub)
 import Syntax
   ( Case (..),
     Closure (..),
@@ -185,7 +185,7 @@ data TcError
   | InvalidPattern
   | RemainingProblems [Problem]
   | ImpossibleCaseIsPossible VTm VTm
-  | ImpossibleCaseMightBePossible VTm VTm Sub
+  -- | ImpossibleCaseMightBePossible VTm VTm Sub
   | ImpossibleCase VTm [UnifyError]
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
@@ -236,16 +236,17 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           t1' <- pretty t1
           t2' <- pretty t2
           return $ "Impossible case is possible: " <> t1' <> " = " <> t2'
-        ImpossibleCaseMightBePossible t1 t2 s -> do
-          t1' <- pretty t1
-          t2' <- pretty t2
-          sp <- pretty s
-          s' <-
-            if null sp
-              then return ""
-              else do
-                return $ "\nThis could happen if " ++ sp
-          return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
+        -- ImpossibleCaseMightBePossible t1 t2 s -> do
+        --   t1' <- pretty t1
+        --   t2' <- pretty t2
+        --   return undefined -- @@Todo
+          -- sp <- pretty s
+          -- s' <-
+          --   if null sp
+          --     then return ""
+          --     else do
+          --       return $ "\nThis could happen if " ++ sp
+          -- return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
         ImpossibleCase p t -> do
           p' <- pretty p
           t' <- intercalate "\n" <$> mapM pretty t
@@ -376,7 +377,7 @@ checkMeta n ty q = do
 
 newMeta :: (Tc m) => Maybe Name -> Qty -> m STm
 newMeta n q = do
-  bs <- accessCtx (\c -> c.bounds)
+  bs <- accessCtx bounds
   m <- freshMetaVar n q
   return (SMeta m bs)
 
@@ -884,7 +885,7 @@ instance (ApplySub a, ApplySub b) => ApplySub (Clause a b) where
 
 binder :: (Has m Ctx) => PiMode -> Qty -> Name -> VTy -> (Lvl -> m a) -> m a
 binder m q x a f = do
-  l <- accessCtx (\c -> c.lvl)
+  l <- getLvl
   enterCtx (bind m x q a) $ f l
 
 data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
@@ -1346,19 +1347,6 @@ global n i = case i of
     ty' <- tyCl $$> vmetas
     return (SCtor (CtorGlobal n, metas), ty')
   PrimInfo p -> return (SPrim (PrimGlobal n), p.ty)
-
-instance (Tc m) => Has m (Env VTm) where
-  view = accessCtx (\c -> c.env)
-  modify f = modifyCtx (\c -> c {env = f c.env})
-
-instance (Tc m) => Has m [Name] where
-  view = accessCtx (\c -> c.nameList)
-  modify f = modifyCtx (\c -> c {nameList = f c.nameList})
-
-instance (Tc m) => Has m Lvl where
-  view = accessCtx (\c -> c.lvl)
-  modify f = modifyCtx (\c -> c {lvl = f c.lvl})
-
 data ProblemKind = Unify VTm VTm | Synthesize VTm VTy deriving (Show)
 
 data Problem = Problem

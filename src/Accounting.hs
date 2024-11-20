@@ -40,7 +40,7 @@ import Context
     qty,
     setCtxEntryQty,
     typelessBind,
-    typelessBinds,
+    typelessBinds, modifyNames, getNames,
   )
 import Data.Foldable (Foldable (..), traverse_)
 import Data.Maybe (fromJust)
@@ -77,15 +77,6 @@ import Unelaboration (Unelab)
 class (Eval m, Unelab m, Parent m, Has m Loc, Has m Qty, Has m Ctx) => Acc m where
   accError :: AccError -> m a
   catchAccErrorNoResume :: m a -> m (Either AccError a)
-
-instance (Acc m) => Has m [Name] where
-  view = do
-    ctx <- accessCtx id
-    return ctx.nameList
-
-  modify f = do
-    ctx <- accessCtx id
-    modifyCtx (\c -> c {nameList = f ctx.nameList})
 
 data AccError
   = QtyMismatch Qty Qty VTm
