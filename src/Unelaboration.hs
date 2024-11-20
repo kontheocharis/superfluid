@@ -233,18 +233,6 @@ instance (Unelab m, Has m [Name]) => Pretty m Closure where
 instance (Unelab m, Has m [Name]) => Pretty m VPatB where
   pretty (VPatB pat names) = enter (map snd names ++) $ pretty pat
 
-instance (Unelab m, Has m [Name]) => Pretty m Sub where
-  pretty sub = do
-    vars <-
-      concatMapM
-        ( \(x, v) -> do
-            l' <- pretty (VNeu (VVar (Lvl x)))
-            v' <- mapM pretty (NE.toList v)
-            return $ map (\v'' -> l' <> " = " <> v'') v'
-        )
-        (IM.toList sub.vars)
-    return $ intercalate ", " vars
-
 instance (Unelab m, Has m [Name]) => Pretty m (Tel STm) where
   pretty tel = do
     n <- view

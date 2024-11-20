@@ -78,6 +78,7 @@ import qualified Data.Sequence as S
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import Printing (Pretty (..))
+import Control.Monad (replicateM)
 
 -- | Whether a pi type is implicit or explicit.
 data PiMode
@@ -362,6 +363,9 @@ instance Show Tag where
 
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name
+
+  uniqueNames :: Int -> m [Name]
+  uniqueNames n = replicateM n uniqueName
 
 class (Monad m) => Has m a where
   view :: m a

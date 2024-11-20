@@ -10,6 +10,9 @@ import Data.Sequence (Seq (..), fromList)
 import Evaluation (Eval, eval, quote)
 import Printing (Pretty (..))
 import Syntax (VTm (..), pattern VV)
+import Data.IntMap (IntMap)
+
+-- Substitution
 
 data Sub = Sub {domLvl :: Lvl, tms :: Seq VTm} deriving (Show)
 

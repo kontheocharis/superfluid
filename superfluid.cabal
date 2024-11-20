@@ -46,6 +46,7 @@ library
       Traversal
       Typechecking
       Unelaboration
+      Unification
   other-modules:
       Paths_superfluid
   hs-source-dirs:

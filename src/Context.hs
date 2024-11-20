@@ -33,25 +33,49 @@ module Context
     setCtxEntryQty,
     here,
     localInstances,
+    getLvl,
+    enterTypelessClosure,
+    unfoldHere,
+    unfoldLazyHere,
+    closeHere,
+    closeValHere,
+    resolveHere,
+    reprHere,
   )
 where
 
-import Common (Has (..), Idx (..), Lvl (..), Name, Param (..), PiMode (..), Qty (..), Tel, idxToLvl, lvlToIdx, members, nextLvl)
+import Common
+  ( Has (..),
+    HasNameSupply (..),
+    Idx (..),
+    Lvl (..),
+    Name,
+    Param (..),
+    PiMode (..),
+    Qty (..),
+    Tel,
+    idxToLvl,
+    lvlToIdx,
+    members,
+    nextLvl,
+    nextLvls,
+  )
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, eval, evalInOwnCtx, evalPat, quote)
+import Evaluation (Eval, close, eval, evalInOwnCtx, evalPat, quote, resolve, vUnfold, vUnfoldLazy, vRepr)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (Bound, Defined),
     Bounds,
-    Closure,
+    Closure (..),
     Env,
     SPat,
     STm (..),
     STy,
+    VLazy,
     VPatB,
     VTm (..),
     VTy,
@@ -243,6 +267,14 @@ accessCtx f = f <$> getCtx
 enterCtx :: (Has m Ctx) => (Ctx -> Ctx) -> m a -> m a
 enterCtx = enter
 
+enterTypelessClosure :: (Has m Ctx, HasNameSupply m) => [Qty] -> Closure -> m a -> m a
+enterTypelessClosure qs c m = do
+  ns <- uniqueNames c.numVars
+  enterCtx (typelessBinds (zip qs ns)) m
+
+getLvl :: (Has m Ctx) => m Lvl
+getLvl = accessCtx (\c -> c.lvl)
+
 qty :: (Has m Qty) => m Qty
 qty = view
 
@@ -280,3 +312,34 @@ evalInOwnCtxHere :: (Eval m, Has m Ctx) => Closure -> m VTm
 evalInOwnCtxHere t = do
   l <- accessCtx (\c -> c.lvl)
   evalInOwnCtx l t
+
+closeValHere :: (Eval m, Has m Ctx) => Int -> VTm -> m Closure
+closeValHere n t = do
+  (l, e) <- accessCtx (\c -> (c.lvl, c.env))
+  t' <- quote (nextLvls l n) t
+  close n e t'
+
+closeHere :: (Eval m, Has m Ctx) => Int -> STm -> m Closure
+closeHere n t = do
+  e <- accessCtx (\c -> c.env)
+  close n e t
+
+unfoldLazyHere :: (Eval m, Has m Ctx) => VLazy -> m (Maybe VTm)
+unfoldLazyHere (n, sp) = do
+  lvl <- getLvl
+  vUnfoldLazy lvl (n, sp)
+
+unfoldHere :: (Eval m, Has m Ctx) => VTm -> m VTm
+unfoldHere t = do
+  l <- accessCtx (\c -> c.lvl)
+  vUnfold l t
+
+resolveHere :: (Eval m, Has m Ctx) => VTm -> m VTm
+resolveHere t = do
+  e <- accessCtx (\c -> c.env)
+  resolve e t
+
+reprHere :: (Eval m, Has m Ctx) => Int -> VTm -> m VTm
+reprHere m t = do
+  l <- accessCtx (\c -> c.lvl)
+  vRepr l m t
