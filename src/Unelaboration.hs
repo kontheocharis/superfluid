@@ -62,12 +62,12 @@ import Syntax
     Closure (..),
     SPat (..),
     STm (..),
-    Sub (..),
     VPatB (..),
     VTm (..),
     pattern VVar,
   )
 import qualified Data.Sequence as S
+import Substitution (Sub)
 
 class (Eval m) => Unelab m
 

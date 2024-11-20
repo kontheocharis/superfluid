@@ -34,17 +34,11 @@ module Syntax
     VLazyHead (..),
     VNorm (..),
     WTm (..),
-    PRen (..),
-    Sub (..),
     VLazyCase,
     VBlockedCase,
     SCase,
     mapClosureM,
     weakAsValue,
-    subbing,
-    liftPRen,
-    liftPRenN,
-    isEmptySub,
     vGetSpine,
     pattern VVar,
     pattern VMeta,
@@ -105,36 +99,6 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
 import Control.Monad (void)
-
-data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
-
-isEmptySub :: Sub -> Bool
-isEmptySub s = IM.null s.vars
-
-emptySub :: Sub
-emptySub = Sub (Lvl 0) IM.empty
-
-subbing :: Lvl -> Lvl -> VTm -> Sub
-subbing l x v = Sub l (IM.singleton x.unLvl (NE.singleton v))
-
-instance Semigroup Sub where
-  Sub l1 v1 <> Sub l2 v2 = Sub (max l1 l2) (IM.unionWith (<>) v1 v2)
-
-instance Monoid Sub where
-  mempty = emptySub
-
-data PRen = PRen
-  { domSize :: Lvl,
-    codSize :: Lvl,
-    vars :: IntMap (Lvl, Qty)
-  }
-  deriving (Show)
-
-liftPRen :: Qty -> PRen -> PRen
-liftPRen q (PRen dom cod ren) = PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl (dom, q) ren)
-
-liftPRenN :: [Qty] -> PRen -> PRen
-liftPRenN qs ren = foldl (flip liftPRen) ren qs
 
 type VPat = VTm
 

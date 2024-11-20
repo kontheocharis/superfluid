@@ -178,11 +178,9 @@ import Syntax
     HTel,
     HTm (..),
     HTy,
-    PRen (..),
     SPat (..),
     STm (..),
     STy,
-    Sub,
     VCtor,
     VLazy,
     VLazyHead (..),
@@ -200,9 +198,7 @@ import Syntax
     hGatherApps,
     hLams,
     headAsValue,
-    isEmptySub,
     joinTels,
-    liftPRenN,
     sAppSpine,
     sGatherApps,
     sGatherLams,
@@ -217,6 +213,8 @@ import Syntax
 import Unelaboration (Unelab)
 import Prelude hiding (pi)
 import Data.Bifunctor (Bifunctor(..))
+import Substitution (Sub, isEmptySub)
+import Data.IntMap (IntMap)
 
 data TcError
   = Mismatch [UnifyError]
@@ -1554,6 +1552,19 @@ invertSpine s@(sp' :|> Arg _ q t) = do
   case f of
     VNeu (VVar (Lvl l')) | IM.notMember l' ren -> return $ PRen (nextLvl dom) cod (IM.insert l' (dom, q) ren)
     _ -> throwError $ InvertError s
+
+data PRen = PRen
+  { domSize :: Lvl,
+    codSize :: Lvl,
+    vars :: IntMap (Lvl, Qty)
+  }
+  deriving (Show)
+
+liftPRen :: Qty -> PRen -> PRen
+liftPRen q (PRen dom cod ren) = PRen (Lvl (dom.unLvl + 1)) (Lvl (cod.unLvl + 1)) (IM.insert cod.unLvl (dom, q) ren)
+
+liftPRenN :: [Qty] -> PRen -> PRen
+liftPRenN qs ren = foldl (flip liftPRen) ren qs
 
 renameSp :: (Tc m) => MetaVar -> PRen -> STm -> Spine VTm -> SolveT m STm
 renameSp _ _ t Empty = return t
