@@ -1,59 +1,61 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Substitution (Sub, isEmptySub, subbing, idSub, proj, compose, emptySub, liftSub) where
+module Substitution
+  ( Sub,
+    subbing,
+    idSub,
+    proj,
+    compose,
+    emptySub,
+    liftSub,
+    nonEmptyDom,
+    BiSub (..),
+  )
+where
 
-import Common (Lvl (..), members, nextLvl)
-import Data.Foldable (toList)
-import Data.List (intercalate)
-import Data.Sequence (Seq (..), fromList)
-import Evaluation (Eval, eval, quote)
-import Printing (Pretty (..))
-import Syntax (VTm (..), pattern VV)
-import Data.IntMap (IntMap)
+import Common (Lvl (..), nextLvl)
+import Data.Sequence (Seq (..))
+import Evaluation (Eval)
+import Syntax (HTm (HVar), VTm (..))
 
 -- Substitution
 
-data Sub = Sub {domLvl :: Lvl, tms :: Seq VTm} deriving (Show)
+data Sub = Sub {domLvl :: Lvl, mapping :: Seq HTm -> Seq HTm}
 
-isEmptySub :: Sub -> Bool
-isEmptySub s = null s.tms
+data BiSub = BiSub {forward :: Sub, backward :: Sub}
+
+nonEmptyDom :: (Seq HTm -> HTm -> a) -> (Seq HTm -> a)
+nonEmptyDom f = \case
+  Empty -> error "Empty domain"
+  s :|> x -> f s x
 
 -- ε : Sub Γ •
 emptySub :: Lvl -> Sub
-emptySub dom = Sub dom Empty
+emptySub dom = Sub dom (const Empty)
 
 -- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ, Α)
-subbing :: Sub -> VTm -> Sub
-subbing s v = Sub s.domLvl (s.tms :|> v)
+subbing :: Sub -> (Seq HTm -> HTm) -> Sub
+subbing s v = Sub s.domLvl (\g -> s.mapping g :|> v g)
 
 -- id : Sub Γ Γ
 idSub :: Lvl -> Sub
-idSub dom = Sub dom (fromList . map VV $ members dom)
+idSub dom = Sub dom id
 
 -- _◦_ : (σ : Sub Γ Δ) -> (τ : Sub Δ Θ) -> Sub Γ Θ
-compose :: (Eval m) => Sub -> Sub -> m Sub
-compose s1 s2 = do
-  s' <- traverse (sub s1) s2.tms
-  return $ Sub s1.domLvl s'
+compose :: Sub -> Sub -> Sub
+compose s1 s2 = Sub s1.domLvl $ \sp -> s2.mapping (s1.mapping sp)
 
--- ^ _ : Sub Γ Δ -> Sub (Γ, Α) (Δ, Α)
+-- lift : Sub Γ Δ -> Sub (Γ, Α) (Δ, Α)
 liftSub :: Sub -> Sub
-liftSub s = Sub (nextLvl s.domLvl) (s.tms :|> VV (Lvl (length s.tms)))
+liftSub s = Sub (nextLvl s.domLvl) $ nonEmptyDom (\sp t -> s.mapping sp :|> t)
 
 -- π : Sub Γ (Δ , A) -> Sub Γ Δ
 proj :: Sub -> Sub
-proj s = case s.tms of
+proj s = Sub s.domLvl $ \sp -> case s.mapping sp of
   Empty -> error "Cannot project from empty substitution"
-  s' :|> _ -> Sub s.domLvl s'
-
-instance (Monad m, Pretty m VTm) => Pretty m Sub where
-  pretty s = do
-    tms' <- traverse pretty s.tms
-    return $ intercalate ", " (toList tms')
+  s' :|> _ -> s'
 
 -- _[_] : Sub Γ Δ -> Tm Γ A -> Tm Δ A
 sub :: (Eval m) => Sub -> VTm -> m VTm
-sub s v = do
-  t <- quote s.domLvl v
-  eval (reverse $ toList s.tms) t
+sub s v = undefined

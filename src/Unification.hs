@@ -52,6 +52,7 @@ import Evaluation
   )
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
+import Substitution (BiSub)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
@@ -430,3 +431,146 @@ rename m pren tm = case tm of
   VNorm n -> renameNorm m pren n
   VLazy n -> renameLazy m pren n
   VNeu n -> renameNeu m pren n
+
+-- Proof relevant unification
+
+data UnifyResult = Can BiSub | Cannot BiSub [UnifyError] | Unclear
+
+
+unifySpines :: (Unify m) => Spine VTm -> Spine VTm -> m CanUnify
+unifySpines Empty Empty = return Yes
+unifySpines (sp :|> Arg _ q u) (sp' :|> Arg _ q' u') | q == q' = unifySpines sp sp' /\ unify u u'
+unifySpines sp sp' = return $ No [DifferentSpineLengths sp sp']
+
+unifyClauses :: (Unify m) => [Clause VPatB Closure] -> [Clause VPatB Closure] -> m CanUnify
+unifyClauses [] [] = return Yes
+unifyClauses (c : cs) (c' : cs') = unifyClause c c' /\ unifyClauses cs cs'
+unifyClauses a b = return $ No [DifferentClauses a b]
+
+unifyClause :: (Unify m) => Clause VPatB Closure -> Clause VPatB Closure -> m CanUnify
+unifyClause (Possible p t) (Possible p' t') = unifyClosure (map fst p.binds) t (map fst p'.binds) t'
+unifyClause (Impossible _) (Impossible _) = return Yes
+unifyClause a b = return $ No [DifferentClauses [a] [b]]
+
+runSolveT :: (Unify m) => MetaVar -> Spine VTm -> VTm -> SolveT m () -> m CanUnify
+runSolveT m sp t f = do
+  f' <- runExceptT f
+  case f' of
+    Left err -> do
+      onMetaFailed (MetaProblem m sp t) err
+      return Yes
+    Right () -> onMetaSolved (MetaProblem m sp t) >> return Yes
+
+canUnifyHere :: (Unify m) => VTm -> VTm -> m CanUnify
+canUnifyHere t1 t2 = do
+  -- l <- accessCtx (\c -> c.lvl)
+  t1' <- resolveHere t1
+  t2' <- resolveHere t2
+  unify t1' t2'
+
+unifyFlex :: (Unify m) => MetaVar -> Spine VTm -> VTm -> m CanUnify
+unifyFlex m sp t = runSolveT m sp t $ do
+  pren <- invertSpine sp
+  rhs <- rename m pren t
+  solution <- lift $ uniqueSLams (reverse $ map (\a -> (a.mode, a.qty)) (toList sp)) rhs >>= eval []
+  lift $ solveMetaVar m solution
+
+unifyClosure :: (Unify m) => [Qty] -> Closure -> [Qty] -> Closure -> m CanUnify
+unifyClosure qs1 cl1 _ cl2 = do
+  l <- getLvl
+  t1 <- evalInOwnCtx l cl1
+  t2 <- evalInOwnCtx l cl2
+  if cl1.numVars == cl2.numVars
+    then enterTypelessClosure qs1 cl1 $ unify t1 t2
+    else error "unifyClosure: different number of variables"
+
+iDontKnow :: (Unify m) => m CanUnify
+iDontKnow = return Maybe
+
+unify :: (Unify m) => VTm -> VTm -> m CanUnify
+unify t1 t2 = do
+  t1' <- force t1
+  t2' <- force t2
+  unifyForced t1' t2'
+
+etaConvert :: (Unify m) => VTm -> PiMode -> Qty -> Closure -> m CanUnify
+etaConvert t m q c = do
+  l <- getLvl
+  x <- evalInOwnCtx l c
+  x' <- vApp t (S.singleton (Arg m q (VNeu (VVar l))))
+  enterTypelessClosure [q] c $ unify x x'
+
+unifyForced :: (Unify m) => VTm -> VTm -> m CanUnify
+unifyForced t1 t2 = case (t1, t2) of
+  (VNorm (VLam m q _ c), VNorm (VLam m' q' _ c')) | m == m' && q == q' -> unifyClosure [q] c [q'] c'
+  (t, VNorm (VLam m' q' _ c')) -> etaConvert t m' q' c'
+  (VNorm (VLam m q _ c), t) -> etaConvert t m q c
+  (VNorm n1, VNorm n2) -> unifyNormRest n1 n2
+  (VNeu (VFlex x, sp), VNeu (VFlex x', sp')) | x == x' -> unifySpines sp sp' \/ iDontKnow
+  (VNeu (VFlex x, sp), _) -> unifyFlex x sp t2
+  (_, VNeu (VFlex x', sp')) -> unifyFlex x' sp' t1
+  (VNeu (VUnrepr c1, sp1), VNeu (VUnrepr c2, sp2)) -> unify (headAsValue c1) (headAsValue c2) /\ unifySpines sp1 sp2
+  (_, VNeu (VUnrepr _, _)) -> do
+    rt1 <- reprHere 1 t1
+    rt2 <- reprHere 1 t2
+    unify rt1 rt2
+  (VNeu (VUnrepr _, _), _) -> do
+    rt1 <- reprHere 1 t1
+    rt2 <- reprHere 1 t2
+    unify rt1 rt2
+  (VNeu n1, VNeu n2) -> unifyNeuRest n1 n2
+  (VLazy l1, VLazy l2) -> unifyLazy l1 l2
+  (VLazy l, t) -> unifyLazyWithTermOr l t iDontKnow
+  (t, VLazy l) -> unifyLazyWithTermOr l t iDontKnow
+  _ -> return $ No [Mismatching t1 t2]
+
+unifyNormRest :: (Unify m) => VNorm -> VNorm -> m CanUnify
+unifyNormRest n1 n2 = case (n1, n2) of
+  (VPi m q _ t c, VPi m' q' _ t' c') | m == m' && q == q' -> unify t t' /\ unifyClosure [q] c [q'] c'
+  (VU, VU) -> return Yes
+  (VData (d, sp), VData (d', sp')) | d == d' -> unifySpines sp sp'
+  (VCtor ((c, _), sp), VCtor ((c', _), sp'))
+    | c == c' -> unifySpines sp sp'
+  _ -> return $ No [Mismatching (VNorm n1) (VNorm n2)]
+
+unifyLazy :: (Unify m) => VLazy -> VLazy -> m CanUnify
+unifyLazy (n1, sp1) (n2, sp2) =
+  ( ( case (n1, n2) of
+        (VDef d1, VDef d2) | d1 == d2 -> return Yes
+        (VLit l1, VLit l2) -> unifyLit l1 l2
+        (VLazyCase c1, VLazyCase c2) -> unifyCases VLazy c1 c2
+        (VLet q1 _ a1 t1 u1, VLet q2 _ a2 t2 u2) | q1 == q2 -> unify a1 a2 /\ unify t1 t2 /\ unifyClosure [q1] u1 [q2] u2
+        (VRepr n1', VRepr n2') -> unify (headAsValue n1') (headAsValue n2')
+        _ -> iDontKnow
+    )
+      /\ unifySpines sp1 sp2
+  )
+    \/ tryUnfold
+  where
+    tryUnfold = unifyLazyWithTermOr (n1, sp1) (VLazy (n2, sp2)) (unifyLazyWithTermOr (n2, sp2) (VLazy (n1, sp1)) iDontKnow)
+
+unifyNeuRest :: (Unify m) => VNeu -> VNeu -> m CanUnify
+unifyNeuRest (n1, sp1) (n2, sp2) = case (n1, n2) of
+  (VRigid x, VRigid x') | x == x' -> do
+    unifySpines sp1 sp2 \/ iDontKnow
+  (VBlockedCase c1, VBlockedCase c2) -> unifyCases VNeu c1 c2 /\ unifySpines sp1 sp2
+  (VPrim p1, VPrim p2) | p1 == p2 -> unifySpines sp1 sp2
+  _ -> return $ No [Mismatching (VNeu (n1, sp1)) (VNeu (n2, sp2))]
+
+unifyLazyWithTermOr :: (Unify m) => VLazy -> VTm -> m CanUnify -> m CanUnify
+unifyLazyWithTermOr l t els = do
+  l' <- unfoldLazyHere l
+  case l' of
+    Just l'' -> unify l'' t
+    Nothing -> els
+
+unifyCases :: (Unify m) => (s -> VTm) -> Case s VTm VPatB Closure -> Case s VTm VPatB Closure -> m CanUnify
+unifyCases f c1 c2 = unify (f c1.subject) (f c2.subject) /\ unifyClauses c1.clauses c2.clauses
+
+unifyLit :: (Unify m) => Lit VTm -> Lit VTm -> m CanUnify
+unifyLit l1 l2 = case (l1, l2) of
+  (StringLit x, StringLit y) | x == y -> return Yes
+  (CharLit x, CharLit y) | x == y -> return Yes
+  (NatLit x, NatLit y) | x == y -> return Yes
+  (FinLit d n, FinLit d' n') | d == d' -> unify n n'
+  _ -> return $ No [Mismatching (VLazy (VLit l1, Empty)) (VLazy (VLit l2, Empty))]

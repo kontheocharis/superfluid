@@ -8,7 +8,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# HLINT ignore "Use bimap" #-}
 {-# HLINT ignore "Use first" #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
@@ -134,18 +133,17 @@ import Globals
     getDataGlobal,
     getDefGlobal,
     hasName,
-    instances,
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem,
+    modifyDefItem, instances,
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
 import Substitution (Sub, isEmptySub)
 import Syntax
   ( Case (..),
-    Closure (body, numVars),
+    Closure (..),
     Env,
     HTel,
     HTm (..),
@@ -241,12 +239,12 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         ImpossibleCaseMightBePossible t1 t2 s -> do
           t1' <- pretty t1
           t2' <- pretty t2
+          sp <- pretty s
           s' <-
-            if isEmptySub s
+            if null sp
               then return ""
               else do
-                s' <- pretty s
-                return $ "\nThis could happen if " ++ s'
+                return $ "\nThis could happen if " ++ sp
           return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
         ImpossibleCase p t -> do
           p' <- pretty p
