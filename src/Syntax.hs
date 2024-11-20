@@ -90,12 +90,12 @@ import Common
     nextLvl,
     unLvl,
   )
+import Control.Monad (void)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
-import Control.Monad (void)
 
 data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 
@@ -363,8 +363,6 @@ unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
 unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
 
-
-
 hApp :: HTm -> Spine HTm -> HTm
 hApp = foldl (\f (Arg m q u) -> HApp m q f u)
 
@@ -393,9 +391,9 @@ hOwnSpine l (Param m q _ () :<| xs) = Arg m q (HVar l) :<| hOwnSpine (nextLvl l)
 
 embedClosure :: Env VTm -> Tel () -> (Spine HTm -> HTm) -> Closure
 embedClosure env n f =
-  let ownSpine = hOwnSpine (Lvl (length env)) n in
-  let fHere = f ownSpine in
-  Closure (length n) env (embed (Lvl (length n + length env)) fHere)
+  let ownSpine = hOwnSpine (Lvl (length env)) n
+   in let fHere = f ownSpine
+       in Closure (length n) env (embed (Lvl (length n + length env)) fHere)
 
 embed :: Lvl -> HTm -> STm
 embed l = \case
