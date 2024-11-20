@@ -24,6 +24,7 @@ import Common
     Lit (..),
     Lvl (..),
     MetaVar,
+    Name (..),
     Param (..),
     PiMode (..),
     Qty (..),
@@ -60,7 +61,7 @@ import Evaluation
 import Globals (getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, projN)
+import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, projN)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
@@ -457,7 +458,7 @@ class (Eval m, Has m Ctx) => UnifyPL m where
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
 -- was successful or not.
-data UnifyOutcome = Can | Cannot [UnifyError]
+data UnifyOutcome = Can | Cannot [UnifyPLError]
 
 -- A unification between terms a, b : Tm Γ A is a telescope Γ' and an
 -- invertible (with coherence proofs definitionally equal to refl)
@@ -548,8 +549,14 @@ dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
 dcongSp = undefined
 
 -- noConfusion : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-noConfusion :: HTm -> HTm -> Spine HTm
-noConfusion = undefined
+inj :: HTm -> HTm -> Spine HTm
+inj = undefined
+
+-- conflict : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
+--            -> Tm Γ (c1 xs = c2 ys)
+--            -> Tm Γ Empty
+conf :: HTm -> HTm -> HTm -> HTm
+conf = undefined
 
 solution :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
 solution a b = case (a, b) of
@@ -600,7 +607,7 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
                 mapSub1
                   (sh :|> csh)
                   (sh <> n)
-                  (\sp p -> sp <> noConfusion (HCtor (c, pp)) p)
+                  (\sp p -> sp <> inj (HCtor (c, pp)) p)
             }
 
     -- return (Γ', (
@@ -616,10 +623,55 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
       )
   _ -> return Nothing
 
-conflict :: (UnifyPL m) => (HTm) -> (HTm) -> m (Maybe Unification)
-conflict a b = case (hGatherApps a, hGatherApps b) of
-  ((HCtor (c1, _), xs), (HCtor (c2, _), ys)) | c1 /= c2 -> do
-    return undefined
+-- Never
+--
+-- This is the internal Empty type's eliminator.
+--
+-- Important: 'internal Empty' means void in the metatheory, because the Unit
+-- type behaves like the empty context instead.
+--
+-- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
+never :: HTm -> HTm
+never = undefined
+
+voidSh :: (UnifyPL m) => m Shapes
+voidSh = do
+  n <- uniqueName
+  return $ Param Explicit Many n () :<| Empty
+
+initialSub :: Shapes -> Shapes -> Sub
+initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never x)) sh)
+
+ofSh :: Shapes -> [a] -> Spine a
+ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
+
+conflict :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+conflict ctx a b = case (hGatherApps a, hGatherApps b) of
+  ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
+    let sh = telShapes ctx
+    -- Here we have (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂)
+    -- And we are trying to unify (c1 xs = c2 ys).
+    --
+    -- This is a conflict, so we need to return a void context.
+
+    -- Make a new name and shape for the new context
+    x <- uniqueName
+    let csh = Param Explicit Many x ()
+
+    -- We return some invertible substitution:
+    --
+    -- σ : Sub ⊥ Γ(c1 xs = c2 ys)
+    -- where
+    --     σ = init Γ(c1 xs = c2 ys),     -- init is the initial morphism from the void context
+    --     σ⁻¹ = (ɛ, conf c1 c2 here)    -- ɛ is the terminal morphism from Γ to the empty context
+    vSh <- voidSh
+    return . Just $
+      ( Cannot [],
+        BiSub
+          { forward = initialSub vSh (sh :|> csh),
+            backward = mapSub1 (sh :|> csh) vSh (\_ p -> ofSh vSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
+          }
+      )
   _ -> return Nothing
 
 cycle :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)

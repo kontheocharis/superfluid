@@ -2,15 +2,15 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Substitution
-  ( Sub,
+  ( Sub (..),
     extendSub,
     idSub,
     Subst (..),
     composeSub,
-    emptySub,
     liftSub,
     nonEmptyDom,
     BiSub (..),
+    Shapes,
     liftSubN,
     projN,
     proj,
@@ -20,7 +20,7 @@ module Substitution
   )
 where
 
-import Common (Arg (..), Clause (..), Lvl (..), Name, Param (..), PiMode (..), Qty (..), Spine, Tel, members, nextLvl, nextLvls, telShapes, telToBinds)
+import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, nextLvl, nextLvls, telShapes, telToBinds)
 import Context (Ctx)
 import Data.Foldable (toList)
 import Data.Maybe (fromJust)
@@ -58,8 +58,8 @@ mapSubN :: Shapes -> Shapes -> Shapes -> (Spine HTm -> Spine HTm -> Spine HTm) -
 mapSubN dom cod n f = Sub dom cod $ domGt (length n) f
 
 -- ε : Sub Γ •
-emptySub :: Shapes -> Sub
-emptySub dom = Sub dom Empty (const Empty)
+terminalSub :: Shapes -> Sub
+terminalSub dom = Sub dom Empty (const Empty)
 
 -- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ, Α)
 extendSub :: Sub -> Shape -> (Spine HTm -> HTm) -> Sub
@@ -148,3 +148,4 @@ instance (Subst t) => (Subst (Seq t)) where
 
 instance (Subst t) => Subst (Arg t) where
   sub s (Arg m q x) = Arg m q (sub s x)
+
