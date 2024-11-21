@@ -17,6 +17,9 @@ module Substitution
     Shape,
     mapSub1,
     mapSubN,
+    replaceSub,
+    nonEmptyDomL,
+    terminalSub,
   )
 where
 
@@ -43,6 +46,11 @@ nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
   Empty -> error "Empty domain"
   s :|> Arg _ _ x -> f s x
+
+nonEmptyDomL :: (HTm -> Spine HTm -> a) -> (Spine HTm -> a)
+nonEmptyDomL f = \case
+  Empty -> error "Empty domain"
+  Arg _ _ x :<| s -> f x s
 
 -- Basically allows us to split the domain of a substitution into two parts
 -- if we know that the domain is greater than l
@@ -93,6 +101,17 @@ getVar x s =
   let ms = fromList . map (Arg Explicit Many . HVar) $ members (Lvl (length s.domSh))
    in (fromJust $ s.mapping ms S.!? x.unLvl)
 
+-- Replace : (σ : Sub Γ Δ) -> (x : Var Δ A) -> (t : Tm Δ A) -> Ctx
+-- replace : (σ : Sub Γ Δ) -> (x : Var Γ A) -> (t : Tm Γ A) -> Sub Γ (Replace σ x t)
+replaceSub :: Sub -> Lvl -> HTm -> Sub
+replaceSub s x t = Sub s.domSh s.codSh $ \sp ->
+  S.zipWith
+    ( \s' i ->
+        if Lvl i == x then s' {arg = t} else s'
+    )
+    sp
+    (S.fromList [0 ..])
+
 -- π₁ : Sub Γ (Δ , A) -> Sub Γ Δ
 proj :: Sub -> Sub
 proj = projN 1
@@ -101,13 +120,11 @@ proj = projN 1
 projN :: Int -> Sub -> Sub
 projN n s = Sub s.domSh (S.take (length s.domSh - n) s.codSh) $ \sp -> S.take (length s.codSh - n) (s.mapping sp)
 
--- _[_] : Sub Γ Δ -> Tm Γ A -> Tm Δ A
---
-
 bindsToShapes :: [(Qty, Name)] -> Shapes
 bindsToShapes = fromList . map (\(q, n) -> Param Explicit q n ())
 
 class Subst a where
+  -- [_]_ : (σ : Sub Γ Δ) -> P Γ (A σ) -> P Δ A
   sub :: Sub -> a -> a
 
 instance (Subst HTm) where
@@ -142,10 +159,16 @@ instance (Subst HTm) where
   sub s (HRepr t) = HRepr (sub s t)
   sub s (HUnrepr t) = HUnrepr (sub s t)
 
-instance (Subst t) => (Subst (Seq t)) where
+instance (Subst t) => (Subst (Tel t)) where
   sub _ Empty = Empty
-  sub s (x :|> t) = sub s x :|> sub s t
+  sub s (x :<| t) = sub s x :<| sub (liftSub (Param x.mode x.qty x.name ()) s) t
+
+instance (Subst t) => (Subst (Spine t)) where
+  sub _ Empty = Empty
+  sub s (x :<| t) = sub s x :<| sub (liftSub (Param x.mode x.qty (Name "_") ()) s) t
 
 instance (Subst t) => Subst (Arg t) where
   sub s (Arg m q x) = Arg m q (sub s x)
 
+instance (Subst t) => Subst (Param t) where
+  sub s (Param m q n x) = Param m q n (sub s x)

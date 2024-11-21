@@ -65,7 +65,7 @@ import Evaluation
 import Globals (CtorConstructions (..), DataConstructions (..), getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, projN)
+import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, projN, replaceSub)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
@@ -85,6 +85,7 @@ import Syntax
     hApp,
     hGatherApps,
     headAsValue,
+    removing,
     uniqueSLams,
     pattern VV,
     pattern VVar,
@@ -509,9 +510,9 @@ dcong = undefined
 dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
 dcongSp = undefined
 
--- noConfusion : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-inj :: HTm -> HTm -> Spine HTm
-inj = undefined
+-- noConf : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
+noConf :: HTm -> HTm -> Spine HTm
+noConf = undefined
 
 -- conflict : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
 --            -> Tm Γ (c1 xs = c2 ys)
@@ -593,13 +594,53 @@ solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 solution ctx a b = case (a, b) of
   (_, HVar l) -> solution ctx (HVar l) a
   (HVar l, _) -> do
-    -- Plan of action:
-    -- 1. Check that no variable greater than l occurs in b
-    -- 2. Substitute b for l in the (rest of) the context, while removing l from
-    --    the context
-    -- 3. Form the appropriate substitution (need to turn context to a pi here)
+    let sh  = telShapes ctx
 
-    return undefined
+    -- Make a new name and shape for the new context
+    x <- uniqueName
+    let csh = Param Explicit Many x ()
+
+    -- Substitute b for l in the (rest of) the context, while removing l from
+    -- the context
+    -- @@Todo: ocurrence check
+
+    -- Γx (context)
+    let ctxx = S.take l.unLvl ctx
+
+    -- (x : A)
+    let xSh = S.index sh l.unLvl
+
+    -- xΓ (telescope)
+    let xctxx = S.drop (nextLvl l).unLvl ctx
+
+    -- xΓ [x ↦ b]
+    --
+    -- We want Sub Γx Γx(x : A) which can be constructed as:
+    -- [x ↦ a] = (id, b)
+    let vs = extendSub (idSub sh) xSh (const b) -- @@Fixme: const b might not work with the HOAS
+    let xctxx' = sub vs xctxx
+
+    -- (Γx, xΓ (id, a)) (context)
+    let ctx' = ctxx <> xctxx'
+
+    -- Returning shape
+    let rsh = telShapes ctx'
+
+    -- We need to construct an invertible substitution:
+    --
+    -- (Γx, x : A, xΓ) ≃ Γ
+    -- a : Tm Γx A
+    -- ----------
+    -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
+    -- where
+    --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
+    --    σ⁻¹ = (\γ γ' => (γ, a, γ', refl a))
+    let s = undefined
+    -- let s = BiSub
+          -- { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
+          --   backward = mapSubN rsh (sh :|> csh)  (\sp p -> sp :|> Arg Explicit Many p)
+          -- }
+    return $ Just (ctx', Can, s)
   _ -> return Nothing
 
 injectivity :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
@@ -622,10 +663,10 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
 
     -- Now we need to construct an invertible substitution:
     --
-    -- Sub Γ(xs ..= ys) Γ(c xs = c ys)
-    --
-    -- σ' = (πₙ id, dcongSp c (lastN n))
-    -- σ'⁻¹ = (π₁ id, noConfusion c here)
+    -- σ : Sub Γ(xs ..= ys) Γ(c xs = c ys)
+    -- where
+    --    σ' = (πₙ id, dcongSp c (lastN n))
+    --    σ'⁻¹ = (π₁ id, noConf c here)
     let s' =
           BiSub
             { forward =
@@ -638,7 +679,7 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
                 mapSub1
                   (sh :|> csh)
                   (sh <> n)
-                  (\sp p -> sp <> inj (HCtor (c, pp)) p)
+                  (\sp p -> sp <> noConf (HCtor (c, pp)) p)
             }
 
     -- return (Γ', (
@@ -662,7 +703,7 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
     -- Here we have (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂)
     -- And we are trying to unify (c1 xs = c2 ys).
     --
-    -- This is a conflict, so we need to return a void context.
+    -- This is a conflict, so we need to return a disunifier.
 
     -- Make a new name and shape for the new context
     x <- uniqueName

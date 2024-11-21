@@ -65,6 +65,7 @@ module Syntax
     hLams,
     extendTel,
     joinTels,
+    removing,
   )
 where
 
@@ -100,6 +101,7 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
 import Control.Monad (void)
+import qualified Data.Sequence as S
 
 type VPat = VTm
 
@@ -277,6 +279,9 @@ sLams (Param m q x _ :<| sp) t = SLam m q x (sLams sp t)
 sGatherApps :: STm -> (STm, Spine STm)
 sGatherApps (SApp m q t u) = let (t', sp) = sGatherApps t in (t', sp :|> Arg m q u)
 sGatherApps t = (t, Empty)
+
+removing :: Lvl -> Seq a -> Seq a
+removing (Lvl i) = S.deleteAt i
 
 sPis :: Tel STm -> STm -> STm
 sPis Empty b = b
