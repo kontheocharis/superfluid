@@ -140,7 +140,7 @@ import Globals
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Substitution (Sub)
+import Substitution (Sub, Subst (..))
 import Syntax
   ( Case (..),
     Closure (..),
@@ -171,7 +171,7 @@ import Syntax
     unembed,
     uniqueSLams,
     vGetSpine,
-    pattern VV,
+    pattern VV, HCtx,
   )
 import Unelaboration (Unelab)
 import Unification
@@ -891,7 +891,7 @@ binder m q x a f = do
 data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
 
 addVar :: (Tc m) => CaseElab -> m (Maybe STm)
-addVar (CaseElab ty cls) = do
+addVar (CaseElab ctx ty cls) = do
   (ps, cls') <- nextPat cls
   case ps of
     Nothing -> return Nothing
@@ -940,18 +940,20 @@ patAsTm = undefined
 tmAsPat :: HTm -> Pat
 tmAsPat = undefined
 
+runUnifyPL :: (Tc m, Unify n) => n a -> m a
+runUnifyPL = undefined
+
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
-splitConstraint (CaseElab ty cls) = do
+splitConstraint (CaseElab ctx ty cls) = do
   -- Current context is:  Γχ (x : A)
   -- Rest of the goal is: Π xΓ T
   case cls of
     Clause (Constraints (co : cs), _) _ : clss -> case co of
       Constraint _ (VV x) (LvlP _ _ x') _ -> do
         -- We have that x = x'
-        --
-        -- Here we simply unify the level with the level in the pattern and move on.
-        unifyPrfRel (HVar x) (HVar x')
-        Just <$> caseTree (CaseElab ty clss)
+        -- This will use the solution rule for the constraint x = x'
+        (ctx', _, s) <- runUnifyPL $ unifyPL ctx (HVar x) (HVar x')
+        Just <$> caseTree (CaseElab ctx' (sub s.forward ty) clss)
       Constraint _ (VV x) (CtorP _ _) param -> do
         -- We have that A = D δ ψ and x = ci πg
 
@@ -994,19 +996,22 @@ splitConstraint (CaseElab ty cls) = do
             -- Create the spine (ξi[δ,π], ci π)
             let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
 
-            -- Unify (ψ, x) with (ξi[δ,π], ci π), which will enter a new context (Δ, σ)
+            -- Unify (ψ, x) with (ξi[δ,π], ci π), which will give back a new context Γ'
             -- that is isomorphic to
             --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
             -- through the substitution σ.
-            unifyPrfRelSp psix psix'
+            (ctx', _, s) <- runUnifyPL $ unifyPLSpines ctx psix psix'
+            -- @@Todo: do we care about status?
 
             -- Build the rest of the clause, which will first give:
-            --    Δ |- e' : (Π xΓ T) σ
+            --    Γ' |- e' : (Π xΓ T) σ
             -- This is refined by specialisation by unification to:
             --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : Π xΓ T
-            -- Here we are straight away given the e. -- @@Todo: explain how that works
-            e <- caseTree (CaseElab ty children)
+            -- @@Todo: We need to apply sub to children too, and perhaps move xΓ to the context?
+            e <- caseTree (CaseElab ctx' (sub s.forward ty) children)
 
+            -- @@Todo: We need to substitute over propositional K somewhere around here..
+            --
             -- Now we build e'' which is:
             --    Γχ (x : D δ ψ) (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) (Π xΓ T)
             -- The equalities are explicitly given by the motive we will set up later.
@@ -1129,7 +1134,9 @@ nextConstraint (Constraints []) = Nothing
 -- CaseElab : (Γ : Ctx) -> Set
 -- Operating in State Ctx
 data CaseElab = CaseElab
-  { ty :: VTy,
+  {
+    ctx :: HCtx,
+    ty :: VTy,
     cls :: [Clause (Constraints, Spine Pat) STm]
   }
 

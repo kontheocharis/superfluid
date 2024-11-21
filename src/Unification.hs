@@ -13,6 +13,7 @@ module Unification
     Unify (..),
     canUnifyHere,
     unifyPL,
+    unifyPLSpines,
   )
 where
 
@@ -751,15 +752,11 @@ deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 deletion ctx a b = do
   let sh = telShapes ctx
   -- If we can unify a and b we can delete the equation since it will evaluate to refl.
-  -- (and that is why this is only valid with K)
   c <- canConvert ctx a b
 
   -- Make a new name and shape for the new context
   x <- uniqueName
   let csh = Param Explicit Many x ()
-
-  -- @@Todo: hold up, where is the K?
-  -- Need to add linv and rinv to the BiSub!
 
   -- More precisely, we return an invertible substitution:
   --
@@ -767,6 +764,8 @@ deletion ctx a b = do
   -- where
   --     σ = (id, refl a)
   --     σ⁻¹ = π₁ id
+  --
+  -- ##Important: rinv/linv proofs of this isomorphism require propositional K!
   if c
     then
       return . Just $
