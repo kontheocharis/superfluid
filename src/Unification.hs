@@ -9,6 +9,7 @@ module Unification
     SolveError (..),
     unify,
     CanUnify (..),
+    UnifyPL (..),
     MetaProblem (..),
     Unify (..),
     canUnifyHere,

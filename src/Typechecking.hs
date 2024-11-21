@@ -109,7 +109,7 @@ import Evaluation
     quote,
     vApp,
     ($$),
-    ($$>),
+    ($$>), embedEval,
   )
 import Globals
   ( CtorConstructions (..),
@@ -140,7 +140,7 @@ import Globals
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Substitution (Sub, Subst (..))
+import Substitution (Sub (..), Subst (..), BiSub (..))
 import Syntax
   ( Case (..),
     Closure (..),
@@ -171,7 +171,7 @@ import Syntax
     unembed,
     uniqueSLams,
     vGetSpine,
-    pattern VV, HCtx,
+    pattern VV, HCtx, unembedTel,
   )
 import Unelaboration (Unelab)
 import Unification
@@ -896,13 +896,14 @@ addVar (CaseElab ctx ty cls) = do
   case ps of
     Nothing -> return Nothing
     Just ps' -> do
-      ty' <- unfoldHere ty
+      ty' <- embedHere ty >>= evalHere >>= unfoldHere
       case ty' of
         VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
           l <- getLvl
-          b' <- b $$ [VV l']
+          b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
+          ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
           let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
-          rest <- caseTree (CaseElab b' cls'')
+          rest <- caseTree (CaseElab (ctx :|> Param m q x ha) b' cls'')
           return . Just $ SLam m q x rest
         _ -> return Nothing
 
@@ -940,8 +941,8 @@ patAsTm = undefined
 tmAsPat :: HTm -> Pat
 tmAsPat = undefined
 
-runUnifyPL :: (Tc m, Unify n) => n a -> m a
-runUnifyPL = undefined
+runUnifyPL :: (forall n . (UnifyPL n) => n a) -> (forall m . (Tc m) => m a)
+runUnifyPL _ = undefined
 
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
 splitConstraint (CaseElab ctx ty cls) = do
@@ -958,7 +959,7 @@ splitConstraint (CaseElab ctx ty cls) = do
         -- We have that A = D δ ψ and x = ci πg
 
         -- Get the HOAS of the goal, i.e. Π xΓ T
-        ty' <- quoteHere ty >>= unembedHere
+        -- ty' <- quoteHere ty >>= unembedHere
 
         -- Get the current subject type, i.e. D δ ψ
         (d, delta, psi) <- forceData param.ty
@@ -1047,7 +1048,7 @@ splitConstraint (CaseElab ctx ty cls) = do
                 subjectIndices = psi,
                 -- The final motive is:
                 --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
-                elimTy = hLams indTel (const ty'),
+                elimTy = hLams indTel (const ty),
                 clauses = []
               }
         return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
@@ -1136,7 +1137,7 @@ nextConstraint (Constraints []) = Nothing
 data CaseElab = CaseElab
   {
     ctx :: HCtx,
-    ty :: VTy,
+    ty :: HTy,
     cls :: [Clause (Constraints, Spine Pat) STm]
   }
 
@@ -1176,7 +1177,8 @@ clauses d cls ty = enterCtx id $ do
   -- - Then we turn to case tree
   -- - Invariant: in empty ctx
   cls' <- mapM (clause (SDef d, ty)) cls
-  ct <- caseTree (CaseElab ty (clausesWithEmptyConstraints cls'))
+  hty <- quoteHere ty >>= unembedHere
+  ct <- caseTree (CaseElab Empty hty (clausesWithEmptyConstraints cls'))
   return (ct, ty)
 
 defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()
