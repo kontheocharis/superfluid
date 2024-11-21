@@ -60,6 +60,7 @@ module Common
     telToBinds,
     nameSpineToTel,
     telShapes,
+    spineShapes,
   )
 where
 
@@ -328,6 +329,9 @@ telToBinds = toList . fmap (\(Param _ q n _) -> (q, n))
 
 telShapes :: Tel a -> Tel ()
 telShapes = fmap (\(Param m q n _) -> Param m q n ())
+
+spineShapes :: Spine a -> Tel ()
+spineShapes = fmap (\(Arg m q _) -> Param m q (Name "_") ())
 
 -- Metas
 

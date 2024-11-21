@@ -12,6 +12,7 @@ module Unification
     MetaProblem (..),
     Unify (..),
     canUnifyHere,
+    unifyPL,
   )
 where
 
@@ -33,8 +34,10 @@ import Common
     composeZ,
     lvlToIdx,
     mapSpineM,
+    nameSpineToTel,
     nextLvl,
     nextLvls,
+    spineShapes,
     telShapes,
     pattern Impossible,
     pattern Possible,
@@ -58,7 +61,7 @@ import Evaluation
     quotePat,
     vApp,
   )
-import Globals (getCtorGlobal)
+import Globals (CtorConstructions (..), DataConstructions (..), getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
 import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, projN)
@@ -467,7 +470,7 @@ data UnifyOutcome = Can | Cannot [UnifyPLError]
 -- Unification will not always succeed.
 --
 -- We also "remember" if Γ' is the bottom context (x : Empty) or not.
-type Unification = (UnifyOutcome, BiSub)
+type Unification = (HCtx, UnifyOutcome, BiSub)
 
 instance Lattice UnifyOutcome where
   Can \/ _ = Can
@@ -477,50 +480,6 @@ instance Lattice UnifyOutcome where
   Can /\ Can = Can
   Cannot xs /\ Cannot ys = Cannot (xs ++ ys)
   _ /\ _ = Cannot []
-
-unifyPLSpines :: (UnifyPL m) => Spine HTm -> Spine HTm -> m Unification
-unifyPLSpines Empty Empty = do
-  -- Empty spines lead to identity substitutions
-  --
-  -- Γ () ≃ Γ
-  -- So solve with Γ' = Γ and σ = id
-  l <- getLvl
-  return
-    ( Can,
-      BiSub
-        { forward = idSub l,
-          backward = idSub l
-        }
-    )
-unifyPLSpines (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
-  -- Solving unify Γ (x, ..xs) (y, ..ys)
-
-  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ x y
-  (o, s) <- unifyPL x y
-
-  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' (xs σ) (ys σ)
-  (o', s') <- unifyPLSpines (sub s.forward xs) (sub s.forward ys)
-
-  -- return (Γ'', (
-  --     1 = lift (xs ..= ys) σ ∘ σ',
-  --    -1 = σ'⁻¹ ∘ lift (xs σ⁻¹ ..= ys σ⁻¹) σ⁻¹
-  -- ))
-  return
-    ( o /\ o',
-      BiSub
-        { forward = composeSub (liftSubN (length xs) s.forward) s'.forward,
-          backward = composeSub s.backward (liftSubN (length xs) s'.backward)
-        }
-    )
-unifyPLSpines _ _ = error "Mismatching spines should never occur in well-typed terms"
-
-unifyPL :: (UnifyPL m) => HTm -> HTm -> m Unification
-unifyPL t1 t2 = do
-  let tactics = []
-  res <- firstJustM (\t -> t t1 t2) tactics
-  case res of
-    Just x -> return x
-    Nothing -> throwUnifyError UnifyPLError
 
 --- Simple equality
 --
@@ -558,9 +517,79 @@ inj = undefined
 conf :: HTm -> HTm -> HTm -> HTm
 conf = undefined
 
-solution :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
-solution a b = case (a, b) of
-  (_, HVar l) -> solution (HVar l) a
+-- Never
+--
+-- This is the internal Empty type's eliminator.
+--
+-- Important: 'internal Empty' means void in the metatheory, because the Unit
+-- type behaves like the empty context instead.
+--
+-- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
+never :: HTm -> HTm
+never = undefined
+
+voidSh :: Shapes
+voidSh = Param Explicit Many (Name "_") () :<| Empty
+
+voidCtx :: HCtx
+voidCtx = undefined
+
+initialSub :: Shapes -> Shapes -> Sub
+initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never x)) sh)
+
+ofSh :: Shapes -> [a] -> Spine a
+ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
+
+-- Unification:
+
+unifyPLSpines :: (UnifyPL m) => HCtx -> Spine HTm -> Spine HTm -> m Unification
+unifyPLSpines ctx Empty Empty = do
+  -- Empty spines lead to identity substitutions
+  --
+  -- Γ () ≃ Γ
+  -- So solve with Γ' = Γ and σ = id
+  return
+    ( ctx,
+      Can,
+      BiSub
+        { forward = idSub (telShapes ctx),
+          backward = idSub (telShapes ctx)
+        }
+    )
+unifyPLSpines ctx (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
+  -- Solving unify Γ (x, ..xs) (y, ..ys)
+
+  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ x y
+  (ctx', o, s) <- unifyPL ctx x y
+
+  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' (xs σ) (ys σ)
+  (ctx'', o', s') <- unifyPLSpines ctx' (sub s.forward xs) (sub s.forward ys)
+
+  -- return (Γ'', (
+  --     1 = lift (xs ..= ys) σ ∘ σ',
+  --    -1 = σ'⁻¹ ∘ lift (xs σ⁻¹ ..= ys σ⁻¹) σ⁻¹
+  -- ))
+  return
+    ( ctx'',
+      o /\ o',
+      BiSub
+        { forward = composeSub (liftSubN (spineShapes xs) s.forward) s'.forward,
+          backward = composeSub s.backward (liftSubN (spineShapes xs) s'.backward)
+        }
+    )
+unifyPLSpines _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+
+unifyPL :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Unification
+unifyPL ctx t1 t2 = do
+  let tactics = [solution, injectivity, conflict, cycle, deletion]
+  res <- firstJustM (\t -> t ctx t1 t2) tactics
+  case res of
+    Just x -> return x
+    Nothing -> throwUnifyError UnifyPLError
+
+solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+solution ctx a b = case (a, b) of
+  (_, HVar l) -> solution ctx (HVar l) a
   (HVar l, _) -> do
     -- Plan of action:
     -- 1. Check that no variable greater than l occurs in b
@@ -583,7 +612,7 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
     let n = cc.argsArity
 
     -- (Γ', σ : Sub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
-    (o, s) <- unifyPLSpines xs ys
+    (ctx', o, s) <- unifyPLSpines ctx xs ys
 
     -- Make a new name and shape for the new context
     x <- uniqueName
@@ -615,35 +644,14 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
     --     -1 = σ⁻¹ ∘ σ'⁻¹
     -- ))
     return . Just $
-      ( o,
+      ( ctx',
+        o,
         BiSub
           { forward = composeSub s'.forward s.forward,
             backward = composeSub s.backward s'.backward
           }
       )
   _ -> return Nothing
-
--- Never
---
--- This is the internal Empty type's eliminator.
---
--- Important: 'internal Empty' means void in the metatheory, because the Unit
--- type behaves like the empty context instead.
---
--- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
-never :: HTm -> HTm
-never = undefined
-
-voidSh :: (UnifyPL m) => m Shapes
-voidSh = do
-  n <- uniqueName
-  return $ Param Explicit Many n () :<| Empty
-
-initialSub :: Shapes -> Shapes -> Sub
-initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never x)) sh)
-
-ofSh :: Shapes -> [a] -> Spine a
-ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
 
 conflict :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 conflict ctx a b = case (hGatherApps a, hGatherApps b) of
@@ -664,19 +672,19 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
     -- where
     --     σ = init Γ(c1 xs = c2 ys),     -- init is the initial morphism from the void context
     --     σ⁻¹ = (ɛ, conf c1 c2 here)    -- ɛ is the terminal morphism from Γ to the empty context
-    vSh <- voidSh
     return . Just $
-      ( Cannot [],
+      ( voidCtx,
+        Cannot [],
         BiSub
-          { forward = initialSub vSh (sh :|> csh),
-            backward = mapSub1 (sh :|> csh) vSh (\_ p -> ofSh vSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
+          { forward = initialSub voidSh (sh :|> csh),
+            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
           }
       )
   _ -> return Nothing
 
-cycle :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
-cycle a b = case (a, b) of
-  (_, HVar l) -> cycle (HVar l) a
+cycle :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+cycle ctx a b = case (a, b) of
+  (_, HVar l) -> cycle ctx (HVar l) a
   (HVar l, hGatherApps -> (HCtor (c1, _), ys)) ->
     -- 1. Check if l occurs in xs
     -- 2. If so, then we have a cycle so return Cannot with the appropriate sub.
@@ -684,8 +692,8 @@ cycle a b = case (a, b) of
     return undefined
   _ -> return Nothing
 
-deletion :: (UnifyPL m) => HTm -> HTm -> m (Maybe Unification)
-deletion a b = do
+deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+deletion ctx a b = do
   -- If we can unify a and b we can delete the equation since it will evaluate to refl.
   -- (and that is why this is only valid with K)
   return undefined
