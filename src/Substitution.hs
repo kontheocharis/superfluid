@@ -23,14 +23,15 @@ module Substitution
   )
 where
 
-import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, nextLvl, nextLvls, telShapes, telToBinds)
+import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls, telShapes, telToBinds)
 import Context (Ctx)
-import Data.Foldable (toList)
+import Control.Monad (foldM)
+import Data.Foldable (Foldable (..), toList)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
 import Evaluation (Eval)
-import Syntax (Case (..), Env, HCtx, HTm (..), HTy, SPat (..), VTm (..))
+import Syntax (Case (..), Env, HCtx, HTm (..), HTy, SPat (..), VTm (..), hApp)
 
 -- Substitution
 
@@ -127,6 +128,9 @@ class Subst a where
   -- [_]_ : (σ : Sub Γ Δ) -> P Γ (A σ) -> P Δ A
   sub :: Sub -> a -> a
 
+  -- Occurs check
+  occurs :: Lvl -> Lvl -> a -> Bool
+
 instance (Subst HTm) where
   sub s (HVar x) = (getVar x s).arg
   sub s (HApp m q t u) = HApp m q (sub s t) (sub s u)
@@ -159,16 +163,52 @@ instance (Subst HTm) where
   sub s (HRepr t) = HRepr (sub s t)
   sub s (HUnrepr t) = HUnrepr (sub s t)
 
+  occurs _ x (HVar y) = x == y
+  occurs l x (HApp _ _ t u) = occurs l x t || occurs l x u
+  occurs l x (HPi _ _ _ a b) = occurs l x a || occurs (nextLvl l) x (b (HVar l))
+  occurs l x (HLam _ _ _ t) = occurs (nextLvl l) x (t (HVar l))
+  occurs l x (HLet _ _ _ a b) = occurs l x a || occurs (nextLvl l) x (b (HVar l))
+  occurs _ _ (HMeta _ _) = False
+  occurs _ _ HU = False
+  occurs _ _ (HData _) = False
+  occurs l x (HCtor (_, sp)) = any (occurs l x) sp
+  occurs _ _ (HDef _) = False
+  occurs _ _ (HPrim _) = False
+  occurs l x (HLit l') = foldr (\t acc -> acc || occurs l x t) False l'
+  occurs l x (HRepr t) = occurs l x t
+  occurs l x (HUnrepr t) = occurs l x t
+  occurs l x (HCase (Case _ ps subj is ty cs)) =
+    any (occurs l x) ps
+      || occurs l x subj
+      || any (occurs l x) is
+      || occurs l x ty
+      || any
+        ( \(Clause p t) -> case t of
+            Nothing -> False
+            Just t' -> occurs (nextLvls l (length p.binds)) x (t' (map HVar $ membersIn l (Lvl (length p.binds))))
+        )
+        cs
+
 instance (Subst t) => (Subst (Tel t)) where
   sub _ Empty = Empty
   sub s (x :<| t) = sub s x :<| sub (liftSub (Param x.mode x.qty x.name ()) s) t
+
+  occurs _ _ Empty = False
+  occurs l x (a :<| t) = occurs l x a || occurs (nextLvl l) x t
 
 instance (Subst t) => (Subst (Spine t)) where
   sub _ Empty = Empty
   sub s (x :<| t) = sub s x :<| sub (liftSub (Param x.mode x.qty (Name "_") ()) s) t
 
+  occurs _ _ Empty = False
+  occurs l x (a :<| t) = occurs l x a || occurs (nextLvl l) x t
+
 instance (Subst t) => Subst (Arg t) where
   sub s (Arg m q x) = Arg m q (sub s x)
 
+  occurs l x (Arg _ _ t) = occurs l x t
+
 instance (Subst t) => Subst (Param t) where
   sub s (Param m q n x) = Param m q n (sub s x)
+
+  occurs l x (Param _ _ _ t) = occurs l x t
