@@ -129,7 +129,7 @@ class Subst a where
   sub :: Sub -> a -> a
 
   -- Occurs check
-  occurs :: Lvl -> Lvl -> a -> Bool
+  occurs :: Lvl -> (Lvl -> Bool) -> a -> Bool
 
 instance (Subst HTm) where
   sub s (HVar x) = (getVar x s).arg
@@ -163,7 +163,7 @@ instance (Subst HTm) where
   sub s (HRepr t) = HRepr (sub s t)
   sub s (HUnrepr t) = HUnrepr (sub s t)
 
-  occurs _ x (HVar y) = x == y
+  occurs _ x (HVar y) = x y
   occurs l x (HApp _ _ t u) = occurs l x t || occurs l x u
   occurs l x (HPi _ _ _ a b) = occurs l x a || occurs (nextLvl l) x (b (HVar l))
   occurs l x (HLam _ _ _ t) = occurs (nextLvl l) x (t (HVar l))

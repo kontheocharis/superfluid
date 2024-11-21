@@ -486,6 +486,11 @@ instance Lattice UnifyOutcome where
 equality :: HTm -> HTm -> HTm
 equality = undefined
 
+-- Internal reflexivity
+-- refl : [A : Type] -> A -> A
+refl :: HTm -> HTm
+refl = undefined
+
 -- Fibered equality (shorthand = with types left as an exercise)
 --
 -- internally:
@@ -494,6 +499,7 @@ equality = undefined
 hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
 hequality = undefined
 
+-- Fibered equality for spines
 hequalitySp :: Spine HTm -> Spine HTm -> Tel STm
 hequalitySp = undefined
 
@@ -517,7 +523,7 @@ conf = undefined
 
 -- @@Todo: properly encode the < relation
 -- cyc : (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
-cyc :: HTm -> HTm -> HTm
+cyc :: HTm -> HTm -> HTm -> HTm
 cyc = undefined
 
 -- Never
@@ -594,65 +600,68 @@ unifyPL ctx t1 t2 = do
 
 solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 solution ctx a b = case (a, b) of
-  (_, HVar l) -> solution ctx (HVar l) a
-  (HVar l, _) -> do
-    let sh = telShapes ctx
+  (_, HVar x) -> solution ctx (HVar x) a
+  (HVar x, _) -> do
+    let l = Lvl (length ctx)
+    if occurs l (>= x) b then return Nothing
+    else do
 
-    -- Make a new name and shape for the new context
-    p <- uniqueName
-    let csh = Param Explicit Many p ()
+      let sh = telShapes ctx
 
-    -- Substitute b for l in the (rest of) the context, while removing l from
-    -- the context
-    -- @@Todo: ocurrence check
+      -- Make a new name and shape for the new context
+      p <- uniqueName
+      let csh = Param Explicit Many p ()
 
-    -- Γx (context)
-    let ctxx = S.take l.unLvl ctx
+      -- Substitute b for l in the (rest of) the context, while removing l from
+      -- the context
 
-    -- (x : A)
-    let xSh = S.index sh l.unLvl
+      -- Γx (context)
+      let ctxx = S.take x.unLvl ctx
 
-    -- xΓ (telescope)
-    let xctxx = S.drop (nextLvl l).unLvl ctx
+      -- (x : A)
+      let xSh = S.index sh x.unLvl
 
-    -- xΓ [x ↦ b]
-    --
-    -- We want Sub Γx Γx(x : A) which can be constructed as:
-    -- [x ↦ a] = (id, b)
-    let vs = extendSub (idSub sh) xSh (const b) -- @@Fixme: const b might not work with the HOAS
-    let xctxx' = sub vs xctxx
+      -- xΓ (telescope)
+      let xctxx = S.drop (nextLvl x).unLvl ctx
 
-    -- (Γx, xΓ (id, a)) (context)
-    let ctx' = ctxx <> xctxx'
+      -- xΓ [x ↦ b]
+      --
+      -- We want Sub Γx Γx(x : A) which can be constructed as:
+      -- [x ↦ a] = (id, b)
+      let vs = extendSub (idSub sh) xSh (const b) -- @@Check: will const b work with the HOAS?
+      let xctxx' = sub vs xctxx
 
-    -- Returning shape
-    let rsh = telShapes ctx'
+      -- (Γx, xΓ (id, a)) (context)
+      let ctx' = ctxx <> xctxx'
 
-    -- We need to construct an invertible substitution:
-    --
-    -- (Γx, x : A, xΓ) ≃ Γ
-    -- a : Tm Γx A
-    -- ----------
-    -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
-    -- where
-    --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
-    --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
-    let s =
-          BiSub
-            { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
-              backward =
-                mapSubN
-                  rsh
-                  (sh :|> csh)
-                  (telShapes ctxx)
-                  ( \sp sp' ->
-                      sp
-                        <> ofSh (S.singleton xSh) [b]
-                        <> sp'
-                        <> ofSh (S.singleton csh) [refl b]
-                  )
-            }
-    return $ Just (ctx', Can, s)
+      -- Returning shape
+      let rsh = telShapes ctx'
+
+      -- We need to construct an invertible substitution:
+      --
+      -- (Γx, x : A, xΓ) ≃ Γ
+      -- a : Tm Γx A
+      -- ----------
+      -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
+      -- where
+      --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
+      --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
+      let s =
+            BiSub
+              { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take x.unLvl sp <> sub vs (S.drop (nextLvl x).unLvl sp)),
+                backward =
+                  mapSubN
+                    rsh
+                    (sh :|> csh)
+                    (telShapes ctxx)
+                    ( \sp sp' ->
+                        sp
+                          <> ofSh (S.singleton xSh) [b]
+                          <> sp'
+                          <> ofSh (S.singleton csh) [refl b]
+                    )
+              }
+      return $ Just (ctx', Can, s)
   _ -> return Nothing
 
 injectivity :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
@@ -740,10 +749,10 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
 cycle :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 cycle ctx a b = case (a, b) of
   (_, HVar x) -> cycle ctx (HVar x) a
-  (HVar x, hGatherApps -> (HCtor (c, _), xs)) -> do
+  (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
     -- Check if x occurs in xs, if so, then we have a cycle.
     let l = Lvl (length ctx)
-    if occurs l x xs
+    if occurs l (== x) xs
       then do
         let sh = telShapes ctx
         -- Make a new name and shape for the new context
@@ -761,7 +770,7 @@ cycle ctx a b = case (a, b) of
             Cannot [],
             BiSub
               { forward = initialSub voidSh (sh :|> csh),
-                backward = extendSub (idSub sh) csh (\_ -> conf (HCtor (c1, pp)) (HVar x) (ofSh sh xs))
+                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [cyc (hApp (HCtor (c, pp)) xs) (HVar x) p])
               }
           )
       else
@@ -772,11 +781,6 @@ cycle ctx a b = case (a, b) of
 -- unification thing. (And the latter should be renamed to convert?)
 canConvert :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Bool
 canConvert = undefined
-
--- Internal reflexivity
--- refl : [A : Type] -> A -> A
-refl :: HTm -> HTm
-refl = undefined
 
 deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 deletion ctx a b = do
