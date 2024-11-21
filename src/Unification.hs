@@ -55,6 +55,7 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation
   ( Eval (..),
+    embedEval,
     eval,
     evalInOwnCtx,
     force,
@@ -64,7 +65,7 @@ import Evaluation
 import Globals (CtorConstructions (..), DataConstructions (..), getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, projN)
+import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, projN)
 import Syntax
   ( Case (..),
     Closure (body, numVars),
@@ -80,6 +81,7 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
+    embed,
     hApp,
     hGatherApps,
     headAsValue,
@@ -666,7 +668,7 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
     x <- uniqueName
     let csh = Param Explicit Many x ()
 
-    -- We return some invertible substitution:
+    -- We return an invertible substitution:
     --
     -- σ : Sub ⊥ Γ(c1 xs = c2 ys)
     -- where
@@ -692,8 +694,39 @@ cycle ctx a b = case (a, b) of
     return undefined
   _ -> return Nothing
 
+-- Definitional equality checker. This should somehow hook into the other
+-- unification thing. (And the latter should be renamed to convert?)
+canConvert :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Bool
+canConvert = undefined
+
+-- Internal reflexivity
+-- refl : [A : Type] -> A -> A
+refl :: HTm -> HTm
+refl = undefined
+
 deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 deletion ctx a b = do
+  let sh = telShapes ctx
   -- If we can unify a and b we can delete the equation since it will evaluate to refl.
   -- (and that is why this is only valid with K)
-  return undefined
+  c <- canConvert ctx a b
+
+  -- Make a new name and shape for the new context
+  x <- uniqueName
+  let csh = Param Explicit Many x ()
+
+  -- More precisely, we return an invertible substitution:
+  --
+  -- σ : Sub Γ Γ(a = a)
+  -- where
+  --     σ = (id, refl a)
+  --     σ⁻¹ = π₁ id
+  if c
+    then
+      return . Just $
+        ( ctx,
+          Can,
+          BiSub {forward = extendSub (idSub sh) csh (\_ -> refl a), backward = proj (idSub (sh :|> csh))}
+        )
+    else
+      return Nothing

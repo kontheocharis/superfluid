@@ -32,6 +32,7 @@ module Evaluation
     close,
     ($$>),
     closureToLam,
+    embedEval,
   )
 where
 
@@ -60,7 +61,7 @@ import Common
     nextLvl,
     nextLvls,
     pattern Impossible,
-    pattern Possible, Tag (..),
+    pattern Possible, Tag (..), members,
   )
 import Control.Monad (foldM)
 import Control.Monad.Extra (firstJustM)
@@ -106,7 +107,7 @@ import Syntax
     sReprTimes,
     uniqueSLams,
     pattern VMeta,
-    pattern VVar,
+    pattern VVar, HTm, pattern VV, embed,
   )
 import Data.Maybe (fromMaybe)
 
@@ -609,3 +610,6 @@ ensureIsCtor l v c a = do
   case v' of
     VNorm (VCtor ((c', _), _)) | c == c' -> return ()
     _ -> a
+
+embedEval :: (Eval m) => Lvl -> HTm -> m VTm
+embedEval l t = eval (map VV $ members l) (embed l t)
