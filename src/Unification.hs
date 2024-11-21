@@ -603,65 +603,67 @@ solution ctx a b = case (a, b) of
   (_, HVar x) -> solution ctx (HVar x) a
   (HVar x, _) -> do
     let l = Lvl (length ctx)
-    if occurs l (>= x) b then return Nothing
-    else do
 
-      let sh = telShapes ctx
+    -- Ensure that b is well scoped at the place of x.
+    if occurs l (>= x) b
+      then return Nothing
+      else do
+        let sh = telShapes ctx
 
-      -- Make a new name and shape for the new context
-      p <- uniqueName
-      let csh = Param Explicit Many p ()
+        -- Make a new name and shape for the new context
+        p <- uniqueName
+        let csh = Param Explicit Many p ()
 
-      -- Substitute b for l in the (rest of) the context, while removing l from
-      -- the context
+        -- Substitute b for l in the (rest of) the context, while removing l from
+        -- the context
 
-      -- Γx (context)
-      let ctxx = S.take x.unLvl ctx
+        -- Γx (context)
+        let ctxx = S.take x.unLvl ctx
 
-      -- (x : A)
-      let xSh = S.index sh x.unLvl
+        -- (x : A)
+        let xSh = S.index sh x.unLvl
 
-      -- xΓ (telescope)
-      let xctxx = S.drop (nextLvl x).unLvl ctx
+        -- xΓ (telescope)
+        let xctxx = S.drop (nextLvl x).unLvl ctx
 
-      -- xΓ [x ↦ b]
-      --
-      -- We want Sub Γx Γx(x : A) which can be constructed as:
-      -- [x ↦ a] = (id, b)
-      let vs = extendSub (idSub sh) xSh (const b) -- @@Check: will const b work with the HOAS?
-      let xctxx' = sub vs xctxx
+        -- xΓ [x ↦ b]
+        --
+        -- We want Sub Γx Γx(x : A) which can be constructed as:
+        -- [x ↦ a] = (id, b)
+        let vs = extendSub (idSub sh) xSh (const b) -- @@Check: will const b work with the HOAS?
+        let xctxx' = sub vs xctxx
 
-      -- (Γx, xΓ (id, a)) (context)
-      let ctx' = ctxx <> xctxx'
+        -- (Γx, xΓ (id, a)) (context)
+        let ctx' = ctxx <> xctxx'
 
-      -- Returning shape
-      let rsh = telShapes ctx'
+        -- Returning shape
+        let rsh = telShapes ctx'
 
-      -- We need to construct an invertible substitution:
-      --
-      -- (Γx, x : A, xΓ) ≃ Γ
-      -- a : Tm Γx A
-      -- ----------
-      -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
-      -- where
-      --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
-      --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
-      let s =
-            BiSub
-              { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take x.unLvl sp <> sub vs (S.drop (nextLvl x).unLvl sp)),
-                backward =
-                  mapSubN
-                    rsh
-                    (sh :|> csh)
-                    (telShapes ctxx)
-                    ( \sp sp' ->
-                        sp
-                          <> ofSh (S.singleton xSh) [b]
-                          <> sp'
-                          <> ofSh (S.singleton csh) [refl b]
-                    )
-              }
-      return $ Just (ctx', Can, s)
+        -- We need to construct an invertible substitution:
+        --
+        -- (Γx, x : A, xΓ) ≃ Γ
+        -- a : Tm Γx A
+        -- ----------
+        -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
+        -- where
+        --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
+        --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
+        let s =
+              BiSub
+                { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take x.unLvl sp <> sub vs (S.drop (nextLvl x).unLvl sp)),
+                  backward =
+                    mapSubN
+                      rsh
+                      (sh :|> csh)
+                      (telShapes ctxx)
+                      ( \sp sp' ->
+                          sp
+                            <> ofSh (S.singleton xSh) [b]
+                            <> sp'
+                            <> ofSh (S.singleton csh) [refl b]
+                      )
+                }
+        return $ Just (ctx', Can, s)
   _ -> return Nothing
 
 injectivity :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)

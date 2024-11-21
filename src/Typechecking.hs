@@ -998,9 +998,6 @@ splitConstraint (CaseElab ctx ty cls) = do
       Constraint _ (VV x) (CtorP _ _) param -> do
         -- We have that A = D δ ψ and x = ci πg
 
-        -- Get the HOAS of the goal, i.e. Π xΓ T
-        -- ty' <- quoteHere ty >>= unembedHere
-
         -- Get the current subject type, i.e. D δ ψ
         (d, delta, psi) <- forceData param.ty
         (di, dc) <- access (getDataGlobal' d)
@@ -1014,6 +1011,7 @@ splitConstraint (CaseElab ctx ty cls) = do
 
           -- Enter the context of the constructor.
           enterHTel (cc.args delta) $ \pi -> do
+          -- @@Todo: turn to explicit context
             -- For each clause with pattern pj
             children <- fmap catMaybes . forM cls $ \cl' -> do
               case cl' of
@@ -1024,7 +1022,7 @@ splitConstraint (CaseElab ctx ty cls) = do
                   return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
                 Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
                 Clause (Constraints (Constraint _ _ (CtorP _ sp) _ : cs'), ps) t -> do
-                  -- Current context is: Γχ (x : D δ ψ) (π : Πi)
+                  -- Current context is: Γχ (x : D δ ψ) xΓ (π : Πi)
                   -- equate pi to pj, gives back simple constraints.
                   -- give those constraints to make the child case clause j.
                   -- add this to matched clauses for i.
@@ -1039,22 +1037,22 @@ splitConstraint (CaseElab ctx ty cls) = do
 
             -- Unify (ψ, x) with (ξi[δ,π], ci π), which will give back a new context Γ'
             -- that is isomorphic to
-            --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
+            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
             -- through the substitution σ.
             (ctx', _, s) <- runUnifyPL $ unifyPLSpines ctx psix psix'
             -- @@Todo: do we care about status?
 
             -- Build the rest of the clause, which will first give:
-            --    Γ' |- e' : (Π xΓ T) σ
+            --    Γ' |- e' : T σ
             -- This is refined by specialisation by unification to:
-            --    Γχ (x : D δ ψ) (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : Π xΓ T
+            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : T
             -- @@Todo: We need to apply sub to children too, and perhaps move xΓ to the context?
-            e <- caseTree (CaseElab ctx' (sub s.forward ty) children)
+            e <- caseTree (CaseElab ctx' (sub s.backward ty) children)
 
             -- @@Todo: We need to substitute over propositional K somewhere around here..
             --
             -- Now we build e'' which is:
-            --    Γχ (x : D δ ψ) (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) (Π xΓ T)
+            --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) T
             -- The equalities are explicitly given by the motive we will set up later.
             eq <- here (`embedTel` eqTel psix psix')
             let e'' = sLams eq e
