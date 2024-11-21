@@ -102,6 +102,7 @@ import Data.Set (Set)
 import qualified Data.Set as SET
 import Evaluation
   ( Eval (..),
+    embedEval,
     ensureIsCtor,
     ifIsData,
     isCtorTy,
@@ -109,7 +110,7 @@ import Evaluation
     quote,
     vApp,
     ($$),
-    ($$>), embedEval,
+    ($$>),
   )
 import Globals
   ( CtorConstructions (..),
@@ -133,18 +134,20 @@ import Globals
     getDataGlobal,
     getDefGlobal,
     hasName,
+    instances,
     knownData,
     lookupGlobal,
     modifyDataItem,
-    modifyDefItem, instances,
+    modifyDefItem,
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Substitution (Sub (..), Subst (..), BiSub (..))
+import Substitution (BiSub (..), Sub (..), Subst (..))
 import Syntax
   ( Case (..),
     Closure (..),
     Env,
+    HCtx,
     HTel,
     HTm (..),
     HTy,
@@ -169,9 +172,10 @@ import Syntax
     sGatherPis,
     sLams,
     unembed,
+    unembedTel,
     uniqueSLams,
     vGetSpine,
-    pattern VV, HCtx, unembedTel,
+    pattern VV,
   )
 import Unelaboration (Unelab)
 import Unification
@@ -185,8 +189,8 @@ data TcError
   | InvalidPattern
   | RemainingProblems [Problem]
   | ImpossibleCaseIsPossible VTm VTm
-  -- | ImpossibleCaseMightBePossible VTm VTm Sub
-  | ImpossibleCase VTm [UnifyError]
+  | -- | ImpossibleCaseMightBePossible VTm VTm Sub
+    ImpossibleCase VTm [UnifyError]
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
@@ -240,13 +244,13 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
         --   t1' <- pretty t1
         --   t2' <- pretty t2
         --   return undefined -- @@Todo
-          -- sp <- pretty s
-          -- s' <-
-          --   if null sp
-          --     then return ""
-          --     else do
-          --       return $ "\nThis could happen if " ++ sp
-          -- return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
+        -- sp <- pretty s
+        -- s' <-
+        --   if null sp
+        --     then return ""
+        --     else do
+        --       return $ "\nThis could happen if " ++ sp
+        -- return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
         ImpossibleCase p t -> do
           p' <- pretty p
           t' <- intercalate "\n" <$> mapM pretty t
@@ -890,23 +894,6 @@ binder m q x a f = do
 
 data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
 
-addVar :: (Tc m) => CaseElab -> m (Maybe STm)
-addVar (CaseElab ctx ty cls) = do
-  (ps, cls') <- nextPat cls
-  case ps of
-    Nothing -> return Nothing
-    Just ps' -> do
-      ty' <- embedHere ty >>= evalHere >>= unfoldHere
-      case ty' of
-        VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
-          l <- getLvl
-          b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
-          ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
-          let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
-          rest <- caseTree (CaseElab (ctx :|> Param m q x ha) b' cls'')
-          return . Just $ SLam m q x rest
-        _ -> return Nothing
-
 forceData :: (Tc m) => VTm -> m (DataGlobal, Spine HTm, Spine HTm)
 forceData d = undefined
 
@@ -941,15 +928,68 @@ patAsTm = undefined
 tmAsPat :: HTm -> Pat
 tmAsPat = undefined
 
-runUnifyPL :: (forall n . (UnifyPL n) => n a) -> (forall m . (Tc m) => m a)
+runUnifyPL :: (forall n. (UnifyPL n) => n a) -> (forall m. (Tc m) => m a)
 runUnifyPL _ = undefined
+
+joinConstraints :: Constraints -> Constraints -> Constraints
+joinConstraints = undefined
+
+simpleConstraints :: Spine HTm -> Spine Pat -> m Constraints
+simpleConstraints = undefined
+
+simpleConstraint :: HTm -> Pat -> m Constraint
+simpleConstraint = undefined
+
+data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTy}
+
+data Constraints = Constraints {list :: [Constraint]}
+
+emptyConstraints :: Constraints
+emptyConstraints = Constraints []
+
+addConstraint :: Constraint -> ConstrainedClause (Spine Pat) STm -> ConstrainedClause (Spine Pat) STm
+addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
+
+nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
+nextConstraint (Constraints []) = Nothing
+
+data CaseElab = CaseElab
+  { ctx :: HCtx,
+    ty :: HTy,
+    cls :: [Clause (Constraints, Spine Pat) STm]
+  }
+
+caseTree :: (Tc m) => CaseElab -> m STm
+caseTree c = do
+  let tactics = [addVar c, splitConstraint c]
+  result <- asum <$> sequence tactics
+  case result of
+    Just r -> return r
+    Nothing -> error "no case tree tactic matched"
+
+addVar :: (Tc m) => CaseElab -> m (Maybe STm)
+addVar (CaseElab ctx ty cls) = do
+  (ps, cls') <- nextPat cls
+  case ps of
+    Nothing -> return Nothing
+    Just ps' -> do
+      ty' <- embedHere ty >>= evalHere >>= unfoldHere
+      case ty' of
+        VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
+          l <- getLvl
+          b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
+          ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
+          let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
+          rest <- caseTree (CaseElab (ctx :|> Param m q x ha) b' cls'')
+          return . Just $ SLam m q x rest
+        _ -> return Nothing
 
 splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
 splitConstraint (CaseElab ctx ty cls) = do
   -- Current context is:  Γχ (x : A)
   -- Rest of the goal is: Π xΓ T
   case cls of
-    Clause (Constraints (co : cs), _) _ : clss -> case co of
+    Clause (Constraints (co : _), _) _ : clss -> case co of
       Constraint _ (VV x) (LvlP _ _ x') _ -> do
         -- We have that x = x'
         -- This will use the solution rule for the constraint x = x'
@@ -1054,100 +1094,6 @@ splitConstraint (CaseElab ctx ty cls) = do
         return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
       _ -> return Nothing
     _ -> return Nothing
-
-joinConstraints :: Constraints -> Constraints -> Constraints
-joinConstraints = undefined
-
-simpleConstraints :: Spine HTm -> Spine Pat -> m Constraints
-simpleConstraints = undefined
-
-simpleConstraint :: HTm -> Pat -> m Constraint
-simpleConstraint = undefined
-
---
--- ty' <- unfoldHere ty
--- case ty' of
---   VNorm (VPi m q x a b) -> do
---     l' <- getLvl
---     ifIsData
---       l'
---       a
---       ( \d sp -> do
---           dsp <- traverse (traverse (quoteHere >=> unembedHere)) sp
---           di <- access (getDataGlobal d)
---           let dpp = S.take (length di.params) dsp
---           let dix = S.drop (length di.params) dsp
---           let matches = Map.fromList $ map (,[]) di.ctors
---           res <-
---             foldM
---               ( \acc (c, csp) -> case c of
---                   SCtor (c', pp) -> do
---                     ci' <- access (getCtorGlobal c')
---                     let cc = fromJust ci'.constructions
---                     let susp = binder m q x a $ \l -> do
---                           b' <- b $$ [VV l]
---                           caseTree b' cls'
---                           return $ SLam m q x rest
---                     return $ Map.adjust (++ [susp]) c' acc
---                   SVar i -> do
---                     l' <- here (`idxToLvl` i)
---                     mapM_
---                       ( \c' -> do
---                           ci' <- access (getCtorGlobal c')
---                           let cc = fromJust ci'.constructions
---                           let susp = binder m q x a $ \l -> do
---                                 csp' <- traverse (traverse unembedHere) csp
---                                 hcpp <- traverse (traverse unembedHere) pp
---                                 s <-
---                                   equateSpines hcpp dpp
---                                     <> equateSpines (cc.returnIndices hcpp csp') dix
---                                     <> equateTerms (hApp (HCtor (c', hcpp)) csp') (HVar l)
---                                 enterSub s $ do
---                                   b' <- b $$ [VV l]
---                                   rest <- caseTree b' cls'
---                                   return $ SLam m q x <$> rest
---                           return $ Map.adjust (++ [susp]) c' acc
---                       )
---                       di.ctors
---                     return acc
---                   _ -> tcError $ InvalidPattern
---               )
---               matches
---               ps'
---           return undefined
---       )
---       (throwError InvalidPattern)
---   _ -> throwError InvalidPattern
-
-data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTy}
-
-data Constraints = Constraints {list :: [Constraint]}
-
-emptyConstraints :: Constraints
-emptyConstraints = Constraints []
-
-addConstraint :: Constraint -> ConstrainedClause (Spine Pat) STm -> ConstrainedClause (Spine Pat) STm
-addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
-
-nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
-nextConstraint (Constraints []) = Nothing
-
--- CaseElab : (Γ : Ctx) -> Set
--- Operating in State Ctx
-data CaseElab = CaseElab
-  {
-    ctx :: HCtx,
-    ty :: HTy,
-    cls :: [Clause (Constraints, Spine Pat) STm]
-  }
-
--- split
-caseTree :: (Tc m) => CaseElab -> m STm
-caseTree c = do
-  res <- asum <$> sequence [addVar c, splitConstraint c]
-  case res of
-    Just r -> return r
-    Nothing -> error "no case tree tactic matched"
 
 toPat :: (Tc m) => STm -> m Pat
 toPat = undefined
@@ -1356,6 +1302,7 @@ global n i = case i of
     ty' <- tyCl $$> vmetas
     return (SCtor (CtorGlobal n, metas), ty')
   PrimInfo p -> return (SPrim (PrimGlobal n), p.ty)
+
 data ProblemKind = Unify VTm VTm | Synthesize VTm VTy deriving (Show)
 
 data Problem = Problem

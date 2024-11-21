@@ -36,9 +36,7 @@ import Common
     composeZ,
     lvlToIdx,
     mapSpineM,
-    nameSpineToTel,
     nextLvl,
-    nextLvls,
     spineShapes,
     telShapes,
     pattern Impossible,
@@ -47,7 +45,7 @@ import Common
 import Constructions (ctorConstructions)
 import Context
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Extra (findM, firstJustM)
+import Control.Monad.Extra (firstJustM)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import Data.IntMap (IntMap)
@@ -57,20 +55,19 @@ import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation
   ( Eval (..),
-    embedEval,
     eval,
     evalInOwnCtx,
     force,
     quotePat,
     vApp,
   )
-import Globals (CtorConstructions (..), DataConstructions (..), getCtorGlobal)
+import Globals (CtorConstructions (..), getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Shape, Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, projN, replaceSub)
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
-    Closure (body, numVars),
+    Closure (..),
     HCtx,
     HTm (..),
     SPat (..),
@@ -82,14 +79,10 @@ import Syntax
     VNorm (..),
     VPatB (..),
     VTm (..),
-    VTy,
-    embed,
     hApp,
     hGatherApps,
     headAsValue,
-    removing,
     uniqueSLams,
-    pattern VV,
     pattern VVar,
   )
 import Prelude hiding (cycle, pi)
@@ -598,7 +591,7 @@ solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 solution ctx a b = case (a, b) of
   (_, HVar l) -> solution ctx (HVar l) a
   (HVar l, _) -> do
-    let sh  = telShapes ctx
+    let sh = telShapes ctx
 
     -- Make a new name and shape for the new context
     x <- uniqueName
@@ -641,9 +634,9 @@ solution ctx a b = case (a, b) of
     --    σ⁻¹ = (\γ γ' => (γ, a, γ', refl a))
     let s = undefined
     -- let s = BiSub
-          -- { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
-          --   backward = mapSubN rsh (sh :|> csh)  (\sp p -> sp :|> Arg Explicit Many p)
-          -- }
+    -- { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
+    --   backward = mapSubN rsh (sh :|> csh)  (\sp p -> sp :|> Arg Explicit Many p)
+    -- }
     return $ Just (ctx', Can, s)
   _ -> return Nothing
 
