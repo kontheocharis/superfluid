@@ -509,11 +509,16 @@ dcongSp = undefined
 noConf :: HTm -> HTm -> Spine HTm
 noConf = undefined
 
--- conflict : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
+-- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
 --            -> Tm Γ (c1 xs = c2 ys)
 --            -> Tm Γ Empty
 conf :: HTm -> HTm -> HTm -> HTm
 conf = undefined
+
+-- @@Todo: properly encode the < relation
+-- cyc : (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
+cyc :: HTm -> HTm -> HTm
+cyc = undefined
 
 -- Never
 --
@@ -734,12 +739,33 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
 
 cycle :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 cycle ctx a b = case (a, b) of
-  (_, HVar l) -> cycle ctx (HVar l) a
-  (HVar l, hGatherApps -> (HCtor (c1, _), xs)) ->
-    -- 1. Check if l occurs in xs
-    -- 2. If so, then we have a cycle so return Cannot with the appropriate sub.
+  (_, HVar x) -> cycle ctx (HVar x) a
+  (HVar x, hGatherApps -> (HCtor (c, _), xs)) -> do
+    -- Check if x occurs in xs, if so, then we have a cycle.
+    let l = Lvl (length ctx)
+    if occurs l x xs
+      then do
+        let sh = telShapes ctx
+        -- Make a new name and shape for the new context
+        y <- uniqueName
+        let csh = Param Explicit Many y ()
 
-    return undefined
+        -- We return an invertible substitution:
+        --
+        -- σ : Sub ⊥ Γ(x = c xs)
+        -- where
+        --     σ = init Γ(x = c xs),
+        --     σ⁻¹ = (ɛ Γ, cyc c x)
+        return . Just $
+          ( ctx,
+            Cannot [],
+            BiSub
+              { forward = initialSub voidSh (sh :|> csh),
+                backward = extendSub (idSub sh) csh (\_ -> conf (HCtor (c1, pp)) (HVar x) (ofSh sh xs))
+              }
+          )
+      else
+        return Nothing
   _ -> return Nothing
 
 -- Definitional equality checker. This should somehow hook into the other
