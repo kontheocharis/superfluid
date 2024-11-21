@@ -594,8 +594,8 @@ solution ctx a b = case (a, b) of
     let sh = telShapes ctx
 
     -- Make a new name and shape for the new context
-    x <- uniqueName
-    let csh = Param Explicit Many x ()
+    p <- uniqueName
+    let csh = Param Explicit Many p ()
 
     -- Substitute b for l in the (rest of) the context, while removing l from
     -- the context
@@ -631,12 +631,22 @@ solution ctx a b = case (a, b) of
     -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
     -- where
     --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
-    --    σ⁻¹ = (\γ γ' => (γ, a, γ', refl a))
-    let s = undefined
-    -- let s = BiSub
-    -- { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
-    --   backward = mapSubN rsh (sh :|> csh)  (\sp p -> sp :|> Arg Explicit Many p)
-    -- }
+    --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
+    let s =
+          BiSub
+            { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take l.unLvl sp <> sub vs (S.drop (nextLvl l).unLvl sp)),
+              backward =
+                mapSubN
+                  rsh
+                  (sh :|> csh)
+                  (telShapes ctxx)
+                  ( \sp sp' ->
+                      sp
+                        <> ofSh (S.singleton xSh) [b]
+                        <> sp'
+                        <> ofSh (S.singleton csh) [refl b]
+                  )
+            }
     return $ Just (ctx', Can, s)
   _ -> return Nothing
 
