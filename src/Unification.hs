@@ -549,6 +549,11 @@ initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never 
 ofSh :: Shapes -> [a] -> Spine a
 ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
 
+-- Definitional equality checker. This should somehow hook into the other
+-- unification thing. (And the latter should be renamed to convert?)
+canConvert :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Bool
+canConvert = undefined
+
 -- Unification:
 
 unifyPLSpines :: (UnifyPL m) => HCtx -> Spine HTm -> Spine HTm -> m Unification
@@ -596,7 +601,7 @@ unifyPL ctx t1 t2 = do
     Just x -> return x
     Nothing -> throwUnifyError UnifyPLError
 
--- specialise ::
+-- Proof-relevant unification tactics
 
 solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 solution ctx a b = case (a, b) of
@@ -778,11 +783,6 @@ cycle ctx a b = case (a, b) of
       else
         return Nothing
   _ -> return Nothing
-
--- Definitional equality checker. This should somehow hook into the other
--- unification thing. (And the latter should be renamed to convert?)
-canConvert :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Bool
-canConvert = undefined
 
 deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 deletion ctx a b = do
