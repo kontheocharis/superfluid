@@ -590,6 +590,8 @@ unifyPL ctx t1 t2 = do
     Just x -> return x
     Nothing -> throwUnifyError UnifyPLError
 
+-- specialise ::
+
 solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 solution ctx a b = case (a, b) of
   (_, HVar l) -> solution ctx (HVar l) a
@@ -700,7 +702,7 @@ conflict :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 conflict ctx a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
     let sh = telShapes ctx
-    -- Here we have (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂)
+    -- Here we have (c1 : Ctor D Δ Π₁ ξ₁, c2 : Ctor D Δ Π₂ ξ₂)
     -- And we are trying to unify (c1 xs = c2 ys).
     --
     -- This is a conflict, so we need to return a disunifier.
@@ -713,8 +715,8 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
     --
     -- σ : Sub ⊥ Γ(c1 xs = c2 ys)
     -- where
-    --     σ = init Γ(c1 xs = c2 ys),     -- init is the initial morphism from the void context
-    --     σ⁻¹ = (ɛ, conf c1 c2 here)    -- ɛ is the terminal morphism from Γ to the empty context
+    --     σ = init Γ(c1 xs = c2 ys),     -- init X is the initial morphism from the void context to X
+    --     σ⁻¹ = (ɛ Γ, conf c1 c2 here)    -- ɛ X is the terminal morphism from X to the empty context
     return . Just $
       ( voidCtx,
         Cannot [],
@@ -728,7 +730,7 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
 cycle :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
 cycle ctx a b = case (a, b) of
   (_, HVar l) -> cycle ctx (HVar l) a
-  (HVar l, hGatherApps -> (HCtor (c1, _), ys)) ->
+  (HVar l, hGatherApps -> (HCtor (c1, _), xs)) ->
     -- 1. Check if l occurs in xs
     -- 2. If so, then we have a cycle so return Cannot with the appropriate sub.
 
@@ -755,6 +757,9 @@ deletion ctx a b = do
   -- Make a new name and shape for the new context
   x <- uniqueName
   let csh = Param Explicit Many x ()
+
+  -- @@Todo: hold up, where is the K?
+  -- Need to add linv and rinv to the BiSub!
 
   -- More precisely, we return an invertible substitution:
   --
