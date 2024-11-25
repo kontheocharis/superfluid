@@ -318,7 +318,7 @@ piArgsArity ty = do
 
 -- HOAS
 
-type HCase = (Case HTm HTm SPat ([HTm] -> HTm))
+type HCase = (Case HTm HTm Pat ([HTm] -> HTm))
 
 type HTy = HTm
 
@@ -393,6 +393,10 @@ embedCase l (Case d ps s is t cs) =
     (embed l t)
     (fmap embedClause cs)
   where
+    embedPat :: Pat -> SPat
+    embedPat (LvlP n q l) = SPat (SVar 0) [(q, n)]
+    embedPat (CtorP c sp) = SPat (SCtor c) (fmap embedPat sp)
+
     embedClause :: Clause SPat ([HTm] -> HTm) -> Clause SPat STm
     embedClause (Clause p c) =
       let pvs = map HVar $ membersIn l (Lvl (length p.binds))

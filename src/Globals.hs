@@ -69,7 +69,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
-import Syntax (Closure, HTel, HTm, HTy, STm (..), STy, VTm (..), VTy)
+import Syntax (Closure, HTel, HTm, HTy, STm (..), STy, VTm (..), VTy, Pat)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
@@ -86,7 +86,8 @@ data CtorConstructions = CtorConstructions
     argsArity :: Tel (),
     ty :: Spine HTm -> HTy,
     returnIndices :: Spine HTm -> Spine HTm -> Spine HTm,
-    returnTy :: Spine HTm -> Spine HTm -> HTm
+    returnTy :: Spine HTm -> Spine HTm -> HTm,
+    varPat :: Pat
   }
 
 data DataGlobalInfo = DataGlobalInfo

@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Matching
   ( Matching (..),
@@ -59,7 +59,7 @@ import Globals
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, hWeakenSp)
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
     HCtx,
@@ -68,7 +68,6 @@ import Syntax
     HTy,
     Pat (..),
     SPat (..),
-    HTm (..),
     VNorm (..),
     VTm (..),
     VTy,
@@ -96,7 +95,6 @@ data MatchingError = MatchingError
 class (Eval m) => Matching m where
   throwUnifyError :: MatchingError -> m a
   target :: m VTm
-
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
 -- was successful or not.
@@ -580,8 +578,6 @@ data MatchingState = MatchingState
     cls :: [Clause (Constraints, Spine Pat) HTm]
   }
 
-
-
 caseTree :: (Matching m) => MatchingState -> m HTm
 caseTree c = do
   let tactics = [addVar c, splitConstraint c]
@@ -590,26 +586,31 @@ caseTree c = do
     Just r -> return r
     Nothing -> error "no case tree tactic matched"
 
+ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
+ifForcePi = undefined
+
 addVar :: (Matching m) => MatchingState -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
-  (ps, cls') <- nextPat cls
+  (ps, _) <- nextPat cls
   case ps of
     Nothing -> return Nothing
-    Just ps' -> do
-      ty' <- embedHere ty >>= evalHere >>= unfoldHere
-      case ty' of
-        VNorm (VPi m q x a b) -> do
-            let l' = Lvl (length ctx)
-            b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
-            ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
-            let cls'' = zipWith (\pt -> addConstraint $ Constraint l (HVar l') pt (Param m q x ha)) ps' cls'
-            rest <- caseTree (MatchingState (ctx :|> Param m q x ha) b' cls'')
-            return . Just $ HLam m q x rest
-        _ -> return Nothing
+    Just _ -> do
+      ifForcePi ty (return Nothing) $ \(Param m q x a) b -> do
+        -- We have the goal
+        -- Γ ⊢ cs Q ~> e : (x : A) -> B
+        --
+        -- We add (x : A) to the context and then recurse:
+        --    Γ (x : A) ⊢ cs Q ~> e' : B
+        -- Finally we can construct the goal as
+        --    Γ ⊢ cs Q ~> λ t. e' (id,t) : (x : A) -> B
+        let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
+        rest <- caseTree (MatchingState (ctx :|> Param m q x a) (b (HVar (Lvl $ length ctx))) cls)
+        return . Just $ HLam m q x (\t -> sub (s t) rest)
 
 splitConstraint :: (Matching m) => MatchingState -> m (Maybe HTm)
 splitConstraint (MatchingState ctx ty cls) = do
-  -- In context Γ (ctx), and return type T (ty) we have a list of clauses.
+  -- In context Γ (ctx), and return type T (ty) we have a list of clauses Q and constraints cs.
+  -- Γ ⊢ cs Q ~> e : T
   case cls of
     Clause (Constraints (co : _), _) _ : clss -> case co of
       -- 1. We have the constraint Γ ⊢ x = t : T in the first clause.
@@ -683,7 +684,7 @@ splitConstraint (MatchingState ctx ty cls) = do
           --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
           -- The equalities are explicitly given by the motive we will set up later.
           let eq = eqTel psix psix'
-          let e'' :: HTm = hLams eq (hWeakenSp (length psix) e')
+          let e'' = hLams eq (hoistBinders (length psix) e')
 
           -- The method is for constructor ci π
           return (Clause (hApp (HCtor (c, delta)) pi) (Just e''))
@@ -701,11 +702,9 @@ splitConstraint (MatchingState ctx ty cls) = do
         -- We also need the reflexivity proofs to apply to the motive.
         --    refl [ψj] : Equal [Ψj] ψj ψj
         -- Where ψj = ψ1, ..., ψn, x
-        psixRefl <- mapSpineM embedHere $ reflSp psixTe' psix
+        let psixRefl = reflSp psixTe' psix
 
-        caseBase <- here $ \lv ->
-          embedCase lv $
-            Case
+        let caseBase = Case
               { dat = d,
                 datParams = delta,
                 subject = HVar x,
@@ -715,7 +714,7 @@ splitConstraint (MatchingState ctx ty cls) = do
                 elimTy = hLams indTel (const ty),
                 clauses = []
               }
-        return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
+        return . Just $ hApp (HCase (caseBase {clauses = elims})) psixRefl
       _ -> return Nothing
     _ -> return Nothing
 

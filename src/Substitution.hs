@@ -21,7 +21,8 @@ module Substitution
     nonEmptyDomL,
     terminalSub,
     extendSubSp,
-    hWeakenSp,
+    hoistBindersSp,
+    hoistBinders,
   )
 where
 
@@ -45,8 +46,12 @@ data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine 
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
 
-hWeakenSp :: Int -> HTm -> (Spine HTm -> HTm)
-hWeakenSp sh t sp = undefined
+hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
+hoistBindersSp sh t sp = undefined
+
+hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
+hoistBinders sh t sp = undefined
+
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
