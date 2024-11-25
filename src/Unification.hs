@@ -2,19 +2,15 @@
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module Unification
   ( UnifyError (..),
     SolveError (..),
     unify,
     CanUnify (..),
-    UnifyPL (..),
     MetaProblem (..),
     Unify (..),
     canUnifyHere,
-    unifyPL,
-    unifyPLSpines,
   )
 where
 
@@ -23,29 +19,21 @@ import Common
   ( Arg (..),
     Clause (..),
     Has (..),
-    HasNameSupply (uniqueName),
     Lit (..),
     Lvl (..),
     MetaVar,
-    Name (..),
-    Param (..),
     PiMode (..),
     Qty (..),
     Spine,
-    Tel,
     composeZ,
     lvlToIdx,
     mapSpineM,
     nextLvl,
-    spineShapes,
-    telShapes,
     pattern Impossible,
     pattern Possible,
   )
-import Constructions (ctorConstructions)
 import Context
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
-import Control.Monad.Extra (firstJustM)
 import Control.Monad.Trans (MonadTrans (lift))
 import Data.Foldable (Foldable (..), toList)
 import Data.IntMap (IntMap)
@@ -61,15 +49,11 @@ import Evaluation
     quotePat,
     vApp,
   )
-import Globals (CtorConstructions (..), getCtorGlobal)
 import Meta (solveMetaVar)
 import Printing (Pretty (..))
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
     Closure (..),
-    HCtx,
-    HTm (..),
     SPat (..),
     STm (..),
     VLazy,
@@ -79,8 +63,6 @@ import Syntax
     VNorm (..),
     VPatB (..),
     VTm (..),
-    hApp,
-    hGatherApps,
     headAsValue,
     uniqueSLams,
     pattern VVar,
@@ -446,368 +428,3 @@ rename m pren tm = case tm of
   VNorm n -> renameNorm m pren n
   VLazy n -> renameLazy m pren n
   VNeu n -> renameNeu m pren n
-
--- Proof relevant unification
---
-
-data UnifyPLError = UnifyPLError
-
-class (Eval m, Has m Ctx) => UnifyPL m where
-  throwUnifyError :: UnifyPLError -> m a
-
-  target :: m VTm
-
--- The unify outcome is a "decorated" bit that tells us whether the unification
--- was successful or not.
-data UnifyOutcome = Can | Cannot [UnifyPLError]
-
--- A unification between terms a, b : Tm Γ A is a telescope Γ' and an
--- invertible (with coherence proofs definitionally equal to refl)
--- substitution σ : Sub Γ' (Γ, (a = b)).
---
--- Unification will not always succeed.
---
--- We also "remember" if Γ' is the bottom context (x : Empty) or not.
-type Unification = (HCtx, UnifyOutcome, BiSub)
-
-instance Lattice UnifyOutcome where
-  Can \/ _ = Can
-  _ \/ Can = Can
-  Cannot xs \/ Cannot ys = Cannot (xs ++ ys)
-
-  Can /\ Can = Can
-  Cannot xs /\ Cannot ys = Cannot (xs ++ ys)
-  _ /\ _ = Cannot []
-
---- Simple equality
---
--- internally:
--- Equal : [A : Type] -> A -> A -> Type
-equality :: HTm -> HTm -> HTm
-equality = undefined
-
--- Internal reflexivity
--- refl : [A : Type] -> A -> A
-refl :: HTm -> HTm
-refl = undefined
-
--- Fibered equality (shorthand = with types left as an exercise)
---
--- internally:
--- HEqual : [A : Type] (s t : A) (e : Equal s t) (P : A -> Type) -> P s -> P t -> Type
--- HEqual [A] s t e P u v = Equal [P t] (subst P e u) v
-hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
-hequality = undefined
-
--- Fibered equality for spines
-hequalitySp :: Spine HTm -> Spine HTm -> Tel STm
-hequalitySp = undefined
-
--- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
-dcong :: (HTm -> HTm) -> HTm -> HTm
-dcong = undefined
-
--- dcongSp : (f : Tm Γ (Πs Δ Τ)) -> {xs ys : Tms Γ Δ} -> Tms Γ (xs ..= ys) -> Tm Γ (f xs = f ys)
-dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
-dcongSp = undefined
-
--- noConf : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-noConf :: HTm -> HTm -> Spine HTm
-noConf = undefined
-
--- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
---            -> Tm Γ (c1 xs = c2 ys)
---            -> Tm Γ Empty
-conf :: HTm -> HTm -> HTm -> HTm
-conf = undefined
-
--- @@Todo: properly encode the < relation
--- cyc : (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
-cyc :: HTm -> HTm -> HTm -> HTm
-cyc = undefined
-
--- Never
---
--- This is the internal Empty type's eliminator.
---
--- Important: 'internal Empty' means void in the metatheory, because the Unit
--- type behaves like the empty context instead.
---
--- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
-never :: HTm -> HTm
-never = undefined
-
-voidSh :: Shapes
-voidSh = Param Explicit Many (Name "_") () :<| Empty
-
-voidCtx :: HCtx
-voidCtx = undefined
-
-initialSub :: Shapes -> Shapes -> Sub
-initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never x)) sh)
-
-ofSh :: Shapes -> [a] -> Spine a
-ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
-
--- Definitional equality checker. This should somehow hook into the other
--- unification thing. (And the latter should be renamed to convert?)
-canConvert :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Bool
-canConvert = undefined
-
--- Unification:
-
-unifyPLSpines :: (UnifyPL m) => HCtx -> Spine HTm -> Spine HTm -> m Unification
-unifyPLSpines ctx Empty Empty = do
-  -- Empty spines lead to identity substitutions
-  --
-  -- Γ () ≃ Γ
-  -- So solve with Γ' = Γ and σ = id
-  return
-    ( ctx,
-      Can,
-      BiSub
-        { forward = idSub (telShapes ctx),
-          backward = idSub (telShapes ctx)
-        }
-    )
-unifyPLSpines ctx (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
-  -- Solving unify Γ (x, ..xs) (y, ..ys)
-
-  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ x y
-  (ctx', o, s) <- unifyPL ctx x y
-
-  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' (xs σ) (ys σ)
-  (ctx'', o', s') <- unifyPLSpines ctx' (sub s.forward xs) (sub s.forward ys)
-
-  -- return (Γ'', (
-  --     1 = lift (xs ..= ys) σ ∘ σ',
-  --    -1 = σ'⁻¹ ∘ lift (xs σ⁻¹ ..= ys σ⁻¹) σ⁻¹
-  -- ))
-  return
-    ( ctx'',
-      o /\ o',
-      BiSub
-        { forward = composeSub (liftSubN (spineShapes xs) s.forward) s'.forward,
-          backward = composeSub s.backward (liftSubN (spineShapes xs) s'.backward)
-        }
-    )
-unifyPLSpines _ _ _ = error "Mismatching spines should never occur in well-typed terms"
-
-unifyPL :: (UnifyPL m) => HCtx -> HTm -> HTm -> m Unification
-unifyPL ctx t1 t2 = do
-  let tactics = [solution, injectivity, conflict, cycle, deletion]
-  res <- firstJustM (\t -> t ctx t1 t2) tactics
-  case res of
-    Just x -> return x
-    Nothing -> throwUnifyError UnifyPLError
-
--- Proof-relevant unification tactics
-
-solution :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-solution ctx a b = case (a, b) of
-  (_, HVar x) -> solution ctx (HVar x) a
-  (HVar x, _) -> do
-    let l = Lvl (length ctx)
-
-    -- Ensure that b is well scoped at the place of x.
-    if occurs l (>= x) b
-      then return Nothing
-      else do
-        let sh = telShapes ctx
-
-        -- Make a new name and shape for the new context
-        p <- uniqueName
-        let csh = Param Explicit Many p ()
-
-        -- Substitute b for l in the (rest of) the context, while removing l from
-        -- the context
-
-        -- Γx (context)
-        let ctxx = S.take x.unLvl ctx
-
-        -- (x : A)
-        let xSh = S.index sh x.unLvl
-
-        -- xΓ (telescope)
-        let xctxx = S.drop (nextLvl x).unLvl ctx
-
-        -- xΓ [x ↦ b]
-        --
-        -- We want Sub Γx Γx(x : A) which can be constructed as:
-        -- [x ↦ a] = (id, b)
-        let vs = extendSub (idSub sh) xSh (const b) -- @@Check: will const b work with the HOAS?
-        let xctxx' = sub vs xctxx
-
-        -- (Γx, xΓ (id, a)) (context)
-        let ctx' = ctxx <> xctxx'
-
-        -- Returning shape
-        let rsh = telShapes ctx'
-
-        -- We need to construct an invertible substitution:
-        --
-        -- (Γx, x : A, xΓ) ≃ Γ
-        -- a : Tm Γx A
-        -- ----------
-        -- σ : Sub Γ(x = b) (Γx, xΓ (id, b))
-        -- where
-        --    σ = (\(γx, b', xγ) p => (γx, substSp b'  xγ (id, x)))
-        --    σ⁻¹ = (\γ γ' => (γ, b, γ', refl b))
-        let s =
-              BiSub
-                { forward = mapSub1 (sh :|> csh) rsh (\sp _ -> S.take x.unLvl sp <> sub vs (S.drop (nextLvl x).unLvl sp)),
-                  backward =
-                    mapSubN
-                      rsh
-                      (sh :|> csh)
-                      (telShapes ctxx)
-                      ( \sp sp' ->
-                          sp
-                            <> ofSh (S.singleton xSh) [b]
-                            <> sp'
-                            <> ofSh (S.singleton csh) [refl b]
-                      )
-                }
-        return $ Just (ctx', Can, s)
-  _ -> return Nothing
-
-injectivity :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
-  ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 == c2 -> do
-    -- Assume : length xs = length ys = n
-    -- Assume:  Data params are equal
-    -- Reason : Terms are well-typed *and* fully eta-expanded
-    let sh = telShapes ctx
-    let c = c1
-    cc <- access (getCtorGlobal c) >>= ctorConstructions
-    let n = cc.argsArity
-
-    -- (Γ', σ : Sub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
-    (ctx', o, s) <- unifyPLSpines ctx xs ys
-
-    -- Make a new name and shape for the new context
-    x <- uniqueName
-    let csh = Param Explicit Many x ()
-
-    -- Now we need to construct an invertible substitution:
-    --
-    -- σ : Sub Γ(xs ..= ys) Γ(c xs = c ys)
-    -- where
-    --    σ' = (πₙ id, dcongSp c (lastN n))
-    --    σ'⁻¹ = (π₁ id, noConf c here)
-    let s' =
-          BiSub
-            { forward =
-                mapSubN
-                  (sh <> n)
-                  (sh :|> csh)
-                  sh
-                  (\sp ps -> sp :|> Arg Explicit Many (dcongSp (hApp (HCtor (c, pp))) ps)),
-              backward =
-                mapSub1
-                  (sh :|> csh)
-                  (sh <> n)
-                  (\sp p -> sp <> noConf (HCtor (c, pp)) p)
-            }
-
-    -- return (Γ', (
-    --     1 = σ' ∘ σ,
-    --     -1 = σ⁻¹ ∘ σ'⁻¹
-    -- ))
-    return . Just $
-      ( ctx',
-        o,
-        BiSub
-          { forward = composeSub s'.forward s.forward,
-            backward = composeSub s.backward s'.backward
-          }
-      )
-  _ -> return Nothing
-
-conflict :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-conflict ctx a b = case (hGatherApps a, hGatherApps b) of
-  ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
-    let sh = telShapes ctx
-    -- Here we have (c1 : Ctor D Δ Π₁ ξ₁, c2 : Ctor D Δ Π₂ ξ₂)
-    -- And we are trying to unify (c1 xs = c2 ys).
-    --
-    -- This is a conflict, so we need to return a disunifier.
-
-    -- Make a new name and shape for the new context
-    x <- uniqueName
-    let csh = Param Explicit Many x ()
-
-    -- We return an invertible substitution:
-    --
-    -- σ : Sub ⊥ Γ(c1 xs = c2 ys)
-    -- where
-    --     σ = init Γ(c1 xs = c2 ys),     -- init X is the initial morphism from the void context to X
-    --     σ⁻¹ = (ɛ Γ, conf c1 c2 here)    -- ɛ X is the terminal morphism from X to the empty context
-    return . Just $
-      ( voidCtx,
-        Cannot [],
-        BiSub
-          { forward = initialSub voidSh (sh :|> csh),
-            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
-          }
-      )
-  _ -> return Nothing
-
-cycle :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-cycle ctx a b = case (a, b) of
-  (_, HVar x) -> cycle ctx (HVar x) a
-  (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
-    -- Check if x occurs in xs, if so, then we have a cycle.
-    let l = Lvl (length ctx)
-    if occurs l (== x) xs
-      then do
-        let sh = telShapes ctx
-        -- Make a new name and shape for the new context
-        y <- uniqueName
-        let csh = Param Explicit Many y ()
-
-        -- We return an invertible substitution:
-        --
-        -- σ : Sub ⊥ Γ(x = c xs)
-        -- where
-        --     σ = init Γ(x = c xs),
-        --     σ⁻¹ = (ɛ Γ, cyc c x)
-        return . Just $
-          ( ctx,
-            Cannot [],
-            BiSub
-              { forward = initialSub voidSh (sh :|> csh),
-                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [cyc (hApp (HCtor (c, pp)) xs) (HVar x) p])
-              }
-          )
-      else
-        return Nothing
-  _ -> return Nothing
-
-deletion :: (UnifyPL m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-deletion ctx a b = do
-  let sh = telShapes ctx
-  -- If we can unify a and b we can delete the equation since it will evaluate to refl.
-  c <- canConvert ctx a b
-
-  -- Make a new name and shape for the new context
-  x <- uniqueName
-  let csh = Param Explicit Many x ()
-
-  -- More precisely, we return an invertible substitution:
-  --
-  -- σ : Sub Γ Γ(a = a)
-  -- where
-  --     σ = (id, refl a)
-  --     σ⁻¹ = π₁ id
-  --
-  -- ##Important: rinv/linv proofs of this isomorphism require propositional K!
-  if c
-    then
-      return . Just $
-        ( ctx,
-          Can,
-          BiSub {forward = extendSub (idSub sh) csh (\_ -> refl a), backward = proj (idSub (sh :|> csh))}
-        )
-    else
-      return Nothing

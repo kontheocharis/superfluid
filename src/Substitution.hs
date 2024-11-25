@@ -125,7 +125,7 @@ bindsToShapes :: [(Qty, Name)] -> Shapes
 bindsToShapes = fromList . map (\(q, n) -> Param Explicit q n ())
 
 class Subst a where
-  -- [_]_ : (σ : Sub Γ Δ) -> P Γ (A σ) -> P Δ A
+  -- [_]_ : (σ : Sub Γ Δ) -> P Δ (A σ) -> P Γ A
   sub :: Sub -> a -> a
 
   -- Occurs check

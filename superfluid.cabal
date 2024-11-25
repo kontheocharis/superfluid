@@ -35,6 +35,7 @@ library
       Evaluation
       Globals
       Literals
+      Matching
       Meta
       Parsing
       Persistence

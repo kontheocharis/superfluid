@@ -61,6 +61,7 @@ module Common
     nameSpineToTel,
     telShapes,
     spineShapes,
+    Clauses,
   )
 where
 
@@ -109,6 +110,8 @@ data WithNames a = WithNames {names :: [Name], value :: a}
 data Clause p t
   = Clause {pat :: p, branch :: Maybe t}
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+type Clauses pat tm = [Clause (Spine pat) tm]
 
 pattern Possible :: p -> t -> Clause p t
 pattern Possible p t = Clause p (Just t)

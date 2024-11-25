@@ -84,7 +84,7 @@ import Common
     telToBinds,
     telWithNames,
     pattern Impossible,
-    pattern Possible,
+    pattern Possible, Clauses, mapSpine,
   )
 import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
@@ -175,11 +175,12 @@ import Syntax
     unembedTel,
     uniqueSLams,
     vGetSpine,
-    pattern VV,
+    pattern VV, Pat, sTmToPat,
   )
 import Unelaboration (Unelab)
 import Unification
 import Prelude hiding (pi)
+import Matching (caseTree, MatchingState (MatchingState), clausesWithEmptyConstraints, Matching)
 
 data TcError
   = Mismatch [UnifyError]
@@ -838,263 +839,8 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
-
-type Clauses pat tm = [Clause (Spine pat) tm]
-
-type ConstrainedClause pats tm = Clause (Constraints, pats) tm
-
-type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
-
-nextPat :: (Tc m) => ConstrainedClauses pat tm -> m (NextPat pat tm)
-nextPat = undefined
-
-type Matches m = Map CtorGlobal [(Sub, [m (HTm, HTy)])]
-
-equateSpines :: (Tc m) => Spine HTm -> Spine HTm -> m Sub
-equateSpines = undefined
-
-equateTerms :: (Tc m) => HTm -> HTm -> m Sub
-equateTerms = undefined
-
-getHoasEnv :: (Tc m) => m (Env HTm)
-getHoasEnv = do
-  es <- access ctxEntries
-  return $ map (\e -> HVar e.lvl) es
-
-unembedHere :: (Tc m) => STm -> m HTm
-unembedHere t = do
-  h <- getHoasEnv
-  return $ unembed h t
-
-embedHere :: (Tc m) => HTm -> m STm
-embedHere t = do
-  l <- getLvl
-  return $ embed l t
-
-enterSub :: (Tc m) => Sub -> m a -> m a
-enterSub = undefined
-
-class ApplySub m where
-  applySub :: Sub -> m -> m
-
-instance ApplySub VTm where
-  applySub = undefined
-
-instance (ApplySub a) => ApplySub (Spine a) where
-  applySub = undefined
-
-instance (ApplySub a, ApplySub b) => ApplySub (Clause a b) where
-  applySub = undefined
-
-binder :: (Has m Ctx) => PiMode -> Qty -> Name -> VTy -> (Lvl -> m a) -> m a
-binder m q x a f = do
-  l <- getLvl
-  enterCtx (bind m x q a) $ f l
-
-data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
-
-forceData :: (Tc m) => VTm -> m (DataGlobal, Spine HTm, Spine HTm)
-forceData d = undefined
-
--- unifyPrfRelSp : (a : Tms Γ T) -> (b : Tms Γ T) -> (Γ' : Ctx) * (Γ' ~= Γ (a = b)) * m [enter Γ'] ()
-unifyPrfRelSp :: (Tc m) => Spine HTm -> Spine HTm -> m ()
-unifyPrfRelSp = undefined
-
-unifyPrfRel :: (Tc m) => HTm -> HTm -> m ()
-unifyPrfRel = undefined
-
-canUnifyPrfRel :: (Tc m) => HTm -> HTm -> m CanUnify
-canUnifyPrfRel = undefined
-
-enterHTel :: (Tc m) => HTel -> (Spine HTm -> m a) -> m a
-enterHTel = undefined
-
-getDataGlobal' :: DataGlobal -> Sig -> (DataGlobalInfo, DataConstructions)
-getDataGlobal' = undefined
-
-getCtorGlobal' :: CtorGlobal -> Sig -> (CtorGlobalInfo, CtorConstructions)
-getCtorGlobal' = undefined
-
-eqTel :: Spine HTm -> Spine HTm -> HTel
-eqTel = undefined
-
-reflSp :: HTel -> Spine HTm -> Spine HTm
-reflSp = undefined
-
-patAsTm :: Pat -> HTm
-patAsTm = undefined
-
-tmAsPat :: HTm -> Pat
-tmAsPat = undefined
-
-runUnifyPL :: (forall n. (UnifyPL n) => n a) -> (forall m. (Tc m) => m a)
-runUnifyPL _ = undefined
-
-joinConstraints :: Constraints -> Constraints -> Constraints
-joinConstraints = undefined
-
-simpleConstraints :: Spine HTm -> Spine Pat -> m Constraints
-simpleConstraints = undefined
-
-simpleConstraint :: HTm -> Pat -> m Constraint
-simpleConstraint = undefined
-
-data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTy}
-
-data Constraints = Constraints {list :: [Constraint]}
-
-emptyConstraints :: Constraints
-emptyConstraints = Constraints []
-
-addConstraint :: Constraint -> ConstrainedClause (Spine Pat) STm -> ConstrainedClause (Spine Pat) STm
-addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
-
-nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
-nextConstraint (Constraints []) = Nothing
-
-data CaseElab = CaseElab
-  { ctx :: HCtx,
-    ty :: HTy,
-    cls :: [Clause (Constraints, Spine Pat) STm]
-  }
-
-caseTree :: (Tc m) => CaseElab -> m STm
-caseTree c = do
-  let tactics = [addVar c, splitConstraint c]
-  result <- asum <$> sequence tactics
-  case result of
-    Just r -> return r
-    Nothing -> error "no case tree tactic matched"
-
-addVar :: (Tc m) => CaseElab -> m (Maybe STm)
-addVar (CaseElab ctx ty cls) = do
-  (ps, cls') <- nextPat cls
-  case ps of
-    Nothing -> return Nothing
-    Just ps' -> do
-      ty' <- embedHere ty >>= evalHere >>= unfoldHere
-      case ty' of
-        VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
-          l <- getLvl
-          b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
-          ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
-          let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
-          rest <- caseTree (CaseElab (ctx :|> Param m q x ha) b' cls'')
-          return . Just $ SLam m q x rest
-        _ -> return Nothing
-
-splitConstraint :: (Tc m) => CaseElab -> m (Maybe STm)
-splitConstraint (CaseElab ctx ty cls) = do
-  -- Current context is:  Γχ (x : A)
-  -- Rest of the goal is: Π xΓ T
-  case cls of
-    Clause (Constraints (co : _), _) _ : clss -> case co of
-      Constraint _ (VV x) (LvlP _ _ x') _ -> do
-        -- We have that x = x'
-        -- This will use the solution rule for the constraint x = x'
-        (ctx', _, s) <- runUnifyPL $ unifyPL ctx (HVar x) (HVar x')
-        Just <$> caseTree (CaseElab ctx' (sub s.forward ty) clss)
-      Constraint _ (VV x) (CtorP _ _) param -> do
-        -- We have that A = D δ ψ and x = ci πg
-
-        -- Get the current subject type, i.e. D δ ψ
-        (d, delta, psi) <- forceData param.ty
-        (di, dc) <- access (getDataGlobal' d)
-
-        -- Create the spine (ψ, x)
-        let psix = psi :|> Arg param.mode param.qty (HVar x)
-
-        -- For each constructor ci (π : Πi [δ]) : D δ (ξi [δ,π]):
-        elims <- forM di.ctors $ \c -> do
-          (_, cc) <- access (getCtorGlobal' c)
-
-          -- Enter the context of the constructor.
-          enterHTel (cc.args delta) $ \pi -> do
-          -- @@Todo: turn to explicit context
-            -- For each clause with pattern pj
-            children <- fmap catMaybes . forM cls $ \cl' -> do
-              case cl' of
-                Clause (Constraints [], _) _ -> return Nothing
-                Clause (Constraints (Constraint _ _ (LvlP _ _ p) _ : cs'), ps) t -> do
-                  let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
-                  newConstraint <- simpleConstraint (HVar p) cpat
-                  return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
-                Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
-                Clause (Constraints (Constraint _ _ (CtorP _ sp) _ : cs'), ps) t -> do
-                  -- Current context is: Γχ (x : D δ ψ) xΓ (π : Πi)
-                  -- equate pi to pj, gives back simple constraints.
-                  -- give those constraints to make the child case clause j.
-                  -- add this to matched clauses for i.
-                  --
-                  -- this constitutes a match for the constructor ci.
-                  -- now to build the method for ci, call casetree recursively
-                  -- with the configuration amended by the new constraints
-                  newConstraints <- simpleConstraints pi sp
-                  return . Just $ Clause (joinConstraints newConstraints (Constraints cs'), ps) t
-            -- Create the spine (ξi[δ,π], ci π)
-            let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
-
-            -- Unify (ψ, x) with (ξi[δ,π], ci π), which will give back a new context Γ'
-            -- that is isomorphic to
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
-            -- through the substitution σ.
-            (ctx', _, s) <- runUnifyPL $ unifyPLSpines ctx psix psix'
-            -- @@Todo: do we care about status?
-
-            -- Build the rest of the clause, which will first give:
-            --    Γ' |- e' : T σ
-            -- This is refined by specialisation by unification to:
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : T
-            -- @@Todo: We need to apply sub to children too, and perhaps move xΓ to the context?
-            e <- caseTree (CaseElab ctx' (sub s.backward ty) children)
-
-            -- @@Todo: We need to substitute over propositional K somewhere around here..
-            --
-            -- Now we build e'' which is:
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) T
-            -- The equalities are explicitly given by the motive we will set up later.
-            eq <- here (`embedTel` eqTel psix psix')
-            let e'' = sLams eq e
-
-            -- The method is for constructor ci π
-            pt <- here (`embed` hApp (HCtor (c, delta)) pi)
-            let spt = SPat pt (telToBinds cc.argsArity)
-            return (Clause spt (Just e''))
-
-        -- Now we build the motive for the case.
-        -- First, we have the required data indices and subject:
-        --    (ψ' : Ψ[δ]) (x' : D δ ψ')
-        let psixTe' = extendTel (dc.indices delta) (\psi' -> param {ty = hApp (HData d) (delta <> psi')})
-        -- We also add the equalities between the subject and the data indices
-        -- in the motive and the ones in the context.
-        --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
-        let eq = eqTel psix
-        let indTel = joinTels psixTe' eq
-
-        -- We also need the reflexivity proofs to apply to the motive.
-        --    refl [ψj] : Equal [Ψj] ψj ψj
-        -- Where ψj = ψ1, ..., ψn, x
-        psixRefl <- mapSpineM embedHere $ reflSp psixTe' psix
-
-        caseBase <- here $ \lv ->
-          embedCase lv $
-            Case
-              { dat = d,
-                datParams = delta,
-                subject = HVar x,
-                subjectIndices = psi,
-                -- The final motive is:
-                --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
-                elimTy = hLams indTel (const ty),
-                clauses = []
-              }
-        return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
-      _ -> return Nothing
-    _ -> return Nothing
-
-toPat :: (Tc m) => STm -> m Pat
-toPat = undefined
+runMatching :: (forall n. (Matching n) => n a) -> (forall m. (Tc m) => m a)
+runMatching _ = undefined
 
 clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine Pat) STm)
 clause (_, ty) (Possible Empty t) = do
@@ -1105,14 +851,11 @@ clause (tm, ty) (Possible ps t) = do
   (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
   (t', _) <- t (Check retTy)
   let (_, sp) = sGatherApps ret
-  spp <- mapSpineM toPat sp
+  let spp = mapSpine sTmToPat sp
   return $ Possible spp t'
 clause _ (Impossible _) = do
   return undefined -- @@Todo
   -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
-
-clausesWithEmptyConstraints :: Clauses a b -> ConstrainedClauses a b
-clausesWithEmptyConstraints = map (bimap (emptyConstraints,) id)
 
 clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses d cls ty = enterCtx id $ do
@@ -1122,7 +865,7 @@ clauses d cls ty = enterCtx id $ do
   -- - Invariant: in empty ctx
   cls' <- mapM (clause (SDef d, ty)) cls
   hty <- quoteHere ty >>= unembedHere
-  ct <- caseTree (CaseElab Empty hty (clausesWithEmptyConstraints cls'))
+  ct <- runMatching $ caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls'))
   return (ct, ty)
 
 defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()

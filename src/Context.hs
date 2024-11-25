@@ -44,6 +44,8 @@ module Context
     getNames,
     modifyNames,
     bounds,
+    embedHere,
+    unembedHere,
   )
 where
 
@@ -82,7 +84,7 @@ import Syntax
     VPatB,
     VTm (..),
     VTy,
-    pattern VVar,
+    pattern VVar, HTm (..), unembed, embed,
   )
 
 data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
@@ -355,6 +357,21 @@ reprHere :: (Eval m, Has m Ctx) => Int -> VTm -> m VTm
 reprHere m t = do
   l <- accessCtx (\c -> c.lvl)
   vRepr l m t
+
+getHoasEnv :: (Has m Ctx) => m (Env HTm)
+getHoasEnv = do
+  es <- access ctxEntries
+  return $ map (\e -> HVar e.lvl) es
+
+unembedHere :: (Has m Ctx) => STm -> m HTm
+unembedHere t = do
+  h <- getHoasEnv
+  return $ unembed h t
+
+embedHere :: (Has m Ctx) => HTm -> m STm
+embedHere t = do
+  l <- getLvl
+  return $ embed l t
 
 instance Has m Ctx => Has m [Name] where
   view = do

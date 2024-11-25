@@ -10,6 +10,7 @@ module Syntax
     sAppSpine,
     sLams,
     sPis,
+    Pat (..),
     Case (..),
     VCtor,
     HCtx (..),
@@ -66,6 +67,7 @@ module Syntax
     extendTel,
     joinTels,
     removing,
+    sTmToPat,
   )
 where
 
@@ -95,12 +97,12 @@ import Common
     nextLvl,
     unLvl,
   )
+import Control.Monad (void)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
-import Control.Monad (void)
 import qualified Data.Sequence as S
 
 type VPat = VTm
@@ -373,8 +375,6 @@ hLams :: HTel -> (Spine HTm -> HTm) -> HTm
 hLams HEmpty b = b Empty
 hLams (HWithParam m q n _ f) b = HLam m q n (\x -> hLams (f x) (\xs -> b (Arg m q x :<| xs)))
 
-
-
 hGatherApps :: HTm -> (HTm, Spine HTm)
 hGatherApps (HApp m q t u) = let (t', sp) = hGatherApps t in (t', sp :|> Arg m q u)
 hGatherApps t = (t, Empty)
@@ -400,9 +400,9 @@ hOwnSpine l (Param m q _ () :<| xs) = Arg m q (HVar l) :<| hOwnSpine (nextLvl l)
 
 embedClosure :: Env VTm -> Tel () -> (Spine HTm -> HTm) -> Closure
 embedClosure env n f =
-  let ownSpine = hOwnSpine (Lvl (length env)) n in
-  let fHere = f ownSpine in
-  Closure (length n) env (embed (Lvl (length n + length env)) fHere)
+  let ownSpine = hOwnSpine (Lvl (length env)) n
+   in let fHere = f ownSpine
+       in Closure (length n) env (embed (Lvl (length n + length env)) fHere)
 
 embed :: Lvl -> HTm -> STm
 embed l = \case
@@ -452,3 +452,8 @@ unembed env = \case
   SLit li -> HLit (fmap (unembed env) li)
   SRepr t -> HRepr (unembed env t)
   SUnrepr t -> HUnrepr (unembed env t)
+
+sTmToPat :: STm -> Pat
+sTmToPat = undefined
+
+data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
