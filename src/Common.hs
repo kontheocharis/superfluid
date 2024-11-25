@@ -290,6 +290,7 @@ data Arg t = Arg {mode :: PiMode, qty :: Qty, arg :: t} deriving (Eq, Ord, Show,
 
 type Spine t = Seq (Arg t)
 
+
 mapSpine :: (t -> t') -> Spine t -> Spine t'
 mapSpine f = fmap (fmap f)
 

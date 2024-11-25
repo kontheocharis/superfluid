@@ -68,6 +68,7 @@ module Syntax
     joinTels,
     removing,
     sTmToPat,
+    extendCtxWithTel,
   )
 where
 
@@ -355,6 +356,9 @@ joinTels :: HTel -> (Spine HTm -> HTel) -> HTel
 joinTels HEmpty g = g Empty
 joinTels (HWithParam m q n a f) g = HWithParam m q n a (\x -> joinTels (f x) (\xs -> g (Arg m q x :<| xs)))
 
+extendCtxWithTel :: HCtx -> (Spine HTm -> HTel) -> (HCtx, Spine HTm)
+extendCtxWithTel = undefined -- a bit subtle @@Todo
+
 unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
 unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
@@ -456,4 +460,4 @@ unembed env = \case
 sTmToPat :: STm -> Pat
 sTmToPat = undefined
 
-data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine VTm) (Spine Pat)
+data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)

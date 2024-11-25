@@ -20,6 +20,8 @@ module Substitution
     replaceSub,
     nonEmptyDomL,
     terminalSub,
+    extendSubSp,
+    hWeakenSp,
   )
 where
 
@@ -42,6 +44,9 @@ type Shape = Param ()
 data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine HTm}
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
+
+hWeakenSp :: Int -> HTm -> (Spine HTm -> HTm)
+hWeakenSp sh t sp = undefined
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
@@ -70,9 +75,12 @@ mapSubN dom cod n f = Sub dom cod $ domGt (length n) f
 terminalSub :: Shapes -> Sub
 terminalSub dom = Sub dom Empty (const Empty)
 
--- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ, Α)
+-- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ , Α)
 extendSub :: Sub -> Shape -> (Spine HTm -> HTm) -> Sub
 extendSub s sh v = Sub s.domSh (s.codSh :|> sh) (\g -> let Param m q _ () = sh in s.mapping g :|> (v g <$ Arg m q ()))
+
+extendSubSp :: Sub -> Shape -> Shape -> (Spine HTm -> Spine HTm) -> Sub
+extendSubSp s sh sh' v = Sub s.domSh (s.codSh :|> sh') (\g -> s.mapping g <> v g)
 
 -- id : Sub Γ Γ
 idSub :: Shapes -> Sub

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Matching
   ( Matching (..),
@@ -58,7 +59,7 @@ import Globals
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj)
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj, hWeakenSp)
 import Syntax
   ( Case (..),
     HCtx,
@@ -67,13 +68,14 @@ import Syntax
     HTy,
     Pat (..),
     SPat (..),
-    STm (..),
+    HTm (..),
     VNorm (..),
     VTm (..),
     VTy,
     embed,
     embedCase,
     embedTel,
+    extendCtxWithTel,
     extendTel,
     hApp,
     hGatherApps,
@@ -91,17 +93,17 @@ import Prelude hiding (cycle, pi)
 
 data MatchingError = MatchingError
 
-class (Eval m, Has m Ctx) => Matching m where
+class (Eval m) => Matching m where
   throwUnifyError :: MatchingError -> m a
-
   target :: m VTm
+
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
 -- was successful or not.
 data UnifyOutcome = Can | Cannot [MatchingError]
 
 -- A unification between terms a, b : Tm Γ A is a telescope Γ' and an
--- invertible (with coherence proofs definitionally equal to refl)
+-- invertible (with coherence proofs computing to refl)
 -- substitution σ : Sub Γ' (Γ, (a = b)).
 --
 -- Unification will not always succeed.
@@ -150,7 +152,7 @@ refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Impli
 hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
 hequality = undefined
 
--- Higher equality for spines
+-- Equality for spines (Written δ =Δ= γ for a telescope Δ and spines δ γ : Tms Δ)
 --
 -- (() =()= ()) := ()
 -- ((x,xs) =(x : A)Δ= (y,ys)) := (e : x =A= y, xs =Δ[e]= ys)
@@ -214,8 +216,10 @@ canConvert = undefined
 
 -- Unification:
 
-unifyPLSpines :: (Matching m) => HCtx -> Spine HTm -> Spine HTm -> m Unification
-unifyPLSpines ctx Empty Empty = do
+unifyPLSpines :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m Unification
+unifyPLSpines ctx HEmpty Empty Empty = do
+  -- Solving unify Γ ⊢ () = () : ()
+  --
   -- Empty spines lead to identity substitutions
   --
   -- Γ () ≃ Γ
@@ -228,14 +232,14 @@ unifyPLSpines ctx Empty Empty = do
           backward = idSub (telShapes ctx)
         }
     )
-unifyPLSpines ctx (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
-  -- Solving unify Γ (x, ..xs) (y, ..ys)
+unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
+  -- Solving unify Γ ⊢ (x, ..xs) = (y, ..ys) : (_ : A)Δ
 
-  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ x y
-  (ctx', o, s) <- unifyPL ctx x y
+  -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ A x y
+  (ctx', o, s) <- unifyPL ctx ty x y
 
-  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' (xs σ) (ys σ)
-  (ctx'', o', s') <- unifyPLSpines ctx' (sub s.forward xs) (sub s.forward ys)
+  -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' ((Δ [x]) σ) (xs σ) (ys σ)
+  (ctx'', o', s') <- unifyPLSpines ctx' (sub s.forward (ts x)) (sub s.forward xs) (sub s.forward ys)
 
   -- return (Γ'', (
   --     1 = lift (xs ..= ys) σ ∘ σ',
@@ -249,21 +253,21 @@ unifyPLSpines ctx (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
           backward = composeSub s.backward (liftSubN (spineShapes xs) s'.backward)
         }
     )
-unifyPLSpines _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+unifyPLSpines _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
-unifyPL :: (Matching m) => HCtx -> HTm -> HTm -> m Unification
-unifyPL ctx t1 t2 = do
+unifyPL :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m Unification
+unifyPL ctx ty t1 t2 = do
   let tactics = [solution, injectivity, conflict, cycle, deletion]
-  res <- firstJustM (\t -> t ctx t1 t2) tactics
+  res <- firstJustM (\t -> t ctx ty t1 t2) tactics
   case res of
     Just x -> return x
     Nothing -> throwUnifyError MatchingError
 
 -- Proof-relevant unification tactics
 
-solution :: (Matching m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-solution ctx a b = case (a, b) of
-  (_, HVar x) -> solution ctx (HVar x) a
+solution :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
+solution ctx ty a b = case (a, b) of
+  (_, HVar x) -> solution ctx ty (HVar x) a
   (HVar x, _) -> do
     let l = Lvl (length ctx)
 
@@ -323,15 +327,17 @@ solution ctx a b = case (a, b) of
                           sp
                             <> ofSh (S.singleton xSh) [b]
                             <> sp'
-                            <> ofSh (S.singleton csh) [refl b]
+                            <> ofSh (S.singleton csh) [refl ty b]
                       )
                 }
         return $ Just (ctx', Can, s)
   _ -> return Nothing
 
-injectivity :: (Matching m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
-injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
+injectivity :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
+injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 == c2 -> do
+    -- Solving unify Γ ⊢ (ψ, c1 xs) = ( c2 ys) : D δ ψ
+
     -- Assume : length xs = length ys = n
     -- Assume:  Data params are equal
     -- Reason : Terms are well-typed *and* fully eta-expanded
@@ -340,8 +346,10 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
     cc <- access (getCtorGlobal c) >>= ctorConstructions
     let n = cc.argsArity
 
-    -- (Γ', σ : Sub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
+    -- (Γ', σ : BiSub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
     (ctx', o, s) <- unifyPLSpines ctx xs ys
+
+    let ctorIndices = cc.returnIndices pp (sub s.forward)
 
     -- Make a new name and shape for the new context
     x <- uniqueName
@@ -349,7 +357,7 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
 
     -- Now we need to construct an invertible substitution:
     --
-    -- σ : Sub Γ(xs ..= ys) Γ(c xs = c ys)
+    -- σ : BiSub Γ(xs ..= ys) Γ(c xs = c ys)
     -- where
     --    σ' = (πₙ id, dcongSp c (lastN n))
     --    σ'⁻¹ = (π₁ id, noConf c here)
@@ -382,7 +390,7 @@ injectivity ctx a b = case (hGatherApps a, hGatherApps b) of
       )
   _ -> return Nothing
 
-conflict :: (Matching m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+conflict :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 conflict ctx a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
     let sh = telShapes ctx
@@ -397,7 +405,7 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
 
     -- We return an invertible substitution:
     --
-    -- σ : Sub ⊥ Γ(c1 xs = c2 ys)
+    -- σ : BiSub ⊥ Γ(c1 xs = c2 ys)
     -- where
     --     σ = init Γ(c1 xs = c2 ys),     -- init X is the initial morphism from the void context to X
     --     σ⁻¹ = (ɛ Γ, conf c1 c2 here)    -- ɛ X is the terminal morphism from X to the empty context
@@ -411,7 +419,7 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
       )
   _ -> return Nothing
 
-cycle :: (Matching m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+cycle :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 cycle ctx a b = case (a, b) of
   (_, HVar x) -> cycle ctx (HVar x) a
   (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
@@ -426,7 +434,7 @@ cycle ctx a b = case (a, b) of
 
         -- We return an invertible substitution:
         --
-        -- σ : Sub ⊥ Γ(x = c xs)
+        -- σ : BiSub ⊥ Γ(x = c xs)
         -- where
         --     σ = init Γ(x = c xs),
         --     σ⁻¹ = (ɛ Γ, cyc c x)
@@ -442,7 +450,7 @@ cycle ctx a b = case (a, b) of
         return Nothing
   _ -> return Nothing
 
-deletion :: (Matching m) => HCtx -> HTm -> HTm -> m (Maybe Unification)
+deletion :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 deletion ctx a b = do
   let sh = telShapes ctx
   -- If we can unify a and b we can delete the equation since it will evaluate to refl.
@@ -454,7 +462,7 @@ deletion ctx a b = do
 
   -- More precisely, we return an invertible substitution:
   --
-  -- σ : Sub Γ Γ(a = a)
+  -- σ : BiSub Γ Γ(a = a)
   -- where
   --     σ = (id, refl a)
   --     σ⁻¹ = π₁ id
@@ -510,7 +518,7 @@ binder m q x a f = do
   l <- getLvl
   enterCtx (bind m x q a) $ f l
 
-forceData :: (Matching m) => VTm -> m (DataGlobal, Spine HTm, Spine HTm)
+forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
 forceData d = undefined
 
 -- unifyPrfRelSp : (a : Tms Γ T) -> (b : Tms Γ T) -> (Γ' : Ctx) * (Γ' ~= Γ (a = b)) * m [enter Γ'] ()
@@ -547,20 +555,20 @@ tmAsPat = undefined
 joinConstraints :: Constraints -> Constraints -> Constraints
 joinConstraints = undefined
 
-simpleConstraints :: Spine HTm -> Spine Pat -> m Constraints
-simpleConstraints = undefined
+constraints :: HCtx -> Spine HTm -> Spine Pat -> m Constraints
+constraints = undefined
 
 simpleConstraint :: HTm -> Pat -> m Constraint
 simpleConstraint = undefined
 
-data Constraint = Constraint {lvl :: Lvl, lhs :: VTm, rhs :: Pat, param :: Param VTy}
+data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
 
 data Constraints = Constraints {list :: [Constraint]}
 
 emptyConstraints :: Constraints
 emptyConstraints = Constraints []
 
-addConstraint :: Constraint -> ConstrainedClause (Spine Pat) STm -> ConstrainedClause (Spine Pat) STm
+addConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
 addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
 
 nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
@@ -569,10 +577,12 @@ nextConstraint (Constraints []) = Nothing
 data MatchingState = MatchingState
   { ctx :: HCtx,
     ty :: HTy,
-    cls :: [Clause (Constraints, Spine Pat) STm]
+    cls :: [Clause (Constraints, Spine Pat) HTm]
   }
 
-caseTree :: (Matching m) => MatchingState -> m STm
+
+
+caseTree :: (Matching m) => MatchingState -> m HTm
 caseTree c = do
   let tactics = [addVar c, splitConstraint c]
   result <- asum <$> sequence tactics
@@ -580,7 +590,7 @@ caseTree c = do
     Just r -> return r
     Nothing -> error "no case tree tactic matched"
 
-addVar :: (Matching m) => MatchingState -> m (Maybe STm)
+addVar :: (Matching m) => MatchingState -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
   (ps, cls') <- nextPat cls
   case ps of
@@ -588,97 +598,100 @@ addVar (MatchingState ctx ty cls) = do
     Just ps' -> do
       ty' <- embedHere ty >>= evalHere >>= unfoldHere
       case ty' of
-        VNorm (VPi m q x a b) -> binder m q x a $ \l' -> do
-          l <- getLvl
-          b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
-          ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
-          let cls'' = zipWith (\pt -> addConstraint $ Constraint l (VV l') pt (Param m q x a)) ps' cls'
-          rest <- caseTree (MatchingState (ctx :|> Param m q x ha) b' cls'')
-          return . Just $ SLam m q x rest
+        VNorm (VPi m q x a b) -> do
+            let l' = Lvl (length ctx)
+            b' <- b $$ [VV l'] >>= quoteHere >>= unembedHere
+            ha <- quoteHere a >>= unembedHere -- @@Todo: better way to do this?
+            let cls'' = zipWith (\pt -> addConstraint $ Constraint l (HVar l') pt (Param m q x ha)) ps' cls'
+            rest <- caseTree (MatchingState (ctx :|> Param m q x ha) b' cls'')
+            return . Just $ HLam m q x rest
         _ -> return Nothing
 
-splitConstraint :: (Matching m) => MatchingState -> m (Maybe STm)
+splitConstraint :: (Matching m) => MatchingState -> m (Maybe HTm)
 splitConstraint (MatchingState ctx ty cls) = do
-  -- Current context is:  Γχ (x : A)
-  -- Rest of the goal is: Π xΓ T
+  -- In context Γ (ctx), and return type T (ty) we have a list of clauses.
   case cls of
     Clause (Constraints (co : _), _) _ : clss -> case co of
-      Constraint _ (VV x) (LvlP _ _ x') _ -> do
-        -- We have that x = x'
+      -- 1. We have the constraint Γ ⊢ x = t : T in the first clause.
+      --
+      -- 1.1. This constraint is of the form Γ ⊢ x = x' : T, where x and x' are variables.
+      -- @@Check:  is it appropriate to just look at the first clause?
+      Constraint _ (HVar x) (LvlP _ _ x') param -> do
         -- This will use the solution rule for the constraint x = x'
-        (ctx', _, s) <- unifyPL ctx (HVar x) (HVar x')
+        (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
         Just <$> caseTree (MatchingState ctx' (sub s.forward ty) clss)
-      Constraint _ (VV x) (CtorP _ _) param -> do
-        -- We have that A = D δ ψ and x = ci πg
-
+      -- 1.2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ (x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))
+      Constraint _ (HVar x) (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
-        (d, delta, psi) <- forceData param.ty
+        (d, delta, psi) <- forceData p.ty
         (di, dc) <- access (getDataGlobal' d)
 
         -- Create the spine (ψ, x)
-        let psix = psi :|> Arg param.mode param.qty (HVar x)
+        let psix = psi :|> Arg p.mode p.qty (HVar x)
 
         -- For each constructor ci (π : Πi [δ]) : D δ (ξi [δ,π]):
         elims <- forM di.ctors $ \c -> do
+          -- Let Γ' = Γχ (x : D δ ψ) xΓ (π : Πi)
           (_, cc) <- access (getCtorGlobal' c)
+          let (ctx', pi) = extendCtxWithTel ctx (\_ -> cc.args delta)
 
-          -- Enter the context of the constructor.
-          enterHTel (cc.args delta) $ \pi -> do
-            -- @@Todo: turn to explicit context
-            -- For each clause with pattern pj
-            children <- fmap catMaybes . forM cls $ \cl' -> do
-              case cl' of
-                Clause (Constraints [], _) _ -> return Nothing
-                Clause (Constraints (Constraint _ _ (LvlP _ _ p) _ : cs'), ps) t -> do
-                  let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
-                  newConstraint <- simpleConstraint (HVar p) cpat
-                  return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
-                Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
-                Clause (Constraints (Constraint _ _ (CtorP _ sp) _ : cs'), ps) t -> do
-                  -- Current context is: Γχ (x : D δ ψ) xΓ (π : Πi)
-                  -- equate pi to pj, gives back simple constraints.
-                  -- give those constraints to make the child case clause j.
-                  -- add this to matched clauses for i.
-                  --
-                  -- this constitutes a match for the constructor ci.
-                  -- now to build the method for ci, call casetree recursively
-                  -- with the configuration amended by the new constraints
-                  newConstraints <- simpleConstraints pi sp
-                  return . Just $ Clause (joinConstraints newConstraints (Constraints cs'), ps) t
-            -- Create the spine (ξi[δ,π], ci π)
-            let psix' = cc.returnIndices delta pi :|> Arg param.mode param.qty (hApp (HCtor (c, delta)) pi)
+          -- For each clause with pattern πj, equate πj to π:
+          children <- fmap catMaybes . forM cls $ \cl' -> do
+            case cl' of
+              Clause (Constraints [], _) _ -> return Nothing -- @@Check: is this right?
+              Clause (Constraints (Constraint _ _ (LvlP _ _ y) _ : cs'), ps) t -> do
+                let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
+                newConstraint <- simpleConstraint (HVar y) cpat
+                return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
+              Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
+              Clause (Constraints (Constraint _ _ (CtorP _ pij) _ : cs'), ps) t -> do
+                -- We have Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ πj : D δ ξi[δ,πj] by weakening.
+                -- (which we get for free since we are using deBrujin levels.)
+                --
+                -- We now generate the constraints π = πj and add them to the clause.
+                newConstraints <- constraints ctx' pi pij
+                return . Just $ Clause (joinConstraints newConstraints (Constraints cs'), ps) t
 
-            -- Unify (ψ, x) with (ξi[δ,π], ci π), which will give back a new context Γ'
-            -- that is isomorphic to
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π))
-            -- through the substitution σ.
-            (ctx', _, s) <- unifyPLSpines ctx psix psix'
-            -- @@Todo: do we care about status?
+          -- Create the spine (ξi[δ,π], ci π)
+          let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
 
-            -- Build the rest of the clause, which will first give:
-            --    Γ' |- e' : T σ
-            -- This is refined by specialisation by unification to:
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e : T
-            -- @@Todo: We need to apply sub to children too, and perhaps move xΓ to the context?
-            e <- caseTree (MatchingState ctx' (sub s.backward ty) children)
+          -- Create the telescope (ρ : Δ)(x : D ρ)
+          let psiTel = extendTel dc.params (Param p.mode p.qty p.name . hApp (HData d))
 
-            -- @@Todo: We need to substitute over propositional K somewhere around here..
-            --
-            -- Now we build e'' which is:
-            --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' : Π ((ψ, x) = (ξi[δ,π], ci π)) T
-            -- The equalities are explicitly given by the motive we will set up later.
-            eq <- here (`embedTel` eqTel psix psix')
-            let e'' = sLams eq e
+          -- Unify:
+          -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(δ : Δ)(x : D δ)= (ξi[δ,π], ci π)
+          --
+          -- Gives back a bi-substitution σ to a new context Γ''
+          -- @@Todo: do we care about status?
+          (ctx'', _, s) <- unifyPLSpines ctx' psiTel psix psix'
 
-            -- The method is for constructor ci π
-            pt <- here (`embed` hApp (HCtor (c, delta)) pi)
-            let spt = SPat pt (telToBinds cc.argsArity)
-            return (Clause spt (Just e''))
+          -- Build the rest of the clause in Γ'', which will first give:
+          --    Γ'' |- e : T σ .
+          e <-
+            caseTree
+              ( MatchingState
+                  (sub s.forward ctx'')
+                  (sub s.forward ty)
+                  (mapClauses (sub s.forward) children)
+              )
+          -- Through the substitution we can recover
+          --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e' = e σ⁻¹ : T ,
+          -- bringing us back to the original context.
+          let e' = sub s.backward e
+
+          -- Now we build e'' which is:
+          --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
+          -- The equalities are explicitly given by the motive we will set up later.
+          let eq = eqTel psix psix'
+          let e'' :: HTm = hLams eq (hWeakenSp (length psix) e')
+
+          -- The method is for constructor ci π
+          return (Clause (hApp (HCtor (c, delta)) pi) (Just e''))
 
         -- Now we build the motive for the case.
         -- First, we have the required data indices and subject:
         --    (ψ' : Ψ[δ]) (x' : D δ ψ')
-        let psixTe' = extendTel (dc.indices delta) (\psi' -> param {ty = hApp (HData d) (delta <> psi')})
+        let psixTe' = extendTel (dc.indices delta) (\psi' -> p {ty = hApp (HData d) (delta <> psi')})
         -- We also add the equalities between the subject and the data indices
         -- in the motive and the ones in the context.
         --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
@@ -705,3 +718,6 @@ splitConstraint (MatchingState ctx ty cls) = do
         return . Just $ sAppSpine (SCase (caseBase {clauses = elims})) psixRefl
       _ -> return Nothing
     _ -> return Nothing
+
+mapClauses :: (HTm -> HTm) -> [Clause (Constraints, Spine Pat) HTm] -> [Clause (Constraints, Spine Pat) HTm]
+mapClauses = _
