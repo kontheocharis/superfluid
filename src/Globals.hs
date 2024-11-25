@@ -320,6 +320,8 @@ data KnownGlobal a where
   KnownBind :: KnownGlobal DefGlobal
   KnownRefl :: KnownGlobal CtorGlobal
   KnownEqual :: KnownGlobal DataGlobal
+  KnownEmpty :: KnownGlobal DataGlobal
+  KnownVoid :: KnownGlobal DefGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -335,6 +337,7 @@ knownData KnownString = DataGlobal (Name "String")
 knownData KnownUnit = DataGlobal (Name "Unit")
 knownData KnownBool = DataGlobal (Name "Bool")
 knownData KnownEqual = DataGlobal (Name "Equal")
+knownData KnownEmpty = DataGlobal (Name "Empty")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -359,3 +362,4 @@ knownDef :: KnownGlobal DefGlobal -> DefGlobal
 knownDef KnownSub = DefGlobal (Name "sub")
 knownDef KnownAdd = DefGlobal (Name "add")
 knownDef KnownBind = DefGlobal (Name "bind")
+knownDef KnownVoid = DefGlobal (Name "void")

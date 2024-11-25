@@ -81,28 +81,24 @@ import Common
     enterLoc,
     lvlToIdx,
     mapSpineM,
-    telToBinds,
     telWithNames,
     pattern Impossible,
     pattern Possible, Clauses, mapSpine,
   )
 import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
-import Control.Applicative (Alternative (empty), asum)
-import Control.Monad (forM, unless)
+import Control.Applicative (Alternative (empty))
+import Control.Monad (unless)
 import Control.Monad.Extra (fromMaybeM, when)
-import Data.Bifunctor (Bifunctor (..))
 import Data.Foldable (Foldable (..), toList)
 import Data.List (intercalate)
-import Data.Map (Map)
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..), (><))
 import qualified Data.Sequence as S
 import Data.Set (Set)
 import qualified Data.Set as SET
 import Evaluation
   ( Eval (..),
-    embedEval,
     ensureIsCtor,
     ifIsData,
     isCtorTy,
@@ -113,9 +109,7 @@ import Evaluation
     ($$>),
   )
 import Globals
-  ( CtorConstructions (..),
-    CtorGlobalInfo (..),
-    DataConstructions (..),
+  ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
     DefGlobalInfo (..),
     GlobalInfo (..),
@@ -142,15 +136,9 @@ import Globals
   )
 import Meta (freshMetaVar)
 import Printing (Pretty (..), indentedFst)
-import Substitution (BiSub (..), Sub (..), Subst (..))
 import Syntax
   ( Case (..),
     Closure (..),
-    Env,
-    HCtx,
-    HTel,
-    HTm (..),
-    HTy,
     SPat (..),
     STm (..),
     STy,
@@ -159,23 +147,11 @@ import Syntax
     VPatB (..),
     VTm (..),
     VTy,
-    embed,
-    embedCase,
-    embedTel,
-    extendTel,
-    hApp,
-    hLams,
-    joinTels,
-    sAppSpine,
     sGatherApps,
     sGatherLams,
     sGatherPis,
-    sLams,
-    unembed,
-    unembedTel,
     uniqueSLams,
-    vGetSpine,
-    pattern VV, Pat, sTmToPat,
+    vGetSpine, Pat, sTmToPat,
   )
 import Unelaboration (Unelab)
 import Unification
@@ -1079,13 +1055,6 @@ makeProblem err k = do
   c <- getCtx
   l <- view
   return $ Problem {qty = q, ctx = c, loc = l, kind = k, errs = err}
-
-synthesizeProblem :: (Tc m) => VTm -> VTy -> m Problem
-synthesizeProblem t ty = do
-  q <- qty
-  c <- getCtx
-  l <- view
-  return $ Problem {qty = q, ctx = c, loc = l, kind = Synthesize t ty, errs = []}
 
 addSynthesizeProblem :: (Tc m) => VTm -> VTy -> m ()
 addSynthesizeProblem t ty = addProblem [] $ Synthesize t ty

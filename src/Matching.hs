@@ -4,7 +4,6 @@
 
 module Matching
   ( Matching (..),
-    unifyPLSpines,
     caseTree,
     clausesWithEmptyConstraints,
     MatchingState (..),
@@ -53,14 +52,17 @@ import Globals
     CtorGlobalInfo (..),
     DataConstructions (..),
     DataGlobalInfo (..),
+    KnownGlobal (KnownEqual, KnownRefl),
     Sig (..),
     getCtorGlobal,
+    knownCtor,
+    knownData,
   )
 import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
     HCtx,
-    HTel,
+    HTel (HEmpty, HWithParam),
     HTm (..),
     HTy,
     Pat (..),
@@ -120,15 +122,27 @@ instance Lattice UnifyOutcome where
 --
 -- internally:
 -- Equal : [A : Type] -> A -> A -> Type
-equality :: HTm -> HTm -> HTm
-equality = undefined
+equality :: HTm -> HTm -> HTm -> HTm
+equality ty a b =
+  hApp
+    (HData (knownData KnownEqual))
+    (S.fromList [Arg Implicit Zero ty, Arg Explicit Zero a, Arg Explicit Zero b])
 
--- Internal reflexivity
--- refl : [A : Type] -> A -> A
-refl :: HTm -> HTm
-refl = undefined
+-- Simple reflexivity
+--
+-- internally:
+-- refl : [A : Type] -> (0 x : A) -> Equal [A] x x
+refl :: HTm -> HTm -> HTm
+refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Implicit Zero ty)))
 
--- Fibered equality (shorthand = with types left as an exercise)
+-- Higher equality (written as `=`)
+--
+--          m : HEqual s t e x y
+-- x : P s ---- y : P t
+--   |            |
+--   |            |
+--   s ---------- t
+--          e : Equal s t
 --
 -- internally:
 -- HEqual : [A : Type] (s t : A) (e : Equal s t) (P : A -> Type) -> P s -> P t -> Type
@@ -136,9 +150,16 @@ refl = undefined
 hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
 hequality = undefined
 
--- Fibered equality for spines
-hequalitySp :: Spine HTm -> Spine HTm -> Tel STm
-hequalitySp = undefined
+-- Higher equality for spines
+--
+-- (() =()= ()) := ()
+-- ((x,xs) =(x : A)Δ= (y,ys)) := (e : x =A= y, xs =Δ[e]= ys)
+--
+equalitySp :: HTel -> Spine HTm -> Spine HTm -> HTel
+equalitySp HEmpty Empty Empty = HEmpty
+equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
+  HWithParam m Zero (Name (nt.unName ++ "-eq")) (equality tt x y) (\e -> equalitySp (delta e) xs ys)
+equalitySp _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
 dcong :: (HTm -> HTm) -> HTm -> HTm
@@ -171,8 +192,8 @@ cyc = undefined
 -- type behaves like the empty context instead.
 --
 -- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
-never :: HTm -> HTm
-never = undefined
+void :: HTm -> HTm
+void = undefined
 
 voidSh :: Shapes
 voidSh = Param Explicit Many (Name "_") () :<| Empty
@@ -181,7 +202,7 @@ voidCtx :: HCtx
 voidCtx = undefined
 
 initialSub :: Shapes -> Shapes -> Sub
-initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (never x)) sh)
+initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (void x)) sh)
 
 ofSh :: Shapes -> [a] -> Spine a
 ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
