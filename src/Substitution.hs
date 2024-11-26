@@ -23,6 +23,7 @@ module Substitution
     extendSubSp,
     hoistBindersSp,
     hoistBinders,
+    hoistBinders',
   )
 where
 
@@ -52,6 +53,8 @@ hoistBindersSp sh t sp = undefined
 hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
 hoistBinders sh t sp = undefined
 
+hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
+hoistBinders' sh t sp = undefined
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case

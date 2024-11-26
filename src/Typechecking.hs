@@ -818,7 +818,7 @@ lit mode l = case mode of
 runMatching :: (forall n. (Matching n) => n a) -> (forall m. (Tc m) => m a)
 runMatching _ = undefined
 
-clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine Pat) STm)
+clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine SPat) STm)
 clause (_, ty) (Possible Empty t) = do
   (t', _) <- t (Check ty)
   return $ Possible Empty t'
@@ -842,7 +842,8 @@ clauses d cls ty = enterCtx id $ do
   cls' <- mapM (clause (SDef d, ty)) cls
   hty <- quoteHere ty >>= unembedHere
   ct <- runMatching $ caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls'))
-  return (ct, ty)
+  ct' <- embedHere ct
+  return (ct', ty)
 
 defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()
 defItem mq n ts ty cl = do

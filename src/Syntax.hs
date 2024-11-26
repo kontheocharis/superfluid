@@ -391,16 +391,23 @@ embedCase l (Case d ps s is t cs) =
     (embed l s)
     (fmap (fmap (embed l)) is)
     (embed l t)
-    (fmap embedClause cs)
+    (fmap (embedClause l) cs)
   where
-    embedPat :: Pat -> SPat
-    embedPat (LvlP n q l) = SPat (SVar 0) [(q, n)]
-    embedPat (CtorP c sp) = SPat (SCtor c) (fmap embedPat sp)
+    embedClause :: Lvl -> Clause Pat ([HTm] -> HTm) -> Clause SPat STm
+    embedClause _ (Clause p c) =
+      let binds = patBinds p in
+      let pvs = map HVar $ membersIn l (Lvl (length binds))
+       in Clause (embedPat l p) (fmap (embed l . ($ pvs)) c)
 
-    embedClause :: Clause SPat ([HTm] -> HTm) -> Clause SPat STm
-    embedClause (Clause p c) =
-      let pvs = map HVar $ membersIn l (Lvl (length p.binds))
-       in Clause p (fmap (embed l . ($ pvs)) c)
+patBinds :: Pat -> [(Qty, Name)]
+patBinds = undefined
+
+-- @@Todo:
+embedPat :: Lvl -> Pat -> SPat
+embedPat = undefined
+
+unembedPat :: Env HTm -> SPat -> Pat
+unembedPat = undefined
 
 hOwnSpine :: Lvl -> Tel () -> Spine HTm
 hOwnSpine _ Empty = Empty
@@ -438,10 +445,10 @@ unembedCase env (Case d ps s is t cs) =
     (unembed env s)
     (fmap (fmap (unembed env)) is)
     (unembed env t)
-    (fmap unembedClause cs)
+    (fmap (unembedClause env) cs)
   where
-    unembedClause :: Clause SPat STm -> Clause SPat ([HTm] -> HTm)
-    unembedClause (Clause p c) = Clause p (fmap (\c' bs -> unembed (reverse bs ++ env) c') c)
+    unembedClause :: Env HTm -> Clause SPat STm -> Clause Pat ([HTm] -> HTm)
+    unembedClause env (Clause p c) = Clause (unembedPat env p) (fmap (\c' bs -> unembed (reverse bs ++ env) c') c)
 
 unembed :: Env HTm -> STm -> HTm
 unembed env = \case
@@ -461,7 +468,7 @@ unembed env = \case
   SRepr t -> HRepr (unembed env t)
   SUnrepr t -> HUnrepr (unembed env t)
 
-sTmToPat :: STm -> Pat
+sTmToPat :: STm -> SPat
 sTmToPat = undefined
 
 data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)

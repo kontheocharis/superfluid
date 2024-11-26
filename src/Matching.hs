@@ -59,7 +59,7 @@ import Globals
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj)
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj, hoistBinders')
 import Syntax
   ( Case (..),
     HCtx,
@@ -68,6 +68,7 @@ import Syntax
     HTy,
     Pat (..),
     SPat (..),
+    STm,
     VNorm (..),
     VTm (..),
     VTy,
@@ -482,8 +483,8 @@ type ConstrainedClause pats tm = Clause (Constraints, pats) tm
 
 type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
 
-clausesWithEmptyConstraints :: Clauses a b -> ConstrainedClauses a b
-clausesWithEmptyConstraints = map (bimap (emptyConstraints,) id)
+clausesWithEmptyConstraints :: Clauses SPat STm -> ConstrainedClauses Pat HTm
+clausesWithEmptyConstraints = undefined
 
 nextPat :: (Matching m) => ConstrainedClauses pat tm -> m (NextPat pat tm)
 nextPat = undefined
@@ -635,13 +636,13 @@ splitConstraint (MatchingState ctx ty cls) = do
           -- Let Γ' = Γχ (x : D δ ψ) xΓ (π : Πi)
           (_, cc) <- access (getCtorGlobal' c)
           let (ctx', pi) = extendCtxWithTel ctx (\_ -> cc.args delta)
+          let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
 
           -- For each clause with pattern πj, equate πj to π:
           children <- fmap catMaybes . forM cls $ \cl' -> do
             case cl' of
               Clause (Constraints [], _) _ -> return Nothing -- @@Check: is this right?
               Clause (Constraints (Constraint _ _ (LvlP _ _ y) _ : cs'), ps) t -> do
-                let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
                 newConstraint <- simpleConstraint (HVar y) cpat
                 return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
               Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
@@ -684,10 +685,10 @@ splitConstraint (MatchingState ctx ty cls) = do
           --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
           -- The equalities are explicitly given by the motive we will set up later.
           let eq = eqTel psix psix'
-          let e'' = hLams eq (hoistBinders (length psix) e')
+          let e'' = hoistBinders' (length pi) $ hLams eq (hoistBinders (length psix) e')
 
           -- The method is for constructor ci π
-          return (Clause (hApp (HCtor (c, delta)) pi) (Just e''))
+          return (Clause cpat (Just e''))
 
         -- Now we build the motive for the case.
         -- First, we have the required data indices and subject:
@@ -704,16 +705,17 @@ splitConstraint (MatchingState ctx ty cls) = do
         -- Where ψj = ψ1, ..., ψn, x
         let psixRefl = reflSp psixTe' psix
 
-        let caseBase = Case
-              { dat = d,
-                datParams = delta,
-                subject = HVar x,
-                subjectIndices = psi,
-                -- The final motive is:
-                --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
-                elimTy = hLams indTel (const ty),
-                clauses = []
-              }
+        let caseBase =
+              Case
+                { dat = d,
+                  datParams = delta,
+                  subject = HVar x,
+                  subjectIndices = psi,
+                  -- The final motive is:
+                  --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
+                  elimTy = hLams indTel (const ty),
+                  clauses = []
+                }
         return . Just $ hApp (HCase (caseBase {clauses = elims})) psixRefl
       _ -> return Nothing
     _ -> return Nothing
