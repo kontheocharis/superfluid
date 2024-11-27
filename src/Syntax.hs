@@ -38,6 +38,9 @@ module Syntax
     WTm (..),
     VLazyCase,
     VBlockedCase,
+    patBinds,
+    embedPat,
+    unembedPat,
     SCase,
     mapClosureM,
     weakAsValue,
@@ -395,19 +398,9 @@ embedCase l (Case d ps s is t cs) =
   where
     embedClause :: Lvl -> Clause Pat ([HTm] -> HTm) -> Clause SPat STm
     embedClause _ (Clause p c) =
-      let binds = patBinds p in
-      let pvs = map HVar $ membersIn l (Lvl (length binds))
-       in Clause (embedPat l p) (fmap (embed l . ($ pvs)) c)
-
-patBinds :: Pat -> [(Qty, Name)]
-patBinds = undefined
-
--- @@Todo:
-embedPat :: Lvl -> Pat -> SPat
-embedPat = undefined
-
-unembedPat :: Env HTm -> SPat -> Pat
-unembedPat = undefined
+      let binds = patBinds p
+       in let pvs = map HVar $ membersIn l (Lvl (length binds))
+           in Clause (embedPat l p) (fmap (embed l . ($ pvs)) c)
 
 hOwnSpine :: Lvl -> Tel () -> Spine HTm
 hOwnSpine _ Empty = Empty
@@ -472,3 +465,13 @@ sTmToPat :: STm -> SPat
 sTmToPat = undefined
 
 data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
+
+-- @@Todo:
+patBinds :: Pat -> [(Qty, Name)]
+patBinds = undefined
+
+embedPat :: Lvl -> Pat -> SPat
+embedPat = undefined
+
+unembedPat :: Env HTm -> SPat -> Pat
+unembedPat = undefined

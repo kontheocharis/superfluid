@@ -41,7 +41,7 @@ import Control.Monad.Extra (firstJustM)
 import Data.Bifunctor (Bifunctor (..))
 import Data.Foldable (Foldable (..), toList)
 import Data.Map (Map)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromJust)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation
@@ -56,10 +56,11 @@ import Globals
     KnownGlobal (KnownEqual, KnownRefl),
     Sig (..),
     getCtorGlobal,
+    getDataGlobal,
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj, hoistBinders')
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinder, hoistBinders, hoistBinders', hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
     HCtx,
@@ -80,6 +81,7 @@ import Syntax
     hApp,
     hGatherApps,
     hLams,
+    hPis,
     joinTels,
     sAppSpine,
     sLams,
@@ -136,7 +138,7 @@ equality ty a b =
 refl :: HTm -> HTm -> HTm
 refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Implicit Zero ty)))
 
--- Higher equality (written as `=`)
+-- Higher equality (written as `=P,e=`)
 --
 --          m : HEqual s t e x y
 -- x : P s ---- y : P t
@@ -148,19 +150,32 @@ refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Impli
 -- internally:
 -- HEqual : [A : Type] (s t : A) (e : Equal s t) (P : A -> Type) -> P s -> P t -> Type
 -- HEqual [A] s t e P u v = Equal [P t] (subst P e u) v
-hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm
+hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm -> HTm
 hequality = undefined
 
 -- Equality for spines (Written δ =Δ= γ for a telescope Δ and spines δ γ : Tms Δ)
 --
 -- (() =()= ()) := ()
--- ((x,xs) =(x : A)Δ= (y,ys)) := (e : x =A= y, xs =Δ[e]= ys)
+-- ((x,xs) =(x : A),Δ= (y,ys)) := (e : x =A= y, xs =Δ,e= ys)
 --
 equalitySp :: HTel -> Spine HTm -> Spine HTm -> HTel
-equalitySp HEmpty Empty Empty = HEmpty
-equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
-  HWithParam m Zero (Name (nt.unName ++ "-eq")) (equality tt x y) (\e -> equalitySp (delta e) xs ys)
-equalitySp _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+equalitySp = undefined
+
+-- equalitySp HEmpty Empty Empty = HEmpty
+-- equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
+--   HWithParam m Zero (Name (nt.unName ++ "-eq")) (equality tt x y) (\e -> equalitySp' (x, y, e) delta xs ys)
+-- equalitySp _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+
+-- equalitySp' :: (HTm, HTm, HTm, HTm) -> (HTm -> HTel) -> Spine HTm -> Spine HTm -> HTel
+-- equalitySp' (s, t, e, p) (($ p) -> HEmpty) Empty Empty = HEmpty
+-- equalitySp' (s, t, e, p) (($ t) -> (HWithParam m _ nt tt delta)) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
+--   HWithParam
+--     m
+--     Zero
+--     (Name (nt.unName ++ "-heq"))
+--     (hequality s t e p x y)
+--     (\e' -> equalitySp' (x, y, e', delta y) delta xs ys)
+-- equalitySp' _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
 dcong :: (HTm -> HTm) -> HTm -> HTm
@@ -170,9 +185,9 @@ dcong = undefined
 dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
 dcongSp = undefined
 
--- noConf : (c : Ctor D Δ Π ξ) -> {xs ys : Tms Γ Π} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-noConf :: HTm -> HTm -> Spine HTm
-noConf = undefined
+-- inj : (c : Ctor D Δ Π ξ) -> {δ : Δ} {xs ys : Tms Γ (Π [δ])} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
+inj :: HTm -> HTm -> Spine HTm
+inj = undefined
 
 -- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
 --            -> Tm Γ (c1 xs = c2 ys)
@@ -214,7 +229,6 @@ canConvert :: (Matching m) => HCtx -> HTm -> HTm -> m Bool
 canConvert = undefined
 
 -- Unification:
-
 unifyPLSpines :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m Unification
 unifyPLSpines ctx HEmpty Empty Empty = do
   -- Solving unify Γ ⊢ () = () : ()
@@ -335,20 +349,19 @@ solution ctx ty a b = case (a, b) of
 injectivity :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 == c2 -> do
-    -- Solving unify Γ ⊢ (ψ, c1 xs) = ( c2 ys) : D δ ψ
-
+    -- Γ ⊢ (c xs : D δ ξ[xs]) =? (c ys : D δ ξ[ys]) -- @@Todo: this should turn into equality of spines!
+    --
     -- Assume : length xs = length ys = n
     -- Assume:  Data params are equal
-    -- Reason : Terms are well-typed *and* fully eta-expanded
+    -- Reason : Terms are well-typed *and* fully eta-expanded. @@Todo: Actually do the latter!
     let sh = telShapes ctx
     let c = c1
-    cc <- access (getCtorGlobal c) >>= ctorConstructions
+    ci <- access (getCtorGlobal c)
+    let cc = fromJust ci.constructions
     let n = cc.argsArity
 
     -- (Γ', σ : BiSub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
-    (ctx', o, s) <- unifyPLSpines ctx xs ys
-
-    let ctorIndices = cc.returnIndices pp (sub s.forward)
+    (ctx', o, s) <- unifyPLSpines ctx (cc.args pp) xs ys
 
     -- Make a new name and shape for the new context
     x <- uniqueName
@@ -372,7 +385,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
                 mapSub1
                   (sh :|> csh)
                   (sh <> n)
-                  (\sp p -> sp <> noConf (HCtor (c, pp)) p)
+                  (\sp p -> sp <> inj (HCtor (c, pp)) p)
             }
 
     -- return (Γ', (
@@ -390,15 +403,13 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
   _ -> return Nothing
 
 conflict :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
-conflict ctx a b = case (hGatherApps a, hGatherApps b) of
+conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
-    let sh = telShapes ctx
-    -- Here we have (c1 : Ctor D Δ Π₁ ξ₁, c2 : Ctor D Δ Π₂ ξ₂)
-    -- And we are trying to unify (c1 xs = c2 ys).
+    -- Γ ⊢ (c1 xs : D δ ξ[xs]) =? (c2 ys : D δ ξ[ys])
     --
     -- This is a conflict, so we need to return a disunifier.
-
     -- Make a new name and shape for the new context
+    let sh = telShapes ctx
     x <- uniqueName
     let csh = Param Explicit Many x ()
 
@@ -419,8 +430,8 @@ conflict ctx a b = case (hGatherApps a, hGatherApps b) of
   _ -> return Nothing
 
 cycle :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
-cycle ctx a b = case (a, b) of
-  (_, HVar x) -> cycle ctx (HVar x) a
+cycle ctx ty a b = case (a, b) of
+  (_, HVar x) -> cycle ctx ty (HVar x) a
   (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
     -- Check if x occurs in xs, if so, then we have a cycle.
     let l = Lvl (length ctx)
@@ -450,7 +461,7 @@ cycle ctx a b = case (a, b) of
   _ -> return Nothing
 
 deletion :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
-deletion ctx a b = do
+deletion ctx ty a b = do
   let sh = telShapes ctx
   -- If we can unify a and b we can delete the equation since it will evaluate to refl.
   c <- canConvert ctx a b
@@ -472,7 +483,7 @@ deletion ctx a b = do
       return . Just $
         ( ctx,
           Can,
-          BiSub {forward = extendSub (idSub sh) csh (\_ -> refl a), backward = proj (idSub (sh :|> csh))}
+          BiSub {forward = extendSub (idSub sh) csh (\_ -> refl ty a), backward = proj (idSub (sh :|> csh))}
         )
     else
       return Nothing
@@ -657,11 +668,11 @@ splitConstraint (MatchingState ctx ty cls) = do
           -- Create the spine (ξi[δ,π], ci π)
           let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
 
-          -- Create the telescope (ρ : Δ)(x : D ρ)
+          -- Create the telescope (ρ : Ψ)(x : D δ ρ)
           let psiTel = extendTel dc.params (Param p.mode p.qty p.name . hApp (HData d))
 
           -- Unify:
-          -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(δ : Δ)(x : D δ)= (ξi[δ,π], ci π)
+          -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(ρ : Ψ)(D δ ρ)= (ξi[δ,π], ci π)
           --
           -- Gives back a bi-substitution σ to a new context Γ''
           -- @@Todo: do we care about status?
@@ -710,7 +721,7 @@ splitConstraint (MatchingState ctx ty cls) = do
                 { dat = d,
                   datParams = delta,
                   subject = HVar x,
-                  subjectIndices = psi,
+                  subjectIndices = psi, -- @@Todo: the xΓ is not getting quantified properly here (and neither is the ty)
                   -- The final motive is:
                   --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
                   elimTy = hLams indTel (const ty),
@@ -721,4 +732,4 @@ splitConstraint (MatchingState ctx ty cls) = do
     _ -> return Nothing
 
 mapClauses :: (HTm -> HTm) -> [Clause (Constraints, Spine Pat) HTm] -> [Clause (Constraints, Spine Pat) HTm]
-mapClauses = _
+mapClauses = undefined

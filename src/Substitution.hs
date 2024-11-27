@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Substitution
@@ -24,6 +25,7 @@ module Substitution
     hoistBindersSp,
     hoistBinders,
     hoistBinders',
+    hoistBinder,
   )
 where
 
@@ -35,7 +37,7 @@ import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
 import Evaluation (Eval)
-import Syntax (Case (..), Env, HCtx, HTm (..), HTy, SPat (..), VTm (..), hApp)
+import Syntax (Case (..), Env, HCtx, HTel (..), HTm (..), HTy, SPat (..), VTm (..), hApp, patBinds)
 
 -- Substitution
 
@@ -52,6 +54,9 @@ hoistBindersSp sh t sp = undefined
 
 hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
 hoistBinders sh t sp = undefined
+
+hoistBinder :: HTm -> (HTm -> HTm)
+hoistBinder = undefined
 
 hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
 hoistBinders' sh t sp = undefined
@@ -165,7 +170,7 @@ instance (Subst HTm) where
           ( fmap
               ( \(Clause p t) -> case t of
                   Nothing -> Clause p Nothing
-                  Just t' -> Clause p (Just $ \p' -> let bs = p.binds in sub (liftSubN (bindsToShapes bs) s) (t' p'))
+                  Just t' -> Clause p (Just $ \u -> let bs = patBinds p in sub (liftSubN (bindsToShapes bs) s) (t' u))
               )
               cs
           )
@@ -201,7 +206,12 @@ instance (Subst HTm) where
       || any
         ( \(Clause p t) -> case t of
             Nothing -> False
-            Just t' -> occurs (nextLvls l (length p.binds)) x (t' (map HVar $ membersIn l (Lvl (length p.binds))))
+            Just t' ->
+              let l' = length $ patBinds p
+               in occurs
+                    (nextLvls l l')
+                    x
+                    (t' (map HVar $ membersIn l (Lvl l')))
         )
         cs
 
@@ -228,3 +238,16 @@ instance (Subst t) => Subst (Param t) where
   sub s (Param m q n x) = Param m q n (sub s x)
 
   occurs l x (Param _ _ _ t) = occurs l x t
+
+instance Subst HTel where
+  sub _ HEmpty = HEmpty
+  sub s (HWithParam m q n t tel) =
+    HWithParam
+      m
+      q
+      n
+      (sub s t)
+      (sub (liftSub (Param m q n ()) s) . tel)
+
+  occurs _ _ HEmpty = False
+  occurs l x (HWithParam m q _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
