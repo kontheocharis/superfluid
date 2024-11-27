@@ -70,8 +70,13 @@ module Syntax
     extendTel,
     joinTels,
     removing,
-    sTmToPat,
     extendCtxWithTel,
+    hoistBindersSp,
+    hoistBinders,
+    hoistBinders',
+    hoistBinder,
+    lastVar,
+    ctxSize,
   )
 where
 
@@ -348,6 +353,12 @@ data HTel = HEmpty | HWithParam PiMode Qty Name HTy (HTm -> HTel)
 
 type HCtx = Tel HTy
 
+lastVar :: HCtx -> Lvl
+lastVar ctx = Lvl (length ctx - 1)
+
+ctxSize :: HCtx -> Lvl
+ctxSize = Lvl . length
+
 hSimpleTel :: Tel HTy -> HTel
 hSimpleTel = foldr (\(Param m q n a) acc -> HWithParam m q n a (const acc)) HEmpty
 
@@ -461,10 +472,19 @@ unembed env = \case
   SRepr t -> HRepr (unembed env t)
   SUnrepr t -> HUnrepr (unembed env t)
 
-sTmToPat :: STm -> SPat
-sTmToPat = undefined
+hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
+hoistBindersSp sh t sp = undefined
 
-data Pat = LvlP Name Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
+hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
+hoistBinders sh t sp = undefined
+
+hoistBinder :: HTm -> (HTm -> HTm)
+hoistBinder = undefined
+
+hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
+hoistBinders' sh t sp = undefined
+
+data Pat = LvlP Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
 
 -- @@Todo:
 patBinds :: Pat -> [(Qty, Name)]

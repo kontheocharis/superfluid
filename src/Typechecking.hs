@@ -26,6 +26,7 @@ module Typechecking
     Child,
     prettyGoal,
     lam,
+    ifForcePiType,
     letIn,
     app,
     univ,
@@ -155,7 +156,6 @@ import Syntax
     sGatherApps,
     sGatherLams,
     sGatherPis,
-    sTmToPat,
     uniqueSLams,
     vGetSpine,
   )

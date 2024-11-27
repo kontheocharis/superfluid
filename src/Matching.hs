@@ -37,6 +37,7 @@ import Common
     telShapes,
   )
 import Context
+import Context (unembedClosure1Here)
 import Control.Applicative (asum)
 import Control.Monad (forM)
 import Control.Monad.Extra (firstJustM)
@@ -48,6 +49,7 @@ import Data.Traversable (for)
 import Evaluation
   ( Eval (..),
     embedEval,
+    ifIsData,
     quoteUnembed,
   )
 import Globals
@@ -56,11 +58,25 @@ import Globals
     DataGlobalInfo (..),
     KnownGlobal (KnownEqual, KnownRefl),
     getCtorGlobal',
+    getDataGlobal,
     getDataGlobal',
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBinders', idSub, liftSubN, mapSub1, mapSubN, proj)
+import Substitution
+  ( BiSub (..),
+    Shape,
+    Shapes,
+    Sub (..),
+    Subst (..),
+    composeSub,
+    extendSub,
+    idSub,
+    liftSubN,
+    mapSub1,
+    mapSubN,
+    proj,
+  )
 import Syntax
   ( Case (..),
     HCtx,
@@ -71,19 +87,23 @@ import Syntax
     STm (..),
     VTm (..),
     VTy,
+    ctxSize,
     extendCtxWithTel,
     extendTel,
     hApp,
     hGatherApps,
     hLams,
+    hoistBinders,
+    hoistBinders',
     joinTels,
+    lastVar,
   )
-import Typechecking (Child, ModeG (..), Tc (..))
+import Typechecking (Child, ModeG (..), Tc (..), ifForcePiType)
 import Prelude hiding (cycle, pi)
 
 data MatchingError = MatchingError
 
-class (Eval m, Has m Loc) => Matching m where
+class (Eval m, Has m Loc, Tc m) => Matching m where
   matchingError :: MatchingError -> m a
 
 runTc :: (Matching m, Tc m) => Qty -> Ctx -> m a -> m a
@@ -495,17 +515,11 @@ type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
 type ConstrainedClause pats tm = Clause (SimpleConstraints, pats) tm
 
-type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
-
-type NextPatSingle pat tm = (Maybe pat, ConstrainedClause pat tm) -- nonempty
-
 -- Constraints
 
 data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
 
 data SimpleConstraint = SimpleConstraint {lvl :: Lvl, lhs :: Lvl, rhs :: Pat, param :: Param HTy}
-
-data IsSat = Sat | Unsat
 
 type Constraints = [Constraint]
 
@@ -513,6 +527,7 @@ type SimpleConstraints = [SimpleConstraint]
 
 instance Subst Constraint where
   sub s (Constraint l x p q) = Constraint l (sub s x) p q -- @@Todo: subst in pat or remove data params from pat!
+  occurs l f (Constraint _ y _ _) = occurs l f y -- @@Todo: occurs in pat??
 
 subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
 subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
@@ -569,27 +584,47 @@ data MatchingState m = MatchingState
     cls :: ConstrainedClauses (HChildPat m) (HChildTm m)
   }
 
-forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
-forceData d = undefined
+forceData :: (Matching m) => HCtx -> HTm -> m (DataGlobal, Spine HTm, Spine HTm)
+forceData ctx ty = do
+  let size = ctxSize ctx
+  ty' <- embedEval size ty
+  ifIsData
+    (ctxSize ctx)
+    ty'
+    ( \d sp -> do
+        di <- access (getDataGlobal d)
+        sp' <- traverse (traverse $ quoteUnembed size) sp
+        let paramSp = S.take (length di.params) sp'
+        let indexSp = S.drop (length di.params) sp'
+        return (d, paramSp, indexSp)
+    )
+    (matchingError MatchingError) -- @@Todo: errors
 
 tmAsPat :: (Matching m) => HTm -> m Pat
-tmAsPat = undefined
+tmAsPat t = case hGatherApps t of
+  (HVar x, Empty) -> return (LvlP x)
+  (HCtor (c, pp), sp) -> CtorP (c, pp) <$> traverse (traverse tmAsPat) sp
+  _ -> matchingError MatchingError -- @@Todo: errors
 
-ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
-ifForcePi = undefined
+ifForcePi :: (Matching m) => Qty -> HCtx -> PiMode -> HTy -> (Param HTy -> (HTm -> HTy) -> m a) -> m a -> m a
+ifForcePi q ctx m ty the els = runTc' q ctx $ do
+  ty' <- embedEvalHere ty
+  ifForcePiType
+    m
+    ty'
+    ( \m' q' x a b -> do
+        a' <- quoteUnembedHere a
+        b' <- unembedClosure1Here b
+        the (Param m' q' x a') b'
+    )
+    (\_ _ _ _ _ -> els) -- @@Todo: errors
 
-lastVar :: HCtx -> Lvl
-lastVar ctx = Lvl (length ctx - 1)
-
-ctxSize :: HCtx -> Lvl
-ctxSize = Lvl . length
-
-hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m Bool
+hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m (Maybe (Arg ()))
 hasNextPat cls = do
   case cls of
-    Clause (_, Empty) _ : _ -> return False
-    Clause (_, _ :<| _) _ : _ -> return True
-    [] -> return False
+    Clause (_, Empty) _ : _ -> return Nothing
+    Clause (_, a :<| _) _ : _ -> return . Just $ a {arg = ()}
+    [] -> return Nothing
 
 -- In context Γ (ctx), and return type T (ty) we have a list of unelaborated
 -- clauses C with constraints. We want to produce a term e : T that "emulates"
@@ -635,16 +670,23 @@ done (MatchingState ctx q ty cls) = do
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx q' ty cls) = do
   ps <- hasNextPat cls
-  if ps
-    then return Nothing
-    else do
-      ifForcePi ty (return Nothing) $ \p@(Param m q x a) b -> do
-        let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
-        let ctx' = ctx :|> Param m q x a
-        let b' = b (HVar (lastVar ctx'))
-        cls' <- addNextConstraint ctx a (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
-        rest <- caseTree (MatchingState ctx' q' b' cls')
-        return . Just $ HLam m q x (\t -> sub (s t) rest)
+  case ps of
+    Nothing -> return Nothing
+    Just (Arg m' _ ()) -> do
+      ifForcePi
+        q'
+        ctx
+        m'
+        ty
+        ( \p@(Param m q x a) b -> do
+            let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
+            let ctx' = ctx :|> Param m q x a
+            let b' = b (HVar (lastVar ctx'))
+            cls' <- addNextConstraint ctx a (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
+            rest <- caseTree (MatchingState ctx' q' b' cls')
+            return . Just $ HLam m q x (\t -> sub (s t) rest)
+        )
+        (return Nothing)
 
 -- There is a next constraint to split on.
 --
@@ -660,14 +702,14 @@ splitConstraint (MatchingState ctx q ty cls) = do
     Clause (co : _, _) _ : clss -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ x (LvlP _ _ x') param -> do
+      SimpleConstraint _ x (LvlP x') param -> do
         -- This will use the solution rule for the constraint x = x'
         (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
         Just <$> caseTree (MatchingState ctx' q (sub s.forward ty) clss)
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
-        (d, delta, psi) <- forceData p.ty
+        (d, delta, psi) <- forceData ctx p.ty
         (di, dc) <- access (getDataGlobal' d)
 
         -- Create the spine (ψ, x)
@@ -690,7 +732,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(ρ : Ψ)(D δ ρ)= (ξi[δ,π], ci π)
           --
           -- Gives back a bi-substitution σ to a new context Γ''
-          -- @@Todo: do we care about status?
+          -- @@Check: do we care about status?
           (ctx'', _, s) <- unifyPLSpines ctx' psiTel psix psix'
 
           -- For each clause with pattern πj, equate πj to π:
@@ -744,7 +786,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
 
 -- Typechecking
 
-checkPat :: (Matching m, Tc m) => Child m -> HMode -> m (Pat, HTy)
+checkPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy)
 checkPat c mode = do
   mode' <- traverse embedEvalHere mode
   (tm, ty) <- c mode'
@@ -753,7 +795,7 @@ checkPat c mode = do
   pat <- tmAsPat tm'
   return (pat, ty')
 
-checkTm :: (Matching m, Tc m) => Child m -> HMode -> m (HTm, HTy)
+checkTm :: (Matching m) => Child m -> HMode -> m (HTm, HTy)
 checkTm c mode = do
   mode' <- traverse embedEvalHere mode
   (tm, ty) <- c mode'
@@ -762,14 +804,14 @@ checkTm c mode = do
   return (tm', ty')
 
 clausesWithEmptyConstraints ::
-  (Matching m, Tc m) =>
+  (Matching m) =>
   Clauses (Child m) (Child m) ->
   ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
   let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (checkPat p m))) ps
    in let t' = fmap (\t q ctx m -> runTc' q ctx (checkTm t m)) r in Clause ([], ps') t'
 
-clauses :: (Tc m, Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
+clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses _ cls ty = enterCtx id $ do
   hty <- quoteUnembedHere ty
   q <- view

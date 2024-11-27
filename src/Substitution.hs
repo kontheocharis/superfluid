@@ -22,10 +22,6 @@ module Substitution
     nonEmptyDomL,
     terminalSub,
     extendSubSp,
-    hoistBindersSp,
-    hoistBinders,
-    hoistBinders',
-    hoistBinder,
   )
 where
 
@@ -48,18 +44,6 @@ type Shape = Param ()
 data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine HTm}
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
-
-hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
-hoistBindersSp sh t sp = undefined
-
-hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
-hoistBinders sh t sp = undefined
-
-hoistBinder :: HTm -> (HTm -> HTm)
-hoistBinder = undefined
-
-hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
-hoistBinders' sh t sp = undefined
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
