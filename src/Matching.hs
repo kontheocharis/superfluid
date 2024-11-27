@@ -4,6 +4,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module Matching
   ( Matching (..),
@@ -498,8 +499,15 @@ nextPat = undefined
 
 -- Constraints
 
-joinConstraints :: Constraints -> Constraints -> Constraints
-joinConstraints = undefined
+data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
+
+data IsSat = Sat | Unsat
+
+type Constraints = [Constraint]
+
+-- simplifyConstraints (c@(Constraint l x (LvlP n q l') p) : cs) = (c : simplifyConstraints cs)
+-- simplifyConstraints (Constraint l x (CtorP c sp) (hGatherApps -> (HCtor (c'), sp')) : cs) = _
+-- simplifyConstraints (Constraint l x (CtorP c sp) _ : cs) = _
 
 constraints :: HCtx -> Spine HTm -> Spine Pat -> m Constraints
 constraints = undefined
@@ -507,18 +515,20 @@ constraints = undefined
 simpleConstraint :: HTm -> Pat -> m Constraint
 simpleConstraint = undefined
 
-data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
-
-data Constraints = Constraints {list :: [Constraint]}
-
 emptyConstraints :: Constraints
-emptyConstraints = Constraints []
+emptyConstraints = undefined
 
-addConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
-addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), sp) t
+addConstraint :: Constraint -> Constraints -> Constraints
+addConstraint = undefined
+
+-- addConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
+-- addConstraint c (Clause (cs, sp) t) = Clause ((c : cs), sp) t
+
+applyConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
+applyConstraint c (Clause (cs, sp) t) = Clause ((c : cs), sp) t
 
 nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
-nextConstraint (Constraints []) = Nothing
+nextConstraint ([]) = Nothing
 
 -- Matching
 
@@ -552,11 +562,30 @@ ifForcePi = undefined
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
 done (MatchingState ctx ty cls) = do
   case cls of
-    Clause (Constraints [], Empty) (Just tm) : _ -> do
+    Clause ([], Empty) (Just tm) : _ -> do
       -- @@Todo: qty
       (tm', _) <- tm Many ctx (Check ty)
       return (Just tm')
     _ -> return Nothing
+
+addConstraints :: (Matching m) => (ConstrainedClause p t -> Constraints) -> MatchingState m -> MatchingState m
+addConstraints = undefined
+
+simplifyConstraints :: (Matching m) => Constraints -> m (Maybe Constraints)
+simplifyConstraints = undefined
+
+joinConstraints :: (Matching m) => Constraints -> Constraints -> m Constraints
+joinConstraints = undefined
+
+instance Subst Constraint
+
+refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
+refineClause s cl' = case cl' of
+  Clause (cs, ps) t -> do
+    cs' <- simplifyConstraints (map (sub s) cs)
+    case cs' of
+      Just cs'' -> return . Just $ Clause (cs'', ps) t
+      Nothing -> return Nothing
 
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
@@ -581,7 +610,7 @@ splitConstraint (MatchingState ctx ty cls) = do
   -- In context Γ (ctx), and return type T (ty) we have a list of clauses Q and constraints cs.
   -- Γ ⊢ cs Q ~> e : T
   case cls of
-    Clause (Constraints (co : _), _) _ : clss -> case co of
+    Clause ((co : _), _) _ : clss -> case co of
       -- 1. We have the constraint Γ ⊢ x = t : T in the first clause.
       --
       -- 1.1. This constraint is of the form Γ ⊢ x = x' : T, where x and x' are variables.
@@ -606,22 +635,6 @@ splitConstraint (MatchingState ctx ty cls) = do
           let (ctx', pi) = extendCtxWithTel ctx (\_ -> cc.args delta)
           let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
 
-          -- For each clause with pattern πj, equate πj to π:
-          children <- fmap catMaybes . forM cls $ \cl' -> do
-            case cl' of
-              Clause (Constraints [], _) _ -> return Nothing -- @@Check: is this right?
-              Clause (Constraints (Constraint _ _ (LvlP _ _ y) _ : cs'), ps) t -> do
-                newConstraint <- simpleConstraint (HVar y) cpat
-                return . Just $ Clause (Constraints (newConstraint : cs'), ps) t
-              Clause (Constraints (Constraint _ _ (CtorP (cj, _) _) _ : _), _) _ | cj /= c -> return Nothing
-              Clause (Constraints (Constraint _ _ (CtorP _ pij) _ : cs'), ps) t -> do
-                -- We have Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ πj : D δ ξi[δ,πj] by weakening.
-                -- (which we get for free since we are using deBrujin levels.)
-                --
-                -- We now generate the constraints π = πj and add them to the clause.
-                newConstraints <- constraints ctx' pi pij
-                return . Just $ Clause (joinConstraints newConstraints (Constraints cs'), ps) t
-
           -- Create the spine (ξi[δ,π], ci π)
           let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
 
@@ -635,15 +648,12 @@ splitConstraint (MatchingState ctx ty cls) = do
           -- @@Todo: do we care about status?
           (ctx'', _, s) <- unifyPLSpines ctx' psiTel psix psix'
 
+          -- For each clause with pattern πj, equate πj to π:
+          cls' <- fmap catMaybes $ mapM (refineClause s.forward) cls
+
           -- Build the rest of the clause in Γ'', which will first give:
           --    Γ'' |- e : T σ .
-          e <-
-            caseTree
-              ( MatchingState
-                  (sub s.forward ctx'')
-                  (sub s.forward ty)
-                  (mapClauses (sub s.forward) children)
-              )
+          e <- caseTree (MatchingState (sub s.forward ctx'') (sub s.forward ty) cls')
           -- Through the substitution we can recover
           --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e' = e σ⁻¹ : T ,
           -- bringing us back to the original context.
@@ -678,9 +688,9 @@ splitConstraint (MatchingState ctx ty cls) = do
                 { dat = d,
                   datParams = delta,
                   subject = HVar x,
-                  subjectIndices = psi, -- @@Todo: the xΓ is not getting quantified properly here (and neither is the ty)
+                  subjectIndices = psi,
                   -- The final motive is:
-                  --    Γχ (x : D δ ψ)  |-   λ ψ' x'. Π ((ψ, x) = (ψ', x'), xΓ) T   :   Π (ψ' : Ψ[δ], x' : D δ ψ') U
+                  --    Γχ (x : D δ ψ) xΓ  |-  (λ ψ' x'. (Π ((ψ, x) = (ψ', x')) T)) : Π (ψ' : Ψ[δ], x' : D δ ψ') U
                   elimTy = hLams indTel (const ty),
                   clauses = []
                 }
