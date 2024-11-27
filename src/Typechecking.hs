@@ -50,14 +50,16 @@ module Typechecking
     reprCtorItem,
     reprCaseItem,
     reprDefItem,
+    enterPat,
+    spine,
     ensureAllProblemsSolved,
-    clauses,
   )
 where
 
 import Common
   ( Arg (..),
     Clause (..),
+    Clauses,
     CtorGlobal (..),
     DataGlobal (..),
     DefGlobal (DefGlobal),
@@ -80,10 +82,11 @@ import Common
     Try (..),
     enterLoc,
     lvlToIdx,
+    mapSpine,
     mapSpineM,
     telWithNames,
     pattern Impossible,
-    pattern Possible, Clauses, mapSpine,
+    pattern Possible,
   )
 import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
@@ -139,6 +142,7 @@ import Printing (Pretty (..), indentedFst)
 import Syntax
   ( Case (..),
     Closure (..),
+    Pat,
     SPat (..),
     STm (..),
     STy,
@@ -150,13 +154,15 @@ import Syntax
     sGatherApps,
     sGatherLams,
     sGatherPis,
+    sTmToPat,
     uniqueSLams,
-    vGetSpine, Pat, sTmToPat,
+    vGetSpine,
   )
 import Unelaboration (Unelab)
 import Unification
 import Prelude hiding (pi)
-import Matching (caseTree, MatchingState (MatchingState), clausesWithEmptyConstraints, Matching)
+
+-- import Matching (caseTree, MatchingState (MatchingState), clausesWithEmptyConstraints, Matching)
 
 data TcError
   = Mismatch [UnifyError]
@@ -815,38 +821,8 @@ lit mode l = case mode of
         return (FinLit f bound', KnownFin, S.singleton (Arg Explicit Zero vbound'))
     return (SLit l', VNorm (VData (knownData ty, args)))
 
-runMatching :: (forall n. (Matching n) => n a) -> (forall m. (Tc m) => m a)
-runMatching _ = undefined
-
-clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine SPat) STm)
-clause (_, ty) (Possible Empty t) = do
-  (t', _) <- t (Check ty)
-  return $ Possible Empty t'
-clause _ (Impossible Empty) = return $ Impossible Empty
-clause (tm, ty) (Possible ps t) = do
-  (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
-  (t', _) <- t (Check retTy)
-  let (_, sp) = sGatherApps ret
-  let spp = mapSpine sTmToPat sp
-  return $ Possible spp t'
-clause _ (Impossible _) = do
-  return undefined -- @@Todo
-  -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
-
-clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
-clauses d cls ty = enterCtx id $ do
-  -- Strategy:
-  -- - First we typecheck each clause
-  -- - Then we turn to case tree
-  -- - Invariant: in empty ctx
-  cls' <- mapM (clause (SDef d, ty)) cls
-  hty <- quoteHere ty >>= unembedHere
-  ct <- runMatching $ caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls'))
-  ct' <- embedHere ct
-  return (ct', ty)
-
-defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> Clauses (Child m) (Child m) -> m ()
-defItem mq n ts ty cl = do
+defItem :: (Tc m) => Maybe Qty -> Name -> Set Tag -> Child m -> cl -> (DefGlobal -> cl -> VTy -> m (STm, VTy)) -> m ()
+defItem mq n ts ty cl clauses = do
   ensureNewName n
   let q = fromMaybe Many mq
   (ty', _) <- expect Zero $ ty (Check (VNorm VU))

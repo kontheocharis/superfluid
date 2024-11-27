@@ -8,6 +8,8 @@ module Matching
     caseTree,
     clausesWithEmptyConstraints,
     MatchingState (..),
+    clause,
+    clauses,
   )
 where
 
@@ -18,6 +20,7 @@ import Common
     Clauses,
     CtorGlobal (..),
     DataGlobal (..),
+    DefGlobal,
     Has (..),
     HasNameSupply (uniqueName),
     Lvl (..),
@@ -31,7 +34,7 @@ import Common
     nextLvl,
     spineShapes,
     telShapes,
-    telToBinds,
+    telToBinds, pattern Possible, pattern Impossible, mapSpine,
   )
 import Constructions (ctorConstructions)
 import Context
@@ -69,7 +72,7 @@ import Syntax
     HTy,
     Pat (..),
     SPat (..),
-    STm,
+    STm (..),
     VNorm (..),
     VTm (..),
     VTy,
@@ -85,8 +88,9 @@ import Syntax
     joinTels,
     sAppSpine,
     sLams,
-    pattern VV,
+    pattern VV, sGatherApps, sTmToPat,
   )
+import Typechecking (Tc (..), Child, Mode (..), InPat (..), spine)
 import Unification
 import Prelude hiding (cycle, pi)
 
@@ -733,3 +737,33 @@ splitConstraint (MatchingState ctx ty cls) = do
 
 mapClauses :: (HTm -> HTm) -> [Clause (Constraints, Spine Pat) HTm] -> [Clause (Constraints, Spine Pat) HTm]
 mapClauses = undefined
+
+clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine SPat) STm)
+clause (_, ty) (Possible Empty t) = do
+  (t', _) <- t (Check ty)
+  return $ Possible Empty t'
+clause _ (Impossible Empty) = return $ Impossible Empty
+clause (tm, ty) (Possible ps t) = do
+  (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
+  (t', _) <- t (Check retTy)
+  let (_, sp) = sGatherApps ret
+  let spp = mapSpine sTmToPat sp
+  return $ Possible spp t'
+clause _ (Impossible _) = do
+  return undefined -- @@Todo
+  -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
+
+clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
+clauses d cls ty = enterCtx id $ do
+  -- Strategy:
+  -- - First we typecheck each clause
+  -- - Then we turn to case tree
+  -- - Invariant: in empty ctx
+  cls' <- mapM (clause (SDef d, ty)) cls
+  hty <- quoteHere ty >>= unembedHere
+  ct <- runMatching $ caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls'))
+  ct' <- embedHere ct
+  return (ct', ty)
+
+runMatching :: (forall n. (Matching n) => n a) -> (forall m. (Tc m) => m a)
+runMatching _ = undefined

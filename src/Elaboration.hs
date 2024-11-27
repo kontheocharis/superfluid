@@ -55,6 +55,7 @@ import Globals
     knownDef,
     lookupGlobal,
   )
+import Matching (clauses)
 import Presyntax
   ( MaybeQty (..),
     PCaseRep (..),
@@ -106,7 +107,7 @@ import Typechecking
     reprDefItem,
     univ,
     unrepr,
-    wild, clauses,
+    wild,
   )
 
 -- Presyntax exists below here
@@ -244,7 +245,7 @@ elabDef :: (Elab m) => PDef -> m ()
 elabDef def = do
   let cs =
         map
-          ( \(Clause ps t) -> Clause (fmap (fmap elab) ps) (elab <$> t))
+          (\(Clause ps t) -> Clause (fmap (fmap elab) ps) (elab <$> t))
           def.clauses
   defItem
     def.qty.un
@@ -252,6 +253,7 @@ elabDef def = do
     def.tags
     (elab def.ty)
     cs
+    clauses
   ensureAllProblemsSolved
   di <- access (getDefGlobal (DefGlobal def.name))
   runAccount di
