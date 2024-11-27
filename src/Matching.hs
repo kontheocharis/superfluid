@@ -276,7 +276,9 @@ unifyPL ctx ty t1 t2 = do
 
 solution :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 solution ctx ty a b = case (a, b) of
-  (_, HVar x) -> solution ctx ty (HVar x) a
+  (HVar x', HVar x)
+    | x' < x' -> solution ctx ty (HVar x) (HVar x')
+    | otherwise -> solution ctx ty (HVar x') (HVar x)
   (HVar x, _) -> do
     let l = Lvl (length ctx)
 
@@ -340,6 +342,7 @@ solution ctx ty a b = case (a, b) of
                       )
                 }
         return $ Just (ctx', Can, s)
+  (_, HVar x) -> solution ctx ty (HVar x) a
   _ -> return Nothing
 
 injectivity :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
@@ -491,11 +494,10 @@ type ConstrainedClause pats tm = Clause (SimpleConstraints, pats) tm
 
 type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
 
+type NextPatSingle pat tm = (Maybe pat, ConstrainedClause pat tm) -- nonempty
+
 mapClauses :: (Monad m) => (HTm -> HTm) -> ConstrainedClauses (HChild m) (HChild m) -> ConstrainedClauses (HChild m) (HChild m)
 mapClauses = undefined
-
-nextPat :: (Matching m) => ConstrainedClauses pat tm -> m (NextPat pat tm)
-nextPat = undefined
 
 -- Constraints
 
@@ -519,7 +521,15 @@ simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints
 simplifyConstraints cs = mconcat <$> mapM simplifyConstraint cs
 
 simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
-simplifyConstraint = undefined
+simplifyConstraint co = do
+  case co of
+    Constraint l (HVar x) p q -> return . Just $ [SimpleConstraint l x p q]
+    Constraint l (hGatherApps -> (HCtor (c, _), sp)) (CtorP (c', _) sp') q
+      | c == c' ->
+          simplifyConstraints
+            (zipWith (\x y -> Constraint l x.arg y.arg q) (toList sp) (toList sp'))
+      | otherwise -> return Nothing
+    _ -> return Nothing
 
 refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
 refineClause s cl' = case cl' of
@@ -528,6 +538,9 @@ refineClause s cl' = case cl' of
     case cs' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
+
+addNextConstraint :: (Matching m) => (Pat -> SimpleConstraint) -> ConstrainedClauses (HChild m) (HChild m) -> m (ConstrainedClauses (HChild m) (HChild m))
+addNextConstraint = undefined
 
 -- Matching
 
@@ -558,6 +571,12 @@ caseTree c = do
 ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
 ifForcePi = undefined
 
+lastVar :: HCtx -> Lvl
+lastVar ctx = Lvl (length ctx - 1)
+
+ctxSize :: HCtx -> Lvl
+ctxSize = Lvl . length
+
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
 done (MatchingState ctx ty cls) = do
   case cls of
@@ -567,22 +586,35 @@ done (MatchingState ctx ty cls) = do
       return (Just tm')
     _ -> return Nothing
 
+hasNextPat :: (Matching m) => ConstrainedClauses (HChild m) (HChild m) -> m Bool
+hasNextPat cls = do
+  case cls of
+    Clause (_, Empty) _ : _ -> return False
+    Clause (_, (_ :<| _)) _ : _ -> return True
+
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
-  (ps, _) <- nextPat cls
-  case ps of
-    Nothing -> return Nothing
-    Just _ -> do
-      ifForcePi ty (return Nothing) $ \(Param m q x a) b -> do
+  ps <- hasNextPat cls
+  if ps
+    then return Nothing
+    else do
+      ifForcePi ty (return Nothing) $ \p@(Param m q x a) b -> do
         -- We have the goal
-        -- Γ ⊢ cs Q ~> e : (x : A) -> B
+        -- Γ ⊢ C ~> e : (x : A) -> B
         --
-        -- We add (x : A) to the context and then recurse:
-        --    Γ (x : A) ⊢ cs Q ~> e' : B
+        -- We add (x : A) to the context to get Γ(x : A) and equate each clause's next pattern
+        -- to the variable x, to get C(x : A). (Note: C is not a context or telescope, but a list of clauses!)
+        --
         -- Finally we can construct the goal as
-        --    Γ ⊢ cs Q ~> λ t. e' (id,t) : (x : A) -> B
+        --
+        --    Γ(x : A) ⊢ C(x : A) ~> e : B[x]
+        --   -----------------------------------------
+        --    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
+        --
         let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
-        rest <- caseTree (MatchingState (ctx :|> Param m q x a) (b (HVar (Lvl $ length ctx))) cls)
+        let ctx' = ctx :|> Param m q x a
+        cls' <- addNextConstraint (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
+        rest <- caseTree (MatchingState ctx' (b (HVar (lastVar ctx'))) cls')
         return . Just $ HLam m q x (\t -> sub (s t) rest)
 
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
@@ -675,7 +707,6 @@ splitConstraint (MatchingState ctx ty cls) = do
                   clauses = []
                 }
         return . Just $ hApp (HCase (caseBase {clauses = elims})) psixRefl
-      _ -> return Nothing
     _ -> return Nothing
 
 -- Typechecking
@@ -684,7 +715,7 @@ clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses
 clausesWithEmptyConstraints = undefined
 
 clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
-clauses d cls ty = enterCtx id $ do
+clauses _ cls ty = enterCtx id $ do
   hty <- quoteHere ty >>= unembedHere
   ct <- caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls))
   ct' <- embedHere ct
