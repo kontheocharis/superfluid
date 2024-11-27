@@ -44,6 +44,7 @@ import Data.Foldable (Foldable (..), toList)
 import Data.Maybe (catMaybes)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
+import Data.Traversable (for)
 import Evaluation
   ( Eval (..),
   )
@@ -83,10 +84,10 @@ data MatchingError = MatchingError
 class (Eval m, Has m Loc) => Matching m where
   matchingError :: MatchingError -> m a
 
-runTc :: (Matching m) => Qty -> Ctx -> (forall n. (Tc n) => n a) -> m a
+runTc :: (Matching m, Tc m) => Qty -> Ctx -> m a -> m a
 runTc q c x = undefined
 
-runTc' :: (Matching m) => Qty -> HCtx -> (forall n. (Tc n) => n a) -> m a
+runTc' :: (Matching m, Tc m) => Qty -> HCtx -> m a -> m a
 runTc' q c x = undefined
 
 -- Unification
@@ -517,9 +518,6 @@ subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) 
 simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
 simplifyConstraints cs = mconcat <$> mapM simplifyConstraint cs
 
-simplifySimpleConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
-simplifySimpleConstraints cs = mconcat <$> mapM simplifyConstraint cs
-
 simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
 simplifyConstraint co = do
   case co of
@@ -539,6 +537,9 @@ refineClause s cl' = case cl' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
 
+
+-- @@Todo implicit args:
+--
 addNextConstraint ::
   (Matching m) =>
   HCtx ->
@@ -742,8 +743,10 @@ splitConstraint (MatchingState ctx q ty cls) = do
 
 -- Typechecking
 
-clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
-clausesWithEmptyConstraints = undefined
+clausesWithEmptyConstraints :: (Matching m, Tc m) => Clauses (Child m) (Child m) -> (ConstrainedClauses (HChildPat m) (HChildTm m))
+clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps t) ->
+  let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (p m))) ps
+   in let t' = runTc' in Clause ([], ps') t'
 
 clauses :: (Tc m, Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses _ cls ty = enterCtx id $ do
