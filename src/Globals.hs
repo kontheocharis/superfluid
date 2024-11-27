@@ -49,6 +49,8 @@ module Globals
     lookupInstance,
     instances,
     addInstanceItem,
+    getCtorGlobal',
+    getDataGlobal',
   )
 where
 
@@ -67,9 +69,10 @@ import Common
   )
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe (fromJust)
 import Data.Set (Set)
 import qualified Data.Set as S
-import Syntax (Closure, HTel, HTm, HTy, STm (..), STy, VTm (..), VTy, Pat)
+import Syntax (Closure, HTel, HTm, HTy, Pat, STm (..), STy, VTm (..), VTy)
 
 data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
@@ -130,8 +133,8 @@ data GlobalInfo
   | DefInfo DefGlobalInfo
   | PrimInfo PrimGlobalInfo
 
-data InstanceInfo = InstanceInfo {
-    origin :: DefGlobal,
+data InstanceInfo = InstanceInfo
+  { origin :: DefGlobal,
     ty :: VTy
   }
 
@@ -219,11 +222,17 @@ getDataGlobal g sig = case M.lookup g.globalName sig.contents of
   Just _ -> error $ "getDataGlobal: not a data global" ++ show g
   _ -> error $ "getDataGlobal: not a global" ++ show g
 
+getDataGlobal' :: DataGlobal -> Sig -> (DataGlobalInfo, DataConstructions)
+getDataGlobal' g sig = let di = getDataGlobal g sig in (di, fromJust $ di.constructions)
+
 getCtorGlobal :: CtorGlobal -> Sig -> CtorGlobalInfo
 getCtorGlobal g sig = case M.lookup g.globalName sig.contents of
   Just (CtorInfo info) -> info
   Just _ -> error $ "getCtorGlobal: not a ctor global: " ++ show g
   _ -> error $ "getCtorGlobal: not a global" ++ show g
+
+getCtorGlobal' :: CtorGlobal -> Sig -> (CtorGlobalInfo, CtorConstructions)
+getCtorGlobal' g sig = let ci = getCtorGlobal g sig in (ci, fromJust $ ci.constructions)
 
 getDefGlobal :: DefGlobal -> Sig -> DefGlobalInfo
 getDefGlobal g sig = case M.lookup g.globalName sig.contents of

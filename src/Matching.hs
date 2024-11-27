@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -8,7 +10,7 @@ module Matching
     caseTree,
     clausesWithEmptyConstraints,
     MatchingState (..),
-    clause,
+    MatchingError,
     clauses,
   )
 where
@@ -18,52 +20,43 @@ import Common
   ( Arg (..),
     Clause (..),
     Clauses,
-    CtorGlobal (..),
     DataGlobal (..),
     DefGlobal,
     Has (..),
     HasNameSupply (uniqueName),
+    Loc,
     Lvl (..),
     Name (..),
     Param (..),
     PiMode (..),
     Qty (..),
     Spine,
-    Tel,
-    mapSpineM,
     nextLvl,
     spineShapes,
     telShapes,
-    telToBinds, pattern Possible, pattern Impossible, mapSpine,
   )
-import Constructions (ctorConstructions)
 import Context
 import Control.Applicative (asum)
 import Control.Monad (forM)
 import Control.Monad.Extra (firstJustM)
-import Data.Bifunctor (Bifunctor (..))
 import Data.Foldable (Foldable (..), toList)
-import Data.Map (Map)
-import Data.Maybe (catMaybes, fromJust)
+import Data.Maybe (catMaybes)
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Evaluation
   ( Eval (..),
-    ($$),
   )
 import Globals
   ( CtorConstructions (..),
-    CtorGlobalInfo (..),
     DataConstructions (..),
     DataGlobalInfo (..),
     KnownGlobal (KnownEqual, KnownRefl),
-    Sig (..),
-    getCtorGlobal,
-    getDataGlobal,
+    getCtorGlobal',
+    getDataGlobal',
     knownCtor,
     knownData,
   )
-import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinder, hoistBinders, hoistBinders', hoistBindersSp, idSub, liftSubN, mapSub1, mapSubN, proj)
+import Substitution (BiSub (..), Shapes, Sub (..), Subst (..), composeSub, extendSub, hoistBinders, hoistBinders', idSub, liftSubN, mapSub1, mapSubN, proj)
 import Syntax
   ( Case (..),
     HCtx,
@@ -71,37 +64,31 @@ import Syntax
     HTm (..),
     HTy,
     Pat (..),
-    SPat (..),
     STm (..),
-    VNorm (..),
     VTm (..),
     VTy,
-    embed,
-    embedCase,
-    embedTel,
     extendCtxWithTel,
     extendTel,
     hApp,
     hGatherApps,
     hLams,
-    hPis,
     joinTels,
-    sAppSpine,
-    sLams,
-    pattern VV, sGatherApps, sTmToPat,
   )
-import Typechecking (Tc (..), Child, Mode (..), InPat (..), spine)
-import Unification
+import Typechecking (Child, ModeG (..), Tc (..))
 import Prelude hiding (cycle, pi)
-
--- Proof relevant unification
---
 
 data MatchingError = MatchingError
 
-class (Eval m) => Matching m where
-  throwUnifyError :: MatchingError -> m a
-  target :: m VTm
+class (Eval m, Has m Loc, Tc m) => Matching m where
+  matchingError :: MatchingError -> m a
+
+runTc :: (Matching m) => Qty -> Ctx -> (forall n. (Tc n) => n a) -> m a
+runTc q c x = undefined
+
+runTc' :: (Matching m) => Qty -> HCtx -> (forall n. (Tc n) => n a) -> m a
+runTc' q c x = undefined
+
+-- Unification
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
 -- was successful or not.
@@ -164,6 +151,10 @@ hequality = undefined
 --
 equalitySp :: HTel -> Spine HTm -> Spine HTm -> HTel
 equalitySp = undefined
+
+-- Reflexivity for spines
+reflSp :: HTel -> Spine HTm -> Spine HTm
+reflSp = undefined
 
 -- equalitySp HEmpty Empty Empty = HEmpty
 -- equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
@@ -278,9 +269,9 @@ unifyPL ctx ty t1 t2 = do
   res <- firstJustM (\t -> t ctx ty t1 t2) tactics
   case res of
     Just x -> return x
-    Nothing -> throwUnifyError MatchingError
+    Nothing -> matchingError MatchingError
 
--- Proof-relevant unification tactics
+-- Unification tactics
 
 solution :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 solution ctx ty a b = case (a, b) of
@@ -360,8 +351,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
     -- Reason : Terms are well-typed *and* fully eta-expanded. @@Todo: Actually do the latter!
     let sh = telShapes ctx
     let c = c1
-    ci <- access (getCtorGlobal c)
-    let cc = fromJust ci.constructions
+    (_, cc) <- access (getCtorGlobal' c)
     let n = cc.argsArity
 
     -- (Γ', σ : BiSub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
@@ -492,79 +482,21 @@ deletion ctx ty a b = do
     else
       return Nothing
 
+-- Clauses
+
 type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
 type ConstrainedClause pats tm = Clause (Constraints, pats) tm
 
 type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
 
-clausesWithEmptyConstraints :: Clauses SPat STm -> ConstrainedClauses Pat HTm
-clausesWithEmptyConstraints = undefined
+mapClauses :: (Monad m) => (HTm -> HTm) -> ConstrainedClauses (HChild m) (HChild m) -> ConstrainedClauses (HChild m) (HChild m)
+mapClauses = undefined
 
 nextPat :: (Matching m) => ConstrainedClauses pat tm -> m (NextPat pat tm)
 nextPat = undefined
 
-type Matches m = Map CtorGlobal [(Sub, [m (HTm, HTy)])]
-
-equateSpines :: (Matching m) => Spine HTm -> Spine HTm -> m Sub
-equateSpines = undefined
-
-equateTerms :: (Matching m) => HTm -> HTm -> m Sub
-equateTerms = undefined
-
-enterSub :: (Matching m) => Sub -> m a -> m a
-enterSub = undefined
-
-class ApplySub m where
-  applySub :: Sub -> m -> m
-
-instance ApplySub VTm where
-  applySub = undefined
-
-instance (ApplySub a) => ApplySub (Spine a) where
-  applySub = undefined
-
-instance (ApplySub a, ApplySub b) => ApplySub (Clause a b) where
-  applySub = undefined
-
-binder :: (Has m Ctx) => PiMode -> Qty -> Name -> VTy -> (Lvl -> m a) -> m a
-binder m q x a f = do
-  l <- getLvl
-  enterCtx (bind m x q a) $ f l
-
-forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
-forceData d = undefined
-
--- unifyPrfRelSp : (a : Tms Γ T) -> (b : Tms Γ T) -> (Γ' : Ctx) * (Γ' ~= Γ (a = b)) * m [enter Γ'] ()
-unifyPrfRelSp :: (Matching m) => Spine HTm -> Spine HTm -> m ()
-unifyPrfRelSp = undefined
-
-unifyPrfRel :: (Matching m) => HTm -> HTm -> m ()
-unifyPrfRel = undefined
-
-canUnifyPrfRel :: (Matching m) => HTm -> HTm -> m CanUnify
-canUnifyPrfRel = undefined
-
-enterHTel :: (Matching m) => HTel -> (Spine HTm -> m a) -> m a
-enterHTel = undefined
-
-getDataGlobal' :: DataGlobal -> Sig -> (DataGlobalInfo, DataConstructions)
-getDataGlobal' = undefined
-
-getCtorGlobal' :: CtorGlobal -> Sig -> (CtorGlobalInfo, CtorConstructions)
-getCtorGlobal' = undefined
-
-eqTel :: Spine HTm -> Spine HTm -> HTel
-eqTel = undefined
-
-reflSp :: HTel -> Spine HTm -> Spine HTm
-reflSp = undefined
-
-patAsTm :: Pat -> HTm
-patAsTm = undefined
-
-tmAsPat :: HTm -> Pat
-tmAsPat = undefined
+-- Constraints
 
 joinConstraints :: Constraints -> Constraints -> Constraints
 joinConstraints = undefined
@@ -588,15 +520,27 @@ addConstraint c (Clause (Constraints cs, sp) t) = Clause (Constraints (c : cs), 
 nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
 nextConstraint (Constraints []) = Nothing
 
-data MatchingState = MatchingState
+-- Matching
+
+type HMode = ModeG HTy
+
+type HChild m = Qty -> HCtx -> HMode -> m (HTm, HTy)
+
+data MatchingState m = MatchingState
   { ctx :: HCtx,
     ty :: HTy,
-    cls :: [Clause (Constraints, Spine Pat) HTm]
+    cls :: ConstrainedClauses (HChild m) (HChild m)
   }
 
-caseTree :: (Matching m) => MatchingState -> m HTm
+forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
+forceData d = undefined
+
+tmAsPat :: HTm -> Pat
+tmAsPat = undefined
+
+caseTree :: (Matching m) => MatchingState m -> m HTm
 caseTree c = do
-  let tactics = [addVar c, splitConstraint c]
+  let tactics = [addVar c, splitConstraint c, done c]
   result <- asum <$> sequence tactics
   case result of
     Just r -> return r
@@ -605,7 +549,16 @@ caseTree c = do
 ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
 ifForcePi = undefined
 
-addVar :: (Matching m) => MatchingState -> m (Maybe HTm)
+done :: (Matching m) => MatchingState m -> m (Maybe HTm)
+done (MatchingState ctx ty cls) = do
+  case cls of
+    Clause (Constraints [], Empty) (Just tm) : _ -> do
+      -- @@Todo: qty
+      (tm', _) <- tm Many ctx (Check ty)
+      return (Just tm')
+    _ -> return Nothing
+
+addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
   (ps, _) <- nextPat cls
   case ps of
@@ -623,7 +576,7 @@ addVar (MatchingState ctx ty cls) = do
         rest <- caseTree (MatchingState (ctx :|> Param m q x a) (b (HVar (Lvl $ length ctx))) cls)
         return . Just $ HLam m q x (\t -> sub (s t) rest)
 
-splitConstraint :: (Matching m) => MatchingState -> m (Maybe HTm)
+splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
 splitConstraint (MatchingState ctx ty cls) = do
   -- In context Γ (ctx), and return type T (ty) we have a list of clauses Q and constraints cs.
   -- Γ ⊢ cs Q ~> e : T
@@ -699,7 +652,7 @@ splitConstraint (MatchingState ctx ty cls) = do
           -- Now we build e'' which is:
           --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
           -- The equalities are explicitly given by the motive we will set up later.
-          let eq = eqTel psix psix'
+          let eq = equalitySp psiTel psix psix'
           let e'' = hoistBinders' (length pi) $ hLams eq (hoistBinders (length psix) e')
 
           -- The method is for constructor ci π
@@ -712,7 +665,7 @@ splitConstraint (MatchingState ctx ty cls) = do
         -- We also add the equalities between the subject and the data indices
         -- in the motive and the ones in the context.
         --    (ψ' : Ψ[δ]) (x' : D δ ψ') ((ψ, x) = (ψ', x'))
-        let eq = eqTel psix
+        let eq = equalitySp psixTe' psix
         let indTel = joinTels psixTe' eq
 
         -- We also need the reflexivity proofs to apply to the motive.
@@ -735,35 +688,14 @@ splitConstraint (MatchingState ctx ty cls) = do
       _ -> return Nothing
     _ -> return Nothing
 
-mapClauses :: (HTm -> HTm) -> [Clause (Constraints, Spine Pat) HTm] -> [Clause (Constraints, Spine Pat) HTm]
-mapClauses = undefined
+-- Typechecking
 
-clause :: (Tc m) => (STm, VTy) -> Clause (Spine (Child m)) (Child m) -> m (Clause (Spine SPat) STm)
-clause (_, ty) (Possible Empty t) = do
-  (t', _) <- t (Check ty)
-  return $ Possible Empty t'
-clause _ (Impossible Empty) = return $ Impossible Empty
-clause (tm, ty) (Possible ps t) = do
-  (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
-  (t', _) <- t (Check retTy)
-  let (_, sp) = sGatherApps ret
-  let spp = mapSpine sTmToPat sp
-  return $ Possible spp t'
-clause _ (Impossible _) = do
-  return undefined -- @@Todo
-  -- (ret, retTy) <- enterPat (InPossiblePat []) $ spine (tm, ty) ps
+clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses (HChild m) (HChild m)
+clausesWithEmptyConstraints = undefined
 
-clauses :: (Tc m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
+clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses d cls ty = enterCtx id $ do
-  -- Strategy:
-  -- - First we typecheck each clause
-  -- - Then we turn to case tree
-  -- - Invariant: in empty ctx
-  cls' <- mapM (clause (SDef d, ty)) cls
   hty <- quoteHere ty >>= unembedHere
-  ct <- runMatching $ caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls'))
+  ct <- caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls))
   ct' <- embedHere ct
   return (ct', ty)
-
-runMatching :: (forall n. (Matching n) => n a) -> (forall m. (Tc m) => m a)
-runMatching _ = undefined

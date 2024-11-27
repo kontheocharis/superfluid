@@ -46,6 +46,7 @@ module Context
     bounds,
     embedHere,
     unembedHere,
+    binder,
   )
 where
 
@@ -316,6 +317,11 @@ enterTel Empty f = f
 enterTel (t :<| ts) f = do
   t' <- evalHere t.ty
   enterCtx (bind t.mode t.name t.qty t') (enterTel ts f)
+
+binder :: (Has m Ctx) => PiMode -> Qty -> Name -> VTy -> (Lvl -> m a) -> m a
+binder m q x a f = do
+  l <- getLvl
+  enterCtx (bind m x q a) $ f l
 
 quoteHere :: (Eval m, Has m Ctx) => VTm -> m STm
 quoteHere t = do

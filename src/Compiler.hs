@@ -67,6 +67,7 @@ import Typechecking
   )
 import Unelaboration (Unelab, unelabSig)
 import Representation (reprInfSig)
+import Matching (MatchingError, Matching (matchingError))
 
 -- import Resources.Prelude (preludePath, preludeContents)
 
@@ -171,6 +172,7 @@ data CompilerError
   | ParseCompilerError ParseError
   | ElabCompilerError ElabError
   | AccCompilerError AccError
+  | MatchingCompilerError MatchingError
 
 instance Pretty Comp CompilerError where
   pretty e = do
@@ -246,6 +248,9 @@ instance Acc Comp where
 
 instance Elab Comp where
   elabError = throwError . ElabCompilerError
+
+instance Matching Comp where
+  matchingError = throwError . MatchingCompilerError
 
 instance Has Comp Ctx where
   view = gets (\c -> c.ctx)

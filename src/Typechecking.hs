@@ -18,6 +18,7 @@ module Typechecking
     Ctx (..),
     emptyCtx,
     Mode (..),
+    ModeG (..),
     InPat (..),
     Problem,
     Goal,
@@ -321,7 +322,9 @@ instance (Has m Ctx, Eval m, Tc m) => Unify m where
   onMetaFailed (MetaProblem m sp t) = addUnifyProblem (VNeu (VFlex m, sp)) t
   onMetaSolved (MetaProblem {}) = solveRemainingProblems
 
-data Mode = Check VTy | Infer
+data ModeG ty = Check ty | Infer
+
+type Mode = ModeG VTy
 
 instance (Monad m, Pretty m VTy) => Pretty m Mode where
   pretty (Check ty) = do

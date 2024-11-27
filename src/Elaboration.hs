@@ -55,7 +55,7 @@ import Globals
     knownDef,
     lookupGlobal,
   )
-import Matching (clauses)
+import Matching (clauses, Matching)
 import Presyntax
   ( MaybeQty (..),
     PCaseRep (..),
@@ -107,7 +107,7 @@ import Typechecking
     reprDefItem,
     univ,
     unrepr,
-    wild,
+    wild, ModeG (..),
   )
 
 -- Presyntax exists below here
@@ -140,7 +140,7 @@ instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
         PatMustBeFullyApplied n n' ->
           return $ "Pattern must be fully applied, but got " ++ show n' ++ " arguments instead of " ++ show n
 
-class (Tc m, Acc m) => Elab m where
+class (Tc m, Matching m, Acc m) => Elab m where
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
