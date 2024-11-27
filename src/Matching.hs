@@ -646,12 +646,12 @@ addVar (MatchingState ctx q' ty cls) = do
 
 -- There is a next constraint to split on.
 --
--- Γ ⊢ C ~> e : B and  C = ([xᵢ = pᵢ, csᵢ] (pᵢ psᵢ) -> tᵢ)ᵢ
+-- Γ ⊢ C ~> e : B and  C = ([xᵢ = pᵢ, csᵢ] (psᵢ) -> tᵢ)ᵢ
 --
--- This is the most complex case: we need to split on the constraint xᵢ = pᵢ;
--- if pᵢ is a variable, we can use the solution rule, otherwise we need to
--- generate an eliminator that matches the outer layer of all the pᵢs and recurses
--- on the inner layers.
+-- This is the most complex case since we need to split on the constraint xᵢ = pᵢ:
+-- - If pᵢ is a variable, we can use the solution rule.
+-- - Otherwise we need to generate an eliminator that matches the outer layer of
+--   all the pᵢs and recurses on the inner layers.
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
 splitConstraint (MatchingState ctx q ty cls) = do
   case cls of
