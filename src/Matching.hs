@@ -80,7 +80,7 @@ import Prelude hiding (cycle, pi)
 
 data MatchingError = MatchingError
 
-class (Eval m, Has m Loc, Tc m) => Matching m where
+class (Eval m, Has m Loc) => Matching m where
   matchingError :: MatchingError -> m a
 
 runTc :: (Matching m) => Qty -> Ctx -> (forall n. (Tc n) => n a) -> m a
@@ -562,6 +562,7 @@ type HChildPat m = Qty -> HCtx -> HMode -> m (Pat, HTy)
 
 data MatchingState m = MatchingState
   { ctx :: HCtx,
+    qty :: Qty,
     ty :: HTy,
     cls :: ConstrainedClauses (HChildPat m) (HChildTm m)
   }
@@ -609,11 +610,11 @@ caseTree c = do
 --
 -- We simply take the first clause and typecheck its term.
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
-done (MatchingState ctx ty cls) = do
+done (MatchingState ctx q ty cls) = do
   case cls of
     Clause ([], Empty) (Just tm) : _ -> do
       -- @@Todo: qty
-      (tm', _) <- tm Many ctx (Check ty)
+      (tm', _) <- tm q ctx (Check ty)
       return (Just tm')
     _ -> return Nothing
 
@@ -630,7 +631,7 @@ done (MatchingState ctx ty cls) = do
 --   -----------------------------------------
 --    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
-addVar (MatchingState ctx ty cls) = do
+addVar (MatchingState ctx q' ty cls) = do
   ps <- hasNextPat cls
   if ps
     then return Nothing
@@ -640,7 +641,7 @@ addVar (MatchingState ctx ty cls) = do
         let ctx' = ctx :|> Param m q x a
         let b' = b (HVar (lastVar ctx'))
         cls' <- addNextConstraint ctx a (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
-        rest <- caseTree (MatchingState ctx' b' cls')
+        rest <- caseTree (MatchingState ctx' q' b' cls')
         return . Just $ HLam m q x (\t -> sub (s t) rest)
 
 -- There is a next constraint to split on.
@@ -652,7 +653,7 @@ addVar (MatchingState ctx ty cls) = do
 -- generate an eliminator that matches the outer layer of all the pᵢs and recurses
 -- on the inner layers.
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
-splitConstraint (MatchingState ctx ty cls) = do
+splitConstraint (MatchingState ctx q ty cls) = do
   case cls of
     Clause (co : _, _) _ : clss -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
@@ -660,7 +661,7 @@ splitConstraint (MatchingState ctx ty cls) = do
       SimpleConstraint _ x (LvlP _ _ x') param -> do
         -- This will use the solution rule for the constraint x = x'
         (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
-        Just <$> caseTree (MatchingState ctx' (sub s.forward ty) clss)
+        Just <$> caseTree (MatchingState ctx' q (sub s.forward ty) clss)
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
@@ -695,7 +696,7 @@ splitConstraint (MatchingState ctx ty cls) = do
 
           -- Build the rest of the clause in Γ'', which will first give:
           --    Γ'' |- e : T σ .
-          e <- caseTree (MatchingState (sub s.forward ctx'') (sub s.forward ty) cls')
+          e <- caseTree (MatchingState (sub s.forward ctx'') q (sub s.forward ty) cls')
           -- Through the substitution we can recover
           --    Γχ (x : D δ ψ) xΓ (π : Πi) ((ψ, x) = (ξi[δ,π], ci π)) |- e' = e σ⁻¹ : T ,
           -- bringing us back to the original context.
@@ -744,9 +745,10 @@ splitConstraint (MatchingState ctx ty cls) = do
 clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints = undefined
 
-clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
+clauses :: (Tc m, Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses _ cls ty = enterCtx id $ do
   hty <- quoteHere ty >>= unembedHere
-  ct <- caseTree (MatchingState Empty hty (clausesWithEmptyConstraints cls))
+  q <- view
+  ct <- caseTree (MatchingState Empty q hty (clausesWithEmptyConstraints cls))
   ct' <- embedHere ct
   return (ct', ty)
