@@ -47,6 +47,8 @@ module Context
     embedHere,
     unembedHere,
     binder,
+    embedEvalHere,
+    quoteUnembedHere,
   )
 where
 
@@ -71,7 +73,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, close, eval, evalInOwnCtx, evalPat, quote, resolve, vUnfold, vUnfoldLazy, vRepr)
+import Evaluation (Eval, close, eval, evalInOwnCtx, evalPat, quote, resolve, vUnfold, vUnfoldLazy, vRepr, quoteUnembed)
 import Printing (Pretty (..))
 import Syntax
   ( BoundState (Bound, Defined),
@@ -373,6 +375,16 @@ unembedHere :: (Has m Ctx) => STm -> m HTm
 unembedHere t = do
   h <- getHoasEnv
   return $ unembed h t
+
+quoteUnembedHere :: (Eval m, Has m Ctx) => VTm -> m HTm
+quoteUnembedHere t = do
+  l <- getLvl
+  quoteUnembed l t
+
+embedEvalHere :: (Eval m, Has m Ctx) => HTm -> m VTm
+embedEvalHere t = do
+  t' <- embedHere t
+  evalHere t'
 
 embedHere :: (Has m Ctx) => HTm -> m STm
 embedHere t = do

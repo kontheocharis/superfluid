@@ -47,6 +47,8 @@ import qualified Data.Sequence as S
 import Data.Traversable (for)
 import Evaluation
   ( Eval (..),
+    embedEval,
+    quoteUnembed,
   )
 import Globals
   ( CtorConstructions (..),
@@ -537,7 +539,6 @@ refineClause s cl' = case cl' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
 
-
 -- @@Todo implicit args:
 --
 addNextConstraint ::
@@ -571,7 +572,7 @@ data MatchingState m = MatchingState
 forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
 forceData d = undefined
 
-tmAsPat :: HTm -> Pat
+tmAsPat :: (Matching m) => HTm -> m Pat
 tmAsPat = undefined
 
 ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
@@ -677,7 +678,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Let Γ' = Γχ (x : D δ ψ) xΓ (π : Πi)
           (_, cc) <- access (getCtorGlobal' c)
           let (ctx', pi) = extendCtxWithTel ctx (\_ -> cc.args delta)
-          let cpat = tmAsPat (hApp (HCtor (c, delta)) pi)
+          cpat <- tmAsPat (hApp (HCtor (c, delta)) pi) -- Should never fail
 
           -- Create the spine (ξi[δ,π], ci π)
           let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
@@ -743,14 +744,34 @@ splitConstraint (MatchingState ctx q ty cls) = do
 
 -- Typechecking
 
-clausesWithEmptyConstraints :: (Matching m, Tc m) => Clauses (Child m) (Child m) -> (ConstrainedClauses (HChildPat m) (HChildTm m))
-clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps t) ->
-  let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (p m))) ps
-   in let t' = runTc' in Clause ([], ps') t'
+checkPat :: (Matching m, Tc m) => Child m -> HMode -> m (Pat, HTy)
+checkPat c mode = do
+  mode' <- traverse embedEvalHere mode
+  (tm, ty) <- c mode'
+  tm' <- unembedHere tm
+  ty' <- quoteUnembedHere ty
+  pat <- tmAsPat tm'
+  return (pat, ty')
+
+checkTm :: (Matching m, Tc m) => Child m -> HMode -> m (HTm, HTy)
+checkTm c mode = do
+  mode' <- traverse embedEvalHere mode
+  (tm, ty) <- c mode'
+  tm' <- unembedHere tm
+  ty' <- quoteUnembedHere ty
+  return (tm', ty')
+
+clausesWithEmptyConstraints ::
+  (Matching m, Tc m) =>
+  Clauses (Child m) (Child m) ->
+  ConstrainedClauses (HChildPat m) (HChildTm m)
+clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
+  let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (checkPat p m))) ps
+   in let t' = fmap (\t q ctx m -> runTc' q ctx (checkTm t m)) r in Clause ([], ps') t'
 
 clauses :: (Tc m, Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses _ cls ty = enterCtx id $ do
-  hty <- quoteHere ty >>= unembedHere
+  hty <- quoteUnembedHere ty
   q <- view
   ct <- caseTree (MatchingState Empty q hty (clausesWithEmptyConstraints cls))
   ct' <- embedHere ct

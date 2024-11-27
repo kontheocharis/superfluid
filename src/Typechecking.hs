@@ -322,7 +322,7 @@ instance (Has m Ctx, Eval m, Tc m) => Unify m where
   onMetaFailed (MetaProblem m sp t) = addUnifyProblem (VNeu (VFlex m, sp)) t
   onMetaSolved (MetaProblem {}) = solveRemainingProblems
 
-data ModeG ty = Check ty | Infer
+data ModeG ty = Check ty | Infer deriving (Functor, Traversable, Foldable)
 
 type Mode = ModeG VTy
 

@@ -33,6 +33,7 @@ module Evaluation
     ($$>),
     closureToLam,
     embedEval,
+    quoteUnembed,
   )
 where
 
@@ -107,7 +108,7 @@ import Syntax
     sReprTimes,
     uniqueSLams,
     pattern VMeta,
-    pattern VVar, HTm, pattern VV, embed,
+    pattern VVar, HTm (..), pattern VV, embed, unembed,
   )
 import Data.Maybe (fromMaybe)
 
@@ -613,3 +614,9 @@ ensureIsCtor l v c a = do
 
 embedEval :: (Eval m) => Lvl -> HTm -> m VTm
 embedEval l t = eval (map VV $ members l) (embed l t)
+
+quoteUnembed :: (Eval m) => Lvl -> VTm -> m HTm
+quoteUnembed l t = do
+  t' <- quote l t
+  let env = map HVar $ members l
+  return $ unembed env t'
