@@ -251,3 +251,4 @@ instance Subst HTel where
 
   occurs _ _ HEmpty = False
   occurs l x (HWithParam m q _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
+

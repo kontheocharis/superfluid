@@ -487,7 +487,7 @@ deletion ctx ty a b = do
 
 type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
-type ConstrainedClause pats tm = Clause (Constraints, pats) tm
+type ConstrainedClause pats tm = Clause (SimpleConstraints, pats) tm
 
 type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
 
@@ -501,34 +501,33 @@ nextPat = undefined
 
 data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
 
+data SimpleConstraint = SimpleConstraint {lvl :: Lvl, lhs :: Lvl, rhs :: Pat, param :: Param HTy}
+
 data IsSat = Sat | Unsat
 
 type Constraints = [Constraint]
 
--- simplifyConstraints (c@(Constraint l x (LvlP n q l') p) : cs) = (c : simplifyConstraints cs)
--- simplifyConstraints (Constraint l x (CtorP c sp) (hGatherApps -> (HCtor (c'), sp')) : cs) = _
--- simplifyConstraints (Constraint l x (CtorP c sp) _ : cs) = _
+type SimpleConstraints = [SimpleConstraint]
 
-constraints :: HCtx -> Spine HTm -> Spine Pat -> m Constraints
-constraints = undefined
+instance Subst Constraint where
+  sub s (Constraint l x p q) = Constraint l (sub s x) p q -- @@Todo: subst in pat or remove data params from pat!
 
-simpleConstraint :: HTm -> Pat -> m Constraint
-simpleConstraint = undefined
+subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
+subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
 
-emptyConstraints :: Constraints
-emptyConstraints = undefined
+simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
+simplifyConstraints cs = mconcat <$> mapM simplifyConstraint cs
 
-addConstraint :: Constraint -> Constraints -> Constraints
-addConstraint = undefined
+simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
+simplifyConstraint = undefined
 
--- addConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
--- addConstraint c (Clause (cs, sp) t) = Clause ((c : cs), sp) t
-
-applyConstraint :: Constraint -> ConstrainedClause (Spine Pat) HTm -> ConstrainedClause (Spine Pat) HTm
-applyConstraint c (Clause (cs, sp) t) = Clause ((c : cs), sp) t
-
-nextConstraint :: Constraints -> Maybe (Constraint, Constraints)
-nextConstraint ([]) = Nothing
+refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
+refineClause s cl' = case cl' of
+  Clause (cs, ps) t -> do
+    cs' <- simplifyConstraints (map (subSimpleConstraint s) cs)
+    case cs' of
+      Just cs'' -> return . Just $ Clause (cs'', ps) t
+      Nothing -> return Nothing
 
 -- Matching
 
@@ -568,25 +567,6 @@ done (MatchingState ctx ty cls) = do
       return (Just tm')
     _ -> return Nothing
 
-addConstraints :: (Matching m) => (ConstrainedClause p t -> Constraints) -> MatchingState m -> MatchingState m
-addConstraints = undefined
-
-simplifyConstraints :: (Matching m) => Constraints -> m (Maybe Constraints)
-simplifyConstraints = undefined
-
-joinConstraints :: (Matching m) => Constraints -> Constraints -> m Constraints
-joinConstraints = undefined
-
-instance Subst Constraint
-
-refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
-refineClause s cl' = case cl' of
-  Clause (cs, ps) t -> do
-    cs' <- simplifyConstraints (map (sub s) cs)
-    case cs' of
-      Just cs'' -> return . Just $ Clause (cs'', ps) t
-      Nothing -> return Nothing
-
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
   (ps, _) <- nextPat cls
@@ -615,12 +595,12 @@ splitConstraint (MatchingState ctx ty cls) = do
       --
       -- 1.1. This constraint is of the form Γ ⊢ x = x' : T, where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      Constraint _ (HVar x) (LvlP _ _ x') param -> do
+      SimpleConstraint _ x (LvlP _ _ x') param -> do
         -- This will use the solution rule for the constraint x = x'
         (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
         Just <$> caseTree (MatchingState ctx' (sub s.forward ty) clss)
       -- 1.2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ (x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))
-      Constraint _ (HVar x) (CtorP _ _) p -> do
+      SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
         (d, delta, psi) <- forceData p.ty
         (di, dc) <- access (getDataGlobal' d)
