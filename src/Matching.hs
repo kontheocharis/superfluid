@@ -496,9 +496,6 @@ type NextPat pat tm = (Maybe [pat], ConstrainedClauses pat tm) -- nonempty
 
 type NextPatSingle pat tm = (Maybe pat, ConstrainedClause pat tm) -- nonempty
 
-mapClauses :: (Monad m) => (HTm -> HTm) -> ConstrainedClauses (HChild m) (HChild m) -> ConstrainedClauses (HChild m) (HChild m)
-mapClauses = undefined
-
 -- Constraints
 
 data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
@@ -520,6 +517,9 @@ subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) 
 simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
 simplifyConstraints cs = mconcat <$> mapM simplifyConstraint cs
 
+simplifySimpleConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
+simplifySimpleConstraints cs = mconcat <$> mapM simplifyConstraint cs
+
 simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
 simplifyConstraint co = do
   case co of
@@ -539,19 +539,31 @@ refineClause s cl' = case cl' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
 
-addNextConstraint :: (Matching m) => (Pat -> SimpleConstraint) -> ConstrainedClauses (HChild m) (HChild m) -> m (ConstrainedClauses (HChild m) (HChild m))
-addNextConstraint = undefined
+addNextConstraint ::
+  (Matching m) =>
+  HCtx ->
+  HTy ->
+  (Pat -> SimpleConstraint) ->
+  ConstrainedClauses (HChildPat m) (HChildTm m) ->
+  m (ConstrainedClauses (HChildPat m) (HChildTm m))
+addNextConstraint ctx ty f cls = forM cls $ \case
+  (Clause (cs, p :<| ps) t) -> do
+    (p', _) <- p.arg Many ctx (Check ty)
+    return $ Clause (f p' : cs, ps) t
+  (Clause (_, Empty) _) -> error "No next pattern to add constraint to"
 
 -- Matching
 
 type HMode = ModeG HTy
 
-type HChild m = Qty -> HCtx -> HMode -> m (HTm, HTy)
+type HChildTm m = Qty -> HCtx -> HMode -> m (HTm, HTy)
+
+type HChildPat m = Qty -> HCtx -> HMode -> m (Pat, HTy)
 
 data MatchingState m = MatchingState
   { ctx :: HCtx,
     ty :: HTy,
-    cls :: ConstrainedClauses (HChild m) (HChild m)
+    cls :: ConstrainedClauses (HChildPat m) (HChildTm m)
   }
 
 forceData :: (Matching m) => HTm -> m (DataGlobal, Spine HTm, Spine HTm)
@@ -559,14 +571,6 @@ forceData d = undefined
 
 tmAsPat :: HTm -> Pat
 tmAsPat = undefined
-
-caseTree :: (Matching m) => MatchingState m -> m HTm
-caseTree c = do
-  let tactics = [addVar c, splitConstraint c, done c]
-  result <- asum <$> sequence tactics
-  case result of
-    Just r -> return r
-    Nothing -> error "no case tree tactic matched"
 
 ifForcePi :: (Matching m) => HTy -> m a -> (Param HTy -> (HTm -> HTy) -> m a) -> m a
 ifForcePi = undefined
@@ -577,6 +581,33 @@ lastVar ctx = Lvl (length ctx - 1)
 ctxSize :: HCtx -> Lvl
 ctxSize = Lvl . length
 
+hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m Bool
+hasNextPat cls = do
+  case cls of
+    Clause (_, Empty) _ : _ -> return False
+    Clause (_, _ :<| _) _ : _ -> return True
+    [] -> return False
+
+-- In context Γ (ctx), and return type T (ty) we have a list of unelaborated
+-- clauses C with constraints. We want to produce a term e : T that "emulates"
+-- the clauses using lower-level machinery, while typechecking the clauses.
+--
+-- Γ ⊢ C ~> e : T
+--
+-- This is done by the tactics below:
+caseTree :: (Matching m) => MatchingState m -> m HTm
+caseTree c = do
+  let tactics = [addVar c, splitConstraint c, done c]
+  result <- asum <$> sequence tactics
+  case result of
+    Just r -> return r
+    Nothing -> error "no case tree tactic matched"
+
+-- There is no next pattern and the constraints have been solved:
+--
+-- Γ ⊢ C ~> e : B and C = ([] ϵ -> tᵢ)ᵢ
+--
+-- We simply take the first clause and typecheck its term.
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
 done (MatchingState ctx ty cls) = do
   case cls of
@@ -586,12 +617,18 @@ done (MatchingState ctx ty cls) = do
       return (Just tm')
     _ -> return Nothing
 
-hasNextPat :: (Matching m) => ConstrainedClauses (HChild m) (HChild m) -> m Bool
-hasNextPat cls = do
-  case cls of
-    Clause (_, Empty) _ : _ -> return False
-    Clause (_, (_ :<| _)) _ : _ -> return True
-
+-- The goal computes to a Π-type, and there is a next pattern:
+--
+-- Γ ⊢ C ~> e : (x : A) -> B  and C = ([csᵢ] (pᵢ psᵢ) -> tᵢ)ᵢ
+--
+-- We add (x : A) to the context to get Γ(x : A) and equate each clause's next pattern
+-- to the variable x, to get C(x : A). (Note: C is not a context or telescope, but a list of clauses!)
+--
+-- Finally we can construct the goal as
+--
+--    Γ(x : A) ⊢ C(x : A) ~> e : B[x]
+--   -----------------------------------------
+--    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
 addVar (MatchingState ctx ty cls) = do
   ps <- hasNextPat cls
@@ -599,39 +636,32 @@ addVar (MatchingState ctx ty cls) = do
     then return Nothing
     else do
       ifForcePi ty (return Nothing) $ \p@(Param m q x a) b -> do
-        -- We have the goal
-        -- Γ ⊢ C ~> e : (x : A) -> B
-        --
-        -- We add (x : A) to the context to get Γ(x : A) and equate each clause's next pattern
-        -- to the variable x, to get C(x : A). (Note: C is not a context or telescope, but a list of clauses!)
-        --
-        -- Finally we can construct the goal as
-        --
-        --    Γ(x : A) ⊢ C(x : A) ~> e : B[x]
-        --   -----------------------------------------
-        --    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
-        --
         let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
         let ctx' = ctx :|> Param m q x a
-        cls' <- addNextConstraint (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
-        rest <- caseTree (MatchingState ctx' (b (HVar (lastVar ctx'))) cls')
+        let b' = b (HVar (lastVar ctx'))
+        cls' <- addNextConstraint ctx a (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
+        rest <- caseTree (MatchingState ctx' b' cls')
         return . Just $ HLam m q x (\t -> sub (s t) rest)
 
+-- There is a next constraint to split on.
+--
+-- Γ ⊢ C ~> e : B and  C = ([xᵢ = pᵢ, csᵢ] (pᵢ psᵢ) -> tᵢ)ᵢ
+--
+-- This is the most complex case: we need to split on the constraint xᵢ = pᵢ;
+-- if pᵢ is a variable, we can use the solution rule, otherwise we need to
+-- generate an eliminator that matches the outer layer of all the pᵢs and recurses
+-- on the inner layers.
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
 splitConstraint (MatchingState ctx ty cls) = do
-  -- In context Γ (ctx), and return type T (ty) we have a list of clauses Q and constraints cs.
-  -- Γ ⊢ cs Q ~> e : T
   case cls of
-    Clause ((co : _), _) _ : clss -> case co of
-      -- 1. We have the constraint Γ ⊢ x = t : T in the first clause.
-      --
-      -- 1.1. This constraint is of the form Γ ⊢ x = x' : T, where x and x' are variables.
+    Clause (co : _, _) _ : clss -> case co of
+      -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
       SimpleConstraint _ x (LvlP _ _ x') param -> do
         -- This will use the solution rule for the constraint x = x'
         (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
         Just <$> caseTree (MatchingState ctx' (sub s.forward ty) clss)
-      -- 1.2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ (x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))
+      -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
         (d, delta, psi) <- forceData p.ty
@@ -711,7 +741,7 @@ splitConstraint (MatchingState ctx ty cls) = do
 
 -- Typechecking
 
-clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses (HChild m) (HChild m)
+clausesWithEmptyConstraints :: Clauses (Child m) (Child m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints = undefined
 
 clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
