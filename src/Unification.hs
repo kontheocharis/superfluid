@@ -161,7 +161,6 @@ runSolveT m sp t f = do
 
 canUnifyHere :: (Unify m) => VTm -> VTm -> m CanUnify
 canUnifyHere t1 t2 = do
-  -- l <- accessCtx (\c -> c.lvl)
   t1' <- resolveHere t1
   t2' <- resolveHere t2
   unify t1' t2'
@@ -293,6 +292,7 @@ instance (Monad m, Pretty m VTm, Pretty m STm) => Pretty m SolveError where
   pretty Blocking = return "reduction is blocked"
   pretty Synthesis = return "synthesis failed"
 
+-- @@Todo: bring back
 -- pretty (WithProblem p@(Problem {kind = Unify lhs rhs}) e) = do
 --   p' <- enterProblem p $ do
 --     lhs' <- pretty lhs
