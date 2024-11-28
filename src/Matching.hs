@@ -29,12 +29,15 @@ import Common
     Lvl (..),
     Name (..),
     Param (..),
+    Parent (child),
     PiMode (..),
     Qty (..),
     Spine,
+    Try (..),
     nextLvl,
+    ofShapes,
     spineShapes,
-    telShapes, ofShapes,
+    telShapes,
   )
 import Context
 import Context (unembedClosure1Here)
@@ -100,6 +103,7 @@ import Syntax
     lastVar,
   )
 import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
+import Unification (CanUnify (..), canUnifyHere)
 import Prelude hiding (cycle, pi)
 
 data MatchingError = MatchingError
@@ -253,10 +257,18 @@ voidCtx = undefined
 initialSub :: Shapes -> Shapes -> Sub
 initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (void x)) sh)
 
--- Definitional equality checker. This should somehow hook into the other
--- unification thing. (And the latter should be renamed to convert?)
+-- Definitional equality checker. Uses TC's unification.
 canConvert :: (Matching m) => HCtx -> HTm -> HTm -> m Bool
-canConvert = undefined
+canConvert ctx a b = do
+  q <- qty -- @@Check: this shouldn't matter right?
+  runTc' q ctx $ do
+    -- Embed both terms, check with `canUnifyHere` and return the result.
+    a' <- embedEvalHere a
+    b' <- embedEvalHere b
+    res <- canUnifyHere a' b'
+    case res of
+      Yes -> return True
+      _ -> return False
 
 -- Unification:
 unifyPLSpines :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m Unification
