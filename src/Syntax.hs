@@ -484,7 +484,7 @@ hoistBinder = undefined
 hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
 hoistBinders' sh t sp = undefined
 
-data Pat = LvlP Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
+data Pat = LvlP Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
 
 -- @@Todo:
 patBinds :: Pat -> [(Qty, Name)]

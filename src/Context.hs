@@ -5,7 +5,7 @@
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module Context
-  ( Ctx,
+  ( Ctx (..),
     emptyCtx,
     Goal (..),
     bind,

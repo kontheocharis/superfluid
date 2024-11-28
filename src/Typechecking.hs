@@ -186,7 +186,7 @@ data TcError
   | ImpossibleCasesNotSupported
   | Chain [TcError]
 
-data InPat = NotInPat | InPossiblePat [(Qty, Name)] | InImpossiblePat deriving (Eq)
+data InPat = NotInPat | InPat [(Qty, Name)] deriving (Eq)
 
 instance (HasProjectFiles m, Tc m) => Pretty m TcError where
   pretty e = do
@@ -278,8 +278,7 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
 
 instance Show InPat where
   show NotInPat = "not in pat"
-  show (InPossiblePat ns) = "in possible pat with " ++ show ns
-  show InImpossiblePat = "in impossible pat"
+  show (InPat ns) = "in pat with " ++ show ns
 
 class
   ( Eval m,
@@ -302,8 +301,11 @@ class
   inPat :: m InPat
   inPat = view
 
-  enterPat :: InPat -> m a -> m a
-  enterPat = enter . const
+  enterPat :: m a -> m a
+  enterPat = enter (const $ InPat [])
+
+  enterInPat :: InPat -> m a -> m a
+  enterInPat = enter . const
 
   setInPat :: InPat -> m ()
   setInPat = modify . const
@@ -438,11 +440,7 @@ handleUnification :: (Tc m) => VTm -> VTm -> CanUnify -> m ()
 handleUnification t1 t2 r = do
   p <- inPat
   case p of
-    InImpossiblePat -> case r of
-      Yes -> tcError $ ImpossibleCaseIsPossible t1 t2
-      Maybe -> addUnifyProblem t1 t2 Blocking --  tcError $ ImpossibleCaseMightBePossible t1 t2 s
-      No _ -> return ()
-    InPossiblePat _ -> case r of
+    InPat _ -> case r of
       Yes -> return ()
       Maybe -> addUnifyProblem t1 t2 Blocking -- applySubToCtx s
       No errs -> tcError $ ImpossibleCase t1 errs
@@ -497,7 +495,7 @@ checkPatBind x ty = do
   modifyCtx (bind Explicit x q ty)
   whenInPat
     ( \case
-        InPossiblePat ns -> setInPat (InPossiblePat (ns ++ [(q, x)]))
+        InPat ns -> setInPat (InPat (ns ++ [(q, x)]))
         _ -> return ()
     )
   return (SVar (Idx 0), ty)
@@ -530,7 +528,7 @@ ensureNewName n = do
   when r $ tcError $ DuplicateItem n
 
 inPatNames :: InPat -> [(Qty, Name)]
-inPatNames (InPossiblePat ns) = ns
+inPatNames (InPat ns) = ns
 inPatNames _ = []
 
 lam :: (Tc m) => Mode -> PiMode -> Name -> Child m -> m (STm, VTy)
@@ -691,9 +689,9 @@ inferOnly t mode = case mode of
     return (t', ty)
   Infer -> t
 
-pat :: (Tc m) => InPat -> m VTy -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
-pat inPt wideTyM pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
-  (p', t, ns) <- enterPat inPt $ do
+pat :: (Tc m) => m VTy -> Child m -> (SPat -> VTy -> m ()) -> (SPat -> VTy -> m a) -> m a
+pat wideTyM pt runInsidePatScope runOutsidePatScope = enterCtx id $ do
+  (p', t, ns) <- enterPat $ do
     (p', t') <- pt Infer >>= insert
     wideTy <- wideTyM
     unifyHere t' wideTy
@@ -722,7 +720,7 @@ caseClauses di wideTyM cs f = do
     ( \case
         (_, Just (Impossible _)) -> tcError ImpossibleCasesNotSupported
         (c, Just (Possible p t)) -> do
-          pat (InPossiblePat []) wideTyM p (const . const $ return ()) $ \sp pTy -> do
+          pat wideTyM p (const . const $ return ()) $ \sp pTy -> do
             vp <- evalPatHere sp
             case c of
               Just c' -> do

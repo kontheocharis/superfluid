@@ -98,19 +98,32 @@ import Syntax
     joinTels,
     lastVar,
   )
-import Typechecking (Child, ModeG (..), Tc (..), ifForcePiType)
+import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
 import Prelude hiding (cycle, pi)
+import Data.Semiring (Semiring(times))
 
 data MatchingError = MatchingError
 
 class (Eval m, Has m Loc, Tc m) => Matching m where
   matchingError :: MatchingError -> m a
 
-runTc :: (Matching m, Tc m) => Qty -> Ctx -> m a -> m a
-runTc q c x = undefined
+runTc :: (Matching m) => Qty -> Ctx -> m a -> m a
+runTc q c x = enter (const q) $ enterCtx (const c) x
 
-runTc' :: (Matching m, Tc m) => Qty -> HCtx -> m a -> m a
-runTc' q c x = undefined
+runTc' :: (Matching m) => Qty -> HCtx -> m a -> m a
+runTc' q c x = do
+  c' <- embedCtx c
+  runTc q c' x
+
+embedCtx :: (Matching m) => HCtx -> m Ctx
+embedCtx = embedCtx' emptyCtx
+  where
+    embedCtx' :: (Matching m) => Ctx -> HCtx -> m Ctx
+    embedCtx' c Empty = return c
+    embedCtx' c (Param m q x a :<| ps) = do
+      a' <- embedEval c.lvl a
+      let c' = bind m x q a' c
+      embedCtx' c' ps
 
 -- Unification
 
@@ -554,21 +567,6 @@ refineClause s cl' = case cl' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
 
--- @@Todo implicit args:
---
-addNextConstraint ::
-  (Matching m) =>
-  HCtx ->
-  HTy ->
-  (Pat -> SimpleConstraint) ->
-  ConstrainedClauses (HChildPat m) (HChildTm m) ->
-  m (ConstrainedClauses (HChildPat m) (HChildTm m))
-addNextConstraint ctx ty f cls = forM cls $ \case
-  (Clause (cs, p :<| ps) t) -> do
-    (p', _) <- p.arg Many ctx (Check ty)
-    return $ Clause (f p' : cs, ps) t
-  (Clause (_, Empty) _) -> error "No next pattern to add constraint to"
-
 -- Matching
 
 type HMode = ModeG HTy
@@ -584,7 +582,7 @@ data MatchingState m = MatchingState
     cls :: ConstrainedClauses (HChildPat m) (HChildTm m)
   }
 
-forceData :: (Matching m) => HCtx -> HTm -> m (DataGlobal, Spine HTm, Spine HTm)
+forceData :: (Matching m) => HCtx -> HTy -> m (DataGlobal, Spine HTm, Spine HTm)
 forceData ctx ty = do
   let size = ctxSize ctx
   ty' <- embedEval size ty
@@ -600,10 +598,13 @@ forceData ctx ty = do
     )
     (matchingError MatchingError) -- @@Todo: errors
 
-tmAsPat :: (Matching m) => HTm -> m Pat
-tmAsPat t = case hGatherApps t of
-  (HVar x, Empty) -> return (LvlP x)
-  (HCtor (c, pp), sp) -> CtorP (c, pp) <$> traverse (traverse tmAsPat) sp
+tmAsPat :: (Matching m) => Qty -> HTm -> m Pat
+tmAsPat q t = case hGatherApps t of
+  (HVar x, Empty) -> do
+    return (LvlP q x)
+  (HCtor (c, pp), sp) ->
+    CtorP (c, pp)
+      <$> traverse (\a -> traverse (tmAsPat a.qty) a) sp
   _ -> matchingError MatchingError -- @@Todo: errors
 
 ifForcePi :: (Matching m) => Qty -> HCtx -> PiMode -> HTy -> (Param HTy -> (HTm -> HTy) -> m a) -> m a -> m a
@@ -619,6 +620,7 @@ ifForcePi q ctx m ty the els = runTc' q ctx $ do
     )
     (\_ _ _ _ _ -> els) -- @@Todo: errors
 
+-- Check if clauses C are of the form (csᵢ (pᵢ psᵢ) -> tᵢ)ᵢ
 hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m (Maybe (Arg ()))
 hasNextPat cls = do
   case cls of
@@ -655,6 +657,23 @@ done (MatchingState ctx q ty cls) = do
       return (Just tm')
     _ -> return Nothing
 
+-- Given a 'constraint scheme' (p . [x = p]), i.e. a constraint parametrized by
+-- a pattern, and an argument type `ty`,  apply this constraint to the first
+-- pattern of each clause in C.
+addNextConstraint ::
+  (Matching m) =>
+  MatchingState m ->
+  Param HTy ->
+  (Pat -> SimpleConstraint) ->
+  ConstrainedClauses (HChildPat m) (HChildTm m) ->
+  m (ConstrainedClauses (HChildPat m) (HChildTm m))
+addNextConstraint st param f cls = forM cls $ \case
+  (Clause (cs, p :<| ps) t) -> do
+    -- @@Todo: deal with implicits
+    (p', _) <- p.arg (st.qty `times` param.qty) st.ctx (Check param.ty)
+    return $ Clause (f p' : cs, ps) t
+  (Clause (_, Empty) _) -> error "No next pattern to add constraint to"
+
 -- The goal computes to a Π-type, and there is a next pattern:
 --
 -- Γ ⊢ C ~> e : (x : A) -> B  and C = ([csᵢ] (pᵢ psᵢ) -> tᵢ)ᵢ
@@ -668,10 +687,11 @@ done (MatchingState ctx q ty cls) = do
 --   -----------------------------------------
 --    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
 addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
-addVar (MatchingState ctx q' ty cls) = do
+addVar st@(MatchingState ctx q' ty cls) = do
   ps <- hasNextPat cls
   case ps of
     Nothing -> return Nothing
+    -- @@Todo: if the args don't match in implicitness, insert!
     Just (Arg m' _ ()) -> do
       ifForcePi
         q'
@@ -682,7 +702,7 @@ addVar (MatchingState ctx q' ty cls) = do
             let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
             let ctx' = ctx :|> Param m q x a
             let b' = b (HVar (lastVar ctx'))
-            cls' <- addNextConstraint ctx a (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
+            cls' <- addNextConstraint st p (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
             rest <- caseTree (MatchingState ctx' q' b' cls')
             return . Just $ HLam m q x (\t -> sub (s t) rest)
         )
@@ -702,7 +722,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
     Clause (co : _, _) _ : clss -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ x (LvlP x') param -> do
+      SimpleConstraint _ x (LvlP _ x') param -> do
         -- This will use the solution rule for the constraint x = x'
         (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
         Just <$> caseTree (MatchingState ctx' q (sub s.forward ty) clss)
@@ -720,7 +740,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Let Γ' = Γχ (x : D δ ψ) xΓ (π : Πi)
           (_, cc) <- access (getCtorGlobal' c)
           let (ctx', pi) = extendCtxWithTel ctx (\_ -> cc.args delta)
-          cpat <- tmAsPat (hApp (HCtor (c, delta)) pi) -- Should never fail
+          cpat <- tmAsPat p.qty (hApp (HCtor (c, delta)) pi) -- Should never fail
 
           -- Create the spine (ξi[δ,π], ci π)
           let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
@@ -784,33 +804,40 @@ splitConstraint (MatchingState ctx q ty cls) = do
         return . Just $ hApp (HCase (caseBase {clauses = elims})) psixRefl
     _ -> return Nothing
 
--- Typechecking
+-- Typechecking (uses the `Typechecking` module)
 
-checkPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy)
-checkPat c mode = do
+-- Typecheck a pattern
+tcPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy)
+tcPat c mode = do
   mode' <- traverse embedEvalHere mode
-  (tm, ty) <- c mode'
+  (tm, ty) <- enterPat $ c mode'
   tm' <- unembedHere tm
   ty' <- quoteUnembedHere ty
-  pat <- tmAsPat tm'
+  q <- qty
+  pat <- tmAsPat q tm'
   return (pat, ty')
 
-checkTm :: (Matching m) => Child m -> HMode -> m (HTm, HTy)
-checkTm c mode = do
+-- Typecheck a term
+tcTm :: (Matching m) => Child m -> HMode -> m (HTm, HTy)
+tcTm c mode = do
   mode' <- traverse embedEvalHere mode
   (tm, ty) <- c mode'
   tm' <- unembedHere tm
   ty' <- quoteUnembedHere ty
   return (tm', ty')
 
+-- Create a list of constrained HOAS clauses with empty constraints, from a
+-- simple list of syntax clauses.
 clausesWithEmptyConstraints ::
   (Matching m) =>
   Clauses (Child m) (Child m) ->
   ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
-  let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (checkPat p m))) ps
-   in let t' = fmap (\t q ctx m -> runTc' q ctx (checkTm t m)) r in Clause ([], ps') t'
+  let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (tcPat p m))) ps
+   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause ([], ps') t'
 
+-- Typecheck a list of syntax clauses, producing a
+-- corresponding case tree using primitive eliminators.
 clauses :: (Matching m) => DefGlobal -> Clauses (Child m) (Child m) -> VTy -> m (STm, VTy)
 clauses _ cls ty = enterCtx id $ do
   hty <- quoteUnembedHere ty
