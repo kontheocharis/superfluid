@@ -163,8 +163,6 @@ import Unelaboration (Unelab)
 import Unification
 import Prelude hiding (pi)
 
--- import Matching (caseTree, MatchingState (MatchingState), clausesWithEmptyConstraints, Matching)
-
 data TcError
   = Mismatch [UnifyError]
   | PotentialMismatch VTm VTm
@@ -172,9 +170,7 @@ data TcError
   | ImplicitMismatch PiMode PiMode
   | InvalidPattern
   | RemainingProblems [Problem]
-  | ImpossibleCaseIsPossible VTm VTm
-  | -- | ImpossibleCaseMightBePossible VTm VTm Sub
-    ImpossibleCase VTm [UnifyError]
+  | ImpossibleCase VTm [UnifyError]
   | InvalidCaseSubject STm VTy
   | InvalidDataFamily VTy
   | InvalidCtorType STy
@@ -220,21 +216,6 @@ instance (HasProjectFiles m, Tc m) => Pretty m TcError where
           return $ "Implicit mismatch: " <> show m1 <> " and " <> show m2
         InvalidPattern -> do
           return "Invalid in pattern position"
-        ImpossibleCaseIsPossible t1 t2 -> do
-          t1' <- pretty t1
-          t2' <- pretty t2
-          return $ "Impossible case is possible: " <> t1' <> " = " <> t2'
-        -- ImpossibleCaseMightBePossible t1 t2 s -> do
-        --   t1' <- pretty t1
-        --   t2' <- pretty t2
-        --   return undefined -- @@Todo
-        -- sp <- pretty s
-        -- s' <-
-        --   if null sp
-        --     then return ""
-        --     else do
-        --       return $ "\nThis could happen if " ++ sp
-        -- return $ "Impossible case might be possible: " <> t1' <> " =? " <> t2' <> s'
         ImpossibleCase p t -> do
           p' <- pretty p
           t' <- intercalate "\n" <$> mapM pretty t
