@@ -18,22 +18,37 @@ module Substitution
     Shape,
     mapSub1,
     mapSubN,
-    replaceSub,
     nonEmptyDomL,
     terminalSub,
+    unembedClosure1,
     extendSubSp,
+    hoistBinders,
+    hoistBinders',
+    hoistBindersSp,
   )
 where
 
 import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls, telShapes, telToBinds)
-import Context (Ctx)
 import Control.Monad (foldM)
 import Data.Foldable (Foldable (..), toList)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
-import Evaluation (Eval)
-import Syntax (Case (..), Env, HCtx, HTel (..), HTm (..), HTy, SPat (..), VTm (..), hApp, patBinds)
+import Evaluation (Eval, quoteClosure)
+import Syntax
+  ( Case (..),
+    Closure,
+    Env,
+    HCtx,
+    HTel (..),
+    HTm (..),
+    HTy,
+    SPat (..),
+    VTm (..),
+    hApp,
+    patBinds,
+    unembed,
+  )
 
 -- Substitution
 
@@ -44,6 +59,23 @@ type Shape = Param ()
 data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine HTm}
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
+
+hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
+hoistBindersSp sh t sp = undefined
+
+hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
+hoistBinders sh t sp = undefined
+
+hoistBinder :: HTm -> (HTm -> HTm)
+hoistBinder t = undefined
+
+unembedClosure1 :: (Eval m) => Lvl -> Closure -> m (HTm -> HTm)
+unembedClosure1 l c = do
+  c' <- unembed (map HVar (members (nextLvl l))) <$> quoteClosure l c
+  return $ hoistBinder c'
+
+hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
+hoistBinders' sh t sp = undefined
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
@@ -106,17 +138,6 @@ getVar :: Lvl -> Sub -> Arg HTm
 getVar x s =
   let ms = fromList . map (Arg Explicit Many . HVar) $ members (Lvl (length s.domSh))
    in (fromJust $ s.mapping ms S.!? x.unLvl)
-
--- Replace : (σ : Sub Γ Δ) -> (x : Var Δ A) -> (t : Tm Δ A) -> Ctx
--- replace : (σ : Sub Γ Δ) -> (x : Var Γ A) -> (t : Tm Γ A) -> Sub Γ (Replace σ x t)
-replaceSub :: Sub -> Lvl -> HTm -> Sub
-replaceSub s x t = Sub s.domSh s.codSh $ \sp ->
-  S.zipWith
-    ( \s' i ->
-        if Lvl i == x then s' {arg = t} else s'
-    )
-    sp
-    (S.fromList [0 ..])
 
 -- π₁ : Sub Γ (Δ , A) -> Sub Γ Δ
 proj :: Sub -> Sub
@@ -235,4 +256,3 @@ instance Subst HTel where
 
   occurs _ _ HEmpty = False
   occurs l x (HWithParam m q _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
-

@@ -26,6 +26,7 @@ module Evaluation
     vUnfold,
     vUnfoldLazy,
     uniqueVLams,
+    quoteClosure,
     evalInOwnCtx,
     extendEnvByNVars,
     caseToSpine,
@@ -35,7 +36,6 @@ module Evaluation
     embedEval,
     quoteUnembed,
     hSimplify,
-    unembedClosure1,
   )
 where
 
@@ -110,7 +110,7 @@ import Syntax
     sReprTimes,
     uniqueSLams,
     pattern VMeta,
-    pattern VVar, HTm (..), pattern VV, embed, unembed, hoistBinder,
+    pattern VVar, HTm (..), pattern VV, embed, unembed,
   )
 import Data.Maybe (fromMaybe)
 
@@ -622,11 +622,6 @@ quoteUnembed l t = do
   t' <- quote l t
   let env = map HVar $ members l
   return $ unembed env t'
-
-unembedClosure1 :: (Eval m) => Lvl -> Closure -> m (HTm -> HTm)
-unembedClosure1 l c = do
-  c' <- unembed (map HVar (members (nextLvl l))) <$> quoteClosure l c
-  return $ hoistBinder c'
 
 hSimplify :: (Eval m) => Lvl -> HTm -> m HTm
 hSimplify l t = embedEval l t >>= quoteUnembed l

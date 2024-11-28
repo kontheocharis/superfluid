@@ -71,10 +71,6 @@ module Syntax
     joinTels,
     removing,
     extendCtxWithTel,
-    hoistBindersSp,
-    hoistBinders,
-    hoistBinders',
-    hoistBinder,
     lastVar,
     ctxSize,
   )
@@ -471,18 +467,6 @@ unembed env = \case
   SLit li -> HLit (fmap (unembed env) li)
   SRepr t -> HRepr (unembed env t)
   SUnrepr t -> HUnrepr (unembed env t)
-
-hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
-hoistBindersSp sh t sp = undefined
-
-hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
-hoistBinders sh t sp = undefined
-
-hoistBinder :: HTm -> (HTm -> HTm)
-hoistBinder = undefined
-
-hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
-hoistBinders' sh t sp = undefined
 
 data Pat = LvlP Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
 

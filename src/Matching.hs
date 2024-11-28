@@ -43,6 +43,7 @@ import Control.Monad (forM)
 import Control.Monad.Extra (firstJustM)
 import Data.Foldable (Foldable (..), toList)
 import Data.Maybe (catMaybes)
+import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Traversable (for)
@@ -75,6 +76,8 @@ import Substitution
     liftSubN,
     mapSub1,
     mapSubN,
+    hoistBinders,
+    hoistBinders',
     proj,
   )
 import Syntax
@@ -93,14 +96,11 @@ import Syntax
     hApp,
     hGatherApps,
     hLams,
-    hoistBinders,
-    hoistBinders',
     joinTels,
     lastVar,
   )
 import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
 import Prelude hiding (cycle, pi)
-import Data.Semiring (Semiring(times))
 
 data MatchingError = MatchingError
 
@@ -530,9 +530,19 @@ type ConstrainedClause pats tm = Clause (SimpleConstraints, pats) tm
 
 -- Constraints
 
-data Constraint = Constraint {lvl :: Lvl, lhs :: HTm, rhs :: Pat, param :: Param HTy}
+data Constraint = Constraint
+  { lvl :: Lvl,
+    lhs :: HTm,
+    rhs :: Pat,
+    param :: Param HTy
+  }
 
-data SimpleConstraint = SimpleConstraint {lvl :: Lvl, lhs :: Lvl, rhs :: Pat, param :: Param HTy}
+data SimpleConstraint = SimpleConstraint
+  { lvl :: Lvl,
+    lhs :: Lvl,
+    rhs :: Pat,
+    param :: Param HTy
+  }
 
 type Constraints = [Constraint]
 
@@ -629,14 +639,19 @@ hasNextPat cls = do
     [] -> return Nothing
 
 -- In context Γ (ctx), and return type T (ty) we have a list of unelaborated
--- clauses C with constraints. We want to produce a term e : T that "emulates"
+-- clauses C with constraints. We want to produce a term Γ ⊢ e : T that "emulates"
 -- the clauses using lower-level machinery, while typechecking the clauses.
 --
 -- Γ ⊢ C ~> e : T
+-- - Clauses C in context Γ are elaborated to a term e of type T.
 --
 -- This is done by the tactics below:
 caseTree :: (Matching m) => MatchingState m -> m HTm
 caseTree c = do
+  -- First we add all the variables to the context
+  -- Then once we can't anymore, we split on the first-added constraint
+  -- Once all the constraints are solved, we can typecheck the right-hand
+  -- side of the first clause that matches.
   let tactics = [addVar c, splitConstraint c, done c]
   result <- asum <$> sequence tactics
   case result of
@@ -671,8 +686,14 @@ addNextConstraint st param f cls = forM cls $ \case
   (Clause (cs, p :<| ps) t) -> do
     -- @@Todo: deal with implicits
     (p', _) <- p.arg (st.qty `times` param.qty) st.ctx (Check param.ty)
-    return $ Clause (f p' : cs, ps) t
+    return $ Clause (cs ++ [f p'], ps) t
   (Clause (_, Empty) _) -> error "No next pattern to add constraint to"
+
+-- Given a list of clauses C, remove the first constraint from each clause.
+removeFirstConstraint :: ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
+removeFirstConstraint = map $ \case
+  (Clause (_ : cs, ps) t) -> Clause (cs, ps) t
+  (Clause ([], _) _) -> error "No constraints to remove"
 
 -- The goal computes to a Π-type, and there is a next pattern:
 --
@@ -713,7 +734,7 @@ addVar st@(MatchingState ctx q' ty cls) = do
 -- Γ ⊢ C ~> e : B and  C = ([xᵢ = pᵢ, csᵢ] (psᵢ) -> tᵢ)ᵢ
 --
 -- This is the most complex case since we need to split on the constraint xᵢ = pᵢ:
--- - If pᵢ is a variable, we can use the solution rule.
+-- - If pᵢ is a variable (@@Check for all i?), we can use the solution rule.
 -- - Otherwise we need to generate an eliminator that matches the outer layer of
 --   all the pᵢs and recurses on the inner layers.
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
@@ -722,10 +743,10 @@ splitConstraint (MatchingState ctx q ty cls) = do
     Clause (co : _, _) _ : clss -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ x (LvlP _ x') param -> do
-        -- This will use the solution rule for the constraint x = x'
-        (ctx', _, s) <- unifyPL ctx param.ty (HVar x) (HVar x')
-        Just <$> caseTree (MatchingState ctx' q (sub s.forward ty) clss)
+      SimpleConstraint _ _ (LvlP _ _) _ -> do
+        -- All we need to do is remove the constraint from the clauses.
+        -- @@Todo: same quantity check?
+        Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint clss))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
@@ -752,7 +773,6 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(ρ : Ψ)(D δ ρ)= (ξi[δ,π], ci π)
           --
           -- Gives back a bi-substitution σ to a new context Γ''
-          -- @@Check: do we care about status?
           (ctx'', _, s) <- unifyPLSpines ctx' psiTel psix psix'
 
           -- For each clause with pattern πj, equate πj to π:
@@ -768,7 +788,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
 
           -- Now we build e'' which is:
           --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
-          -- The equalities are explicitly given by the motive we will set up later.
+          -- The equalities are explicitly given by the motive we will set up next.
           let eq = equalitySp psiTel psix psix'
           let e'' = hoistBinders' (length pi) $ hLams eq (hoistBinders (length psix) e')
 

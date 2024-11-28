@@ -1,8 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Context
   ( Ctx (..),
@@ -76,13 +76,29 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
-import Evaluation (Eval, close, eval, evalInOwnCtx, evalPat, quote, resolve, vUnfold, vUnfoldLazy, vRepr, quoteUnembed, unembedClosure1)
+import Evaluation
+  ( Eval,
+    close,
+    eval,
+    evalInOwnCtx,
+    evalPat,
+    quote,
+    quoteUnembed,
+    resolve,
+    vRepr,
+    vUnfold,
+    vUnfoldLazy,
+  )
 import Printing (Pretty (..))
+import Substitution
+  ( unembedClosure1,
+  )
 import Syntax
   ( BoundState (Bound, Defined),
     Bounds,
     Closure (..),
     Env,
+    HTm (..),
     SPat,
     STm (..),
     STy,
@@ -90,7 +106,9 @@ import Syntax
     VPatB,
     VTm (..),
     VTy,
-    pattern VVar, HTm (..), unembed, embed,
+    embed,
+    unembed,
+    pattern VVar,
   )
 
 data CtxTy = CtxTy VTy | TyUnneeded deriving (Show)
@@ -399,18 +417,17 @@ embedHere t = do
   l <- getLvl
   return $ embed l t
 
-instance Has m Ctx => Has m [Name] where
+instance (Has m Ctx) => Has m [Name] where
   view = do
     ctx <- accessCtx id
     return (getNames ctx)
 
   modify f = modifyCtx (modifyNames f)
 
-instance Has m Ctx => Has m (Env VTm) where
+instance (Has m Ctx) => Has m (Env VTm) where
   view = accessCtx (\c -> c.env)
   modify f = modifyCtx (\c -> c {env = f c.env})
 
 instance (Monad m, Has m Ctx) => Has m Lvl where
   view = accessCtx (\c -> c.lvl)
   modify f = modifyCtx (\c -> c {lvl = f c.lvl})
-
