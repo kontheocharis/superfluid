@@ -35,6 +35,7 @@ import Common
     Qty (..),
     Spine,
     Try (..),
+    mapSpine,
     nextLvl,
     ofShapes,
     spineShapes,
@@ -59,16 +60,17 @@ import Evaluation
   )
 import Globals
   ( CtorConstructions (..),
+    CtorGlobalInfo (..),
     DataConstructions (..),
     DataGlobalInfo (..),
-    CtorGlobalInfo (..),
-    KnownGlobal (KnownEqual, KnownRefl),
+    KnownGlobal (KnownConf, KnownCycle, KnownDCongSp, KnownEqual, KnownHEqual, KnownInj, KnownRefl, KnownVoid, KnownEmpty),
     getCtorGlobal,
     getCtorGlobal',
     getDataGlobal,
     getDataGlobal',
     knownCtor,
     knownData,
+    knownDef,
   )
 import Substitution
   ( BiSub (..),
@@ -187,58 +189,70 @@ refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Impli
 -- HEqual : [A : Type] (s t : A) (e : Equal s t) (P : A -> Type) -> P s -> P t -> Type
 -- HEqual [A] s t e P u v = Equal [P t] (subst P e u) v
 hequality :: HTm -> HTm -> HTm -> HTm -> HTm -> HTm -> HTm
-hequality = undefined
+hequality s t e p u v =
+  hApp
+    (HData (knownData KnownHEqual))
+    ( S.fromList
+        [ Arg Implicit Zero s,
+          Arg Explicit Zero t,
+          Arg Explicit Zero e,
+          Arg Explicit Zero p,
+          Arg Explicit Zero u,
+          Arg Explicit Zero v
+        ]
+    )
 
 -- Equality for spines (Written δ =Δ= γ for a telescope Δ and spines δ γ : Tms Δ)
 --
 -- (() =()= ()) := ()
 -- ((x,xs) =(x : A),Δ= (y,ys)) := (e : x =A= y, xs =Δ,e= ys)
 --
+-- @@Check: hacky, no way this is right
 equalitySp :: HTel -> Spine HTm -> Spine HTm -> HTel
-equalitySp = undefined
+equalitySp HEmpty Empty Empty = HEmpty
+equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
+  HWithParam m Zero (Name (nt.unName ++ "-eq")) (equality tt x y) (\e -> equalitySp' (x, y, e, delta y) delta xs ys)
+  where
+    equalitySp' :: (HTm, HTm, HTm, HTel) -> (HTm -> HTel) -> Spine HTm -> Spine HTm -> HTel
+    equalitySp' (s, t, e, p) (($ t) -> HEmpty) Empty Empty = HEmpty
+    equalitySp' (s, t, e, p) (($ t) -> (HWithParam m _ nt tt delta)) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
+      HWithParam
+        m
+        Zero
+        (Name (nt.unName ++ "-heq"))
+        (hequality s t e tt x y)
+        (\e' -> equalitySp' (x, y, e', p) delta xs ys)
+    equalitySp' _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+equalitySp _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- Reflexivity for spines
 reflSp :: HTel -> Spine HTm -> Spine HTm
-reflSp = undefined
-
--- equalitySp HEmpty Empty Empty = HEmpty
--- equalitySp (HWithParam m _ nt tt delta) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
---   HWithParam m Zero (Name (nt.unName ++ "-eq")) (equality tt x y) (\e -> equalitySp' (x, y, e) delta xs ys)
--- equalitySp _ _ _ = error "Mismatching spines should never occur in well-typed terms"
-
--- equalitySp' :: (HTm, HTm, HTm, HTm) -> (HTm -> HTel) -> Spine HTm -> Spine HTm -> HTel
--- equalitySp' (s, t, e, p) (($ p) -> HEmpty) Empty Empty = HEmpty
--- equalitySp' (s, t, e, p) (($ t) -> (HWithParam m _ nt tt delta)) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) =
---   HWithParam
---     m
---     Zero
---     (Name (nt.unName ++ "-heq"))
---     (hequality s t e p x y)
---     (\e' -> equalitySp' (x, y, e', delta y) delta xs ys)
--- equalitySp' _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
+reflSp HEmpty Empty = Empty
+reflSp (HWithParam m _ _ tt delta) (Arg _ _ x :<| xs) = Arg m Zero (refl tt x) :<| reflSp (delta x) xs
+reflSp _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
-dcong :: HTy -> (HTm -> HTy) -> (HTm -> HTm) -> HTm -> HTm
-dcong a t = undefined
+-- dcong :: HTy -> (HTm -> HTy) -> (HTm -> HTm) -> HTm -> HTm
+-- dcong a t = undefined
 
 -- dcongSp : (f : Tm Γ (Πs Δ Τ)) -> {xs ys : Tms Γ Δ} -> Tms Γ (xs ..= ys) -> Tm Γ (f xs = f ys)
 dcongSp :: HTel -> (Spine HTm -> HTy) -> (Spine HTm -> HTm) -> Spine HTm -> HTm
-dcongSp delta t = undefined
+dcongSp delta _ f ps = hApp (HDef (knownDef KnownDCongSp)) (Arg Explicit Many (hLams delta f) :<| ps) -- @@Hack
 
 -- inj : (c : Ctor D Δ Π ξ) -> {δ : Δ} {xs ys : Tms Γ (Π [δ])} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-inj :: CtorGlobal -> Spine HTm -> HTm -> HTm -> Spine HTm
-inj = undefined
+inj :: CtorGlobal -> Spine HTm -> Spine HTm -> Spine HTm -> HTm -> Spine HTm
+inj c _ ys _ _ = fmap (\p -> p {arg = hApp (HDef (knownDef (KnownInj c))) (S.singleton p)}) ys
 
 -- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {δ : Δ} {xs : Tms Γ Π₁[δ]} {ys : Tms Γ Π₂[δ]}
 --            -> Tm Γ (c1 xs = c2 ys)
 --            -> Tm Γ Empty
 conf :: CtorGlobal -> CtorGlobal -> Spine HTm -> Spine HTm -> Spine HTm -> HTm -> HTm
-conf = undefined
+conf c1 c2 _ _ _ = hApp (HDef (knownDef (KnownConf c1 c2))) . S.singleton . Arg Explicit Many
 
 -- @@Todo: properly encode the < relation, and deal with indices!
 -- cyc : {δ : Δ} (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
 cyc :: DataGlobal -> Spine HTm -> HTm -> HTm -> HTm -> HTm
-cyc = undefined
+cyc d _ _ _ = hApp (HDef (knownDef (KnownCycle d))) . S.singleton . Arg Explicit Many
 
 -- Never
 --
@@ -249,13 +263,13 @@ cyc = undefined
 --
 -- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
 void :: HTm -> HTm
-void = undefined
+void ty = HApp Explicit Zero (HDef (knownDef KnownVoid)) ty
 
 voidSh :: Shapes
 voidSh = Param Explicit Many (Name "_") () :<| Empty
 
 voidCtx :: HCtx
-voidCtx = undefined
+voidCtx = S.singleton (Param Explicit Many (Name "_") (HData (knownData KnownEmpty)))
 
 initialSub :: Shapes -> Shapes -> Sub
 initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (void x)) sh)
@@ -445,7 +459,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
                 mapSub1
                   (sh :|> csh)
                   (sh <> n)
-                  (\sp p -> sp <> inj c pp (HCtor (c, pp)) p)
+                  (\sp p -> sp <> inj c pp xs ys p)
             }
 
     -- return (Γ', (

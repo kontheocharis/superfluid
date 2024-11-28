@@ -332,6 +332,11 @@ data KnownGlobal a where
   KnownEqual :: KnownGlobal DataGlobal
   KnownEmpty :: KnownGlobal DataGlobal
   KnownVoid :: KnownGlobal DefGlobal
+  KnownDCongSp :: KnownGlobal DefGlobal
+  KnownInj :: CtorGlobal -> KnownGlobal DefGlobal
+  KnownConf :: CtorGlobal -> CtorGlobal -> KnownGlobal DefGlobal
+  KnownCycle :: DataGlobal -> KnownGlobal DefGlobal
+  KnownHEqual :: KnownGlobal DataGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -348,6 +353,7 @@ knownData KnownUnit = DataGlobal (Name "Unit")
 knownData KnownBool = DataGlobal (Name "Bool")
 knownData KnownEqual = DataGlobal (Name "Equal")
 knownData KnownEmpty = DataGlobal (Name "Empty")
+knownData KnownHEqual = DataGlobal (Name "HEqual")
 
 knownCtor :: KnownGlobal CtorGlobal -> CtorGlobal
 knownCtor KnownPair = CtorGlobal (Name "pair")
@@ -373,3 +379,7 @@ knownDef KnownSub = DefGlobal (Name "sub")
 knownDef KnownAdd = DefGlobal (Name "add")
 knownDef KnownBind = DefGlobal (Name "bind")
 knownDef KnownVoid = DefGlobal (Name "void")
+knownDef KnownDCongSp = DefGlobal (Name "dcong-sp") -- @@Todo: this is a hack
+knownDef (KnownInj (CtorGlobal d)) = DefGlobal (Name $ "inj-" ++ d.unName)
+knownDef (KnownConf (CtorGlobal d) (CtorGlobal c)) = DefGlobal (Name $ "conf-" ++ d.unName ++ "-" ++ c.unName)
+knownDef (KnownCycle (DataGlobal d)) = DefGlobal (Name $ "cycle-" ++ d.unName)
