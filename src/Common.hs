@@ -62,6 +62,9 @@ module Common
     telShapes,
     spineShapes,
     Clauses,
+    Shape,
+    Shapes,
+    ofShapes,
   )
 where
 
@@ -311,6 +314,10 @@ data Param t = Param {mode :: PiMode, qty :: Qty, name :: Name, ty :: t}
 
 type Tel t = Seq (Param t)
 
+type Shapes = Tel ()
+
+type Shape = Param ()
+
 telWithNames :: Tel a -> [Name] -> Tel a
 telWithNames te ns = S.zipWith (\(Param m q _ t) n -> Param m q n t) te (S.fromList ns)
 
@@ -336,6 +343,9 @@ telShapes = fmap (\(Param m q n _) -> Param m q n ())
 
 spineShapes :: Spine a -> Tel ()
 spineShapes = fmap (\(Arg m q _) -> Param m q (Name "_") ())
+
+ofShapes :: Shapes -> [a] -> Spine a
+ofShapes sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
 
 -- Metas
 

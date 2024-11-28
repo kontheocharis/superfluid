@@ -73,6 +73,7 @@ module Syntax
     extendCtxWithTel,
     lastVar,
     ctxSize,
+    nextVar,
   )
 where
 
@@ -99,8 +100,11 @@ import Common
     lvlToIdx,
     mapSpine,
     mapSpineM,
+    members,
     membersIn,
     nextLvl,
+    ofShapes,
+    telShapes,
   )
 import Control.Monad (void)
 import Control.Monad.State (MonadState (..), State, evalState, modify)
@@ -350,6 +354,9 @@ type HCtx = Tel HTy
 lastVar :: HCtx -> Lvl
 lastVar ctx = Lvl (length ctx - 1)
 
+nextVar :: HCtx -> Lvl
+nextVar ctx = Lvl (length ctx)
+
 ctxSize :: HCtx -> Lvl
 ctxSize = Lvl . length
 
@@ -364,8 +371,24 @@ joinTels :: HTel -> (Spine HTm -> HTel) -> HTel
 joinTels HEmpty g = g Empty
 joinTels (HWithParam m q n a f) g = HWithParam m q n a (\x -> joinTels (f x) (\xs -> g (Arg m q x :<| xs)))
 
+-- Returns the new context and a spine that can be used to refer to the new
+-- variables in the new context.
 extendCtxWithTel :: HCtx -> (Spine HTm -> HTel) -> (HCtx, Spine HTm)
-extendCtxWithTel = undefined -- a bit subtle @@Todo
+extendCtxWithTel ctx sp =
+  let vars = ofShapes (telShapes ctx) . map HVar $ members (ctxSize ctx)
+   in let sp' = sp vars
+       in extendCtxWithTel' ctx sp'
+  where
+    extendCtxWithTel' :: HCtx -> HTel -> (HCtx, Spine HTm)
+    extendCtxWithTel' ctx' = \case
+      HEmpty -> (ctx', Empty)
+      HWithParam m q n a f ->
+        let nextV = HVar (lastVar ctx')
+         in let (ctx'', sp') =
+                  extendCtxWithTel'
+                    (ctx' :|> Param m q n a)
+                    (f nextV)
+             in (ctx'', Arg m q nextV :<| sp')
 
 unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty

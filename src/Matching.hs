@@ -34,7 +34,7 @@ import Common
     Spine,
     nextLvl,
     spineShapes,
-    telShapes,
+    telShapes, ofShapes,
   )
 import Context
 import Context (unembedClosure1Here)
@@ -253,9 +253,6 @@ voidCtx = undefined
 initialSub :: Shapes -> Shapes -> Sub
 initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (void x)) sh)
 
-ofSh :: Shapes -> [a] -> Spine a
-ofSh sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
-
 -- Definitional equality checker. This should somehow hook into the other
 -- unification thing. (And the latter should be renamed to convert?)
 canConvert :: (Matching m) => HCtx -> HTm -> HTm -> m Bool
@@ -375,9 +372,9 @@ solution ctx ty a b = case (a, b) of
                       (telShapes ctxx)
                       ( \sp sp' ->
                           sp
-                            <> ofSh (S.singleton xSh) [b]
+                            <> ofShapes (S.singleton xSh) [b]
                             <> sp'
-                            <> ofSh (S.singleton csh) [refl ty b]
+                            <> ofShapes (S.singleton csh) [refl ty b]
                       )
                 }
         return $ Just (ctx', S.singleton csh, Can, s)
@@ -463,7 +460,7 @@ conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
         Cannot [],
         BiSub
           { forward = initialSub voidSh (sh :|> csh),
-            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
+            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
           }
       )
   _ -> return Nothing
@@ -493,7 +490,7 @@ cycle ctx ty a b = case (a, b) of
             Cannot [],
             BiSub
               { forward = initialSub voidSh (sh :|> csh),
-                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofSh voidSh [cyc (hApp (HCtor (c, pp)) xs) (HVar x) p])
+                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [cyc (hApp (HCtor (c, pp)) xs) (HVar x) p])
               }
           )
       else

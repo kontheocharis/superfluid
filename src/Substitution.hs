@@ -21,13 +21,12 @@ module Substitution
     nonEmptyDomL,
     terminalSub,
     unembedClosure1,
-    extendSubSp,
     hoistBinders,
     hoistBinders',
   )
 where
 
-import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls)
+import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls, Shapes, Shape)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
@@ -42,10 +41,6 @@ import Syntax
   )
 
 -- Substitution
-
-type Shapes = Tel ()
-
-type Shape = Param ()
 
 data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine HTm}
 
@@ -101,9 +96,6 @@ terminalSub dom = Sub dom Empty (const Empty)
 -- _,_ : (σ : Sub Γ Δ) -> Tm Γ (Α σ) -> Sub Γ (Δ , Α)
 extendSub :: Sub -> Shape -> (Spine HTm -> HTm) -> Sub
 extendSub s sh v = Sub s.domSh (s.codSh :|> sh) (\g -> let Param m q _ () = sh in s.mapping g :|> (v g <$ Arg m q ()))
-
-extendSubSp :: Sub -> Shape -> Shape -> (Spine HTm -> Spine HTm) -> Sub
-extendSubSp s sh sh' v = Sub s.domSh (s.codSh :|> sh') (\g -> s.mapping g <> v g)
 
 -- id : Sub Γ Γ
 idSub :: Shapes -> Sub
@@ -249,4 +241,4 @@ instance Subst HTel where
       (sub (liftSub (Param m q n ()) s) . tel)
 
   occurs _ _ HEmpty = False
-  occurs l x (HWithParam m q _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
+  occurs l x (HWithParam _ _ _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
