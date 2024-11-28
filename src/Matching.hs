@@ -72,12 +72,12 @@ import Substitution
     Subst (..),
     composeSub,
     extendSub,
+    hoistBinders,
+    hoistBinders',
     idSub,
     liftSubN,
     mapSub1,
     mapSubN,
-    hoistBinders,
-    hoistBinders',
     proj,
   )
 import Syntax
@@ -138,7 +138,8 @@ data UnifyOutcome = Can | Cannot [MatchingError]
 -- Unification will not always succeed.
 --
 -- We also "remember" if Γ' is the bottom context (x : Empty) or not.
-type Unification = (HCtx, UnifyOutcome, BiSub)
+-- The `Shapes` is the shape of the added equalities in the context.
+type Unification = (HCtx, Shapes, UnifyOutcome, BiSub)
 
 instance Lattice UnifyOutcome where
   Can \/ _ = Can
@@ -271,6 +272,7 @@ unifyPLSpines ctx HEmpty Empty Empty = do
   -- So solve with Γ' = Γ and σ = id
   return
     ( ctx,
+      Empty,
       Can,
       BiSub
         { forward = idSub (telShapes ctx),
@@ -281,10 +283,10 @@ unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ q x :<| xs) (Arg _ q' y :<| ys
   -- Solving unify Γ ⊢ (x, ..xs) = (y, ..ys) : (_ : A)Δ
 
   -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ A x y
-  (ctx', o, s) <- unifyPL ctx ty x y
+  (ctx', sh', o, s) <- unifyPL ctx ty x y
 
   -- (Γ'', σ' : Sub Γ'' Γ'(χs σ = ys σ)) <- unifySp Γ' ((Δ [x]) σ) (xs σ) (ys σ)
-  (ctx'', o', s') <- unifyPLSpines ctx' (sub s.forward (ts x)) (sub s.forward xs) (sub s.forward ys)
+  (ctx'', sh'', o', s') <- unifyPLSpines ctx' (sub s.forward (ts x)) (sub s.forward xs) (sub s.forward ys)
 
   -- return (Γ'', (
   --     1 = lift (xs ..= ys) σ ∘ σ',
@@ -292,6 +294,7 @@ unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ q x :<| xs) (Arg _ q' y :<| ys
   -- ))
   return
     ( ctx'',
+      sh' <> sh'',
       o /\ o',
       BiSub
         { forward = composeSub (liftSubN (spineShapes xs) s.forward) s'.forward,
@@ -377,7 +380,7 @@ solution ctx ty a b = case (a, b) of
                             <> ofSh (S.singleton csh) [refl ty b]
                       )
                 }
-        return $ Just (ctx', Can, s)
+        return $ Just (ctx', S.singleton csh, Can, s)
   (_, HVar x) -> solution ctx ty (HVar x) a
   _ -> return Nothing
 
@@ -395,7 +398,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
     let n = cc.argsArity
 
     -- (Γ', σ : BiSub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
-    (ctx', o, s) <- unifyPLSpines ctx (cc.args pp) xs ys
+    (ctx', _, o, s) <- unifyPLSpines ctx (cc.args pp) xs ys
 
     -- Make a new name and shape for the new context
     x <- uniqueName
@@ -428,6 +431,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
     -- ))
     return . Just $
       ( ctx',
+        S.singleton csh,
         o,
         BiSub
           { forward = composeSub s'.forward s.forward,
@@ -455,6 +459,7 @@ conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
     --     σ⁻¹ = (ɛ Γ, conf c1 c2 here)    -- ɛ X is the terminal morphism from X to the empty context
     return . Just $
       ( voidCtx,
+        S.singleton csh,
         Cannot [],
         BiSub
           { forward = initialSub voidSh (sh :|> csh),
@@ -484,6 +489,7 @@ cycle ctx ty a b = case (a, b) of
         --     σ⁻¹ = (ɛ Γ, cyc c x)
         return . Just $
           ( ctx,
+            S.singleton csh,
             Cannot [],
             BiSub
               { forward = initialSub voidSh (sh :|> csh),
@@ -516,6 +522,7 @@ deletion ctx ty a b = do
     then
       return . Just $
         ( ctx,
+          S.singleton csh,
           Can,
           BiSub {forward = extendSub (idSub sh) csh (\_ -> refl ty a), backward = proj (idSub (sh :|> csh))}
         )
@@ -712,7 +719,7 @@ addVar st@(MatchingState ctx q' ty cls) = do
   ps <- hasNextPat cls
   case ps of
     Nothing -> return Nothing
-    -- @@Todo: if the args don't match in implicitness, insert!
+    -- @@Todo: if the args don't match in PiMode, insert!
     Just (Arg m' _ ()) -> do
       ifForcePi
         q'
@@ -720,7 +727,8 @@ addVar st@(MatchingState ctx q' ty cls) = do
         m'
         ty
         ( \p@(Param m q x a) b -> do
-            let s t = extendSub (idSub (telShapes ctx)) (Param m q x ()) (hoistBinders (length ctx) t)
+            let ctxShapes = telShapes ctx
+            let s t = extendSub (idSub ctxShapes) (Param m q x ()) (hoistBinders Empty ctxShapes t)
             let ctx' = ctx :|> Param m q x a
             let b' = b (HVar (lastVar ctx'))
             cls' <- addNextConstraint st p (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
@@ -744,7 +752,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
       SimpleConstraint _ _ (LvlP _ _) _ -> do
-        -- All we need to do is remove the constraint from the clauses.
+        -- All we need to do is remove the constraint from the clauses. @@Check: is this right?
         -- @@Todo: same quantity check?
         Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint clss))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
@@ -773,7 +781,9 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(ρ : Ψ)(D δ ρ)= (ξi[δ,π], ci π)
           --
           -- Gives back a bi-substitution σ to a new context Γ''
-          (ctx'', _, s) <- unifyPLSpines ctx' psiTel psix psix'
+          (ctx'', eqSh, _, s) <- unifyPLSpines ctx' psiTel psix psix'
+
+          -- @@Todo: if unification is negative, emit eliminator!
 
           -- For each clause with pattern πj, equate πj to π:
           cls' <- fmap catMaybes $ mapM (refineClause s.forward) cls
@@ -790,7 +800,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
           --    Γχ (x : D δ ψ) xΓ (π : Πi) |- e'' = (λ us . e' [us]) : Π ((ψ, x) = (ξi[δ,π], ci π)) T
           -- The equalities are explicitly given by the motive we will set up next.
           let eq = equalitySp psiTel psix psix'
-          let e'' = hoistBinders' (length pi) $ hLams eq (hoistBinders (length psix) e')
+          let e'' = hoistBinders' (telShapes ctx) cc.argsArity $ hLams eq (hoistBinders (telShapes ctx') eqSh e')
 
           -- The method is for constructor ci π
           return (Clause cpat (Just e''))

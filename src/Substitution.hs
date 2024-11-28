@@ -24,28 +24,19 @@ module Substitution
     extendSubSp,
     hoistBinders,
     hoistBinders',
-    hoistBindersSp,
   )
 where
 
-import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls, telShapes, telToBinds)
-import Control.Monad (foldM)
-import Data.Foldable (Foldable (..), toList)
+import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
 import Evaluation (Eval, quoteClosure)
 import Syntax
   ( Case (..),
-    Closure,
-    Env,
-    HCtx,
+    Closure (..),
     HTel (..),
     HTm (..),
-    HTy,
-    SPat (..),
-    VTm (..),
-    hApp,
     patBinds,
     unembed,
   )
@@ -60,22 +51,25 @@ data Sub = Sub {domSh :: Shapes, codSh :: Shapes, mapping :: Spine HTm -> Spine 
 
 data BiSub = BiSub {forward :: Sub, backward :: Sub}
 
-hoistBindersSp :: Int -> Spine HTm -> (Spine HTm -> HTm)
-hoistBindersSp sh t sp = undefined
+-- Create dummy shapes
+defaultShapes :: Lvl -> Shapes
+defaultShapes l = fromList $ replicate l.unLvl (Param Explicit Many (Name "_") ())
 
-hoistBinders :: Int -> HTm -> (Spine HTm -> HTm)
-hoistBinders sh t sp = undefined
+-- @@Performance: can be made more efficient
+hoistBinders :: Shapes -> Shapes -> HTm -> (Spine HTm -> HTm)
+hoistBinders c (sh :<| shs) t sp = hoistBinder c sh t (hoistBinders c shs t sp)
+hoistBinders _ Empty t _ = t
 
-hoistBinder :: HTm -> (HTm -> HTm)
-hoistBinder t = undefined
+hoistBinder :: Shapes -> Shape -> HTm -> (HTm -> HTm)
+hoistBinder c sh t x = sub (extendSub (idSub c) sh (const x)) t -- @@Check: is const x right?
 
 unembedClosure1 :: (Eval m) => Lvl -> Closure -> m (HTm -> HTm)
 unembedClosure1 l c = do
   c' <- unembed (map HVar (members (nextLvl l))) <$> quoteClosure l c
-  return $ hoistBinder c'
+  return $ hoistBinder (defaultShapes (Lvl $ length c.env)) (Param Explicit Many (Name "_") ()) c'
 
-hoistBinders' :: Int -> HTm -> ([HTm] -> HTm)
-hoistBinders' sh t sp = undefined
+hoistBinders' :: Shapes -> Shapes -> HTm -> ([HTm] -> HTm)
+hoistBinders' sh t sp = hoistBinders sh t sp . fromList . map (Arg Explicit Many)
 
 nonEmptyDom :: (Spine HTm -> HTm -> a) -> (Spine HTm -> a)
 nonEmptyDom f = \case
