@@ -13,7 +13,7 @@ module Syntax
     Pat (..),
     Case (..),
     VCtor,
-    HCtx (..),
+    HCtx,
     sGatherApps,
     sGatherPis,
     sGatherLams,
@@ -97,16 +97,14 @@ import Common
     Tel,
     idxToLvl,
     lvlToIdx,
-    members,
+    mapSpine,
+    mapSpineM,
     membersIn,
     nextLvl,
-    unLvl,
   )
 import Control.Monad (void)
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IM
-import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
+import Control.Monad.State (MonadState (..), State, evalState, modify)
+import Data.Foldable (Foldable (..))
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
 
@@ -448,7 +446,7 @@ unembedCase env (Case d ps s is t cs) =
     (fmap (unembedClause env) cs)
   where
     unembedClause :: Env HTm -> Clause SPat STm -> Clause Pat ([HTm] -> HTm)
-    unembedClause env (Clause p c) = Clause (unembedPat env p) (fmap (\c' bs -> unembed (reverse bs ++ env) c') c)
+    unembedClause env' (Clause p c) = Clause (unembedPat env' p) (fmap (\c' bs -> unembed (reverse bs ++ env') c') c)
 
 unembed :: Env HTm -> STm -> HTm
 unembed env = \case
@@ -468,14 +466,30 @@ unembed env = \case
   SRepr t -> HRepr (unembed env t)
   SUnrepr t -> HUnrepr (unembed env t)
 
-data Pat = LvlP Qty Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
+data Pat = LvlP Qty Name Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
 
--- @@Todo:
 patBinds :: Pat -> [(Qty, Name)]
-patBinds = undefined
+patBinds (LvlP q n _) = [(q, n)]
+patBinds (CtorP _ sp) = concatMap (\a -> patBinds a.arg) (toList sp)
 
 embedPat :: Lvl -> Pat -> SPat
-embedPat = undefined
+embedPat l p = case p of
+  LvlP _ _ l' -> SPat (SVar (lvlToIdx l l')) (patBinds p)
+  CtorP (c, pp) sp' -> SPat (sAppSpine (SCtor (c, fmap (fmap $ embed l) pp)) (fmap (fmap $ \x -> (embedPat l x).asTm) sp')) (patBinds p)
 
 unembedPat :: Env HTm -> SPat -> Pat
-unembedPat = undefined
+unembedPat env (SPat t bs) = flip evalState 0 $ unembedPat' t
+  where
+    unembedPat' :: STm -> State Int Pat
+    unembedPat' t' = do
+      case sGatherApps t' of
+        (SVar _, Empty) -> do
+          i <- get
+          let (q, n) = bs !! i
+          modify (+ 1)
+          return (LvlP q n (idxToLvl (Lvl (length env)) (Idx i)))
+        (SCtor (c, pp), sp) -> do
+          sp' <- mapSpineM unembedPat' sp
+          let pp' = mapSpine (unembed env) pp
+          return (CtorP (c, pp') sp')
+        _ -> error "unembedPat: got non-pattern value"

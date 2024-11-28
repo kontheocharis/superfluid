@@ -618,7 +618,8 @@ forceData ctx ty = do
 tmAsPat :: (Matching m) => Qty -> HTm -> m Pat
 tmAsPat q t = case hGatherApps t of
   (HVar x, Empty) -> do
-    return (LvlP q x)
+    entry <- access (`coindexCtx` x)
+    return (LvlP q entry.name x)
   (HCtor (c, pp), sp) ->
     CtorP (c, pp)
       <$> traverse (\a -> traverse (tmAsPat a.qty) a) sp
@@ -751,7 +752,7 @@ splitConstraint (MatchingState ctx q ty cls) = do
     Clause (co : _, _) _ : clss -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ _ (LvlP _ _) _ -> do
+      SimpleConstraint _ _ (LvlP _ _ _) _ -> do
         -- All we need to do is remove the constraint from the clauses. @@Check: is this right?
         -- @@Todo: same quantity check?
         Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint clss))
