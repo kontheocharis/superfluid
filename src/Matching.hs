@@ -21,6 +21,7 @@ import Common
   ( Arg (..),
     Clause (..),
     Clauses,
+    CtorGlobal (..),
     DataGlobal (..),
     DefGlobal,
     Has (..),
@@ -37,7 +38,7 @@ import Common
     nextLvl,
     ofShapes,
     spineShapes,
-    telShapes, CtorGlobal,
+    telShapes,
   )
 import Context
 import Context (unembedClosure1Here)
@@ -60,7 +61,9 @@ import Globals
   ( CtorConstructions (..),
     DataConstructions (..),
     DataGlobalInfo (..),
+    CtorGlobalInfo (..),
     KnownGlobal (KnownEqual, KnownRefl),
+    getCtorGlobal,
     getCtorGlobal',
     getDataGlobal,
     getDataGlobal',
@@ -215,11 +218,11 @@ reflSp = undefined
 -- equalitySp' _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
-dcong :: HTy -> (HTm -> HTm) -> (HTm -> HTm) -> HTm -> HTm
+dcong :: HTy -> (HTm -> HTy) -> (HTm -> HTm) -> HTm -> HTm
 dcong a t = undefined
 
 -- dcongSp : (f : Tm Γ (Πs Δ Τ)) -> {xs ys : Tms Γ Δ} -> Tms Γ (xs ..= ys) -> Tm Γ (f xs = f ys)
-dcongSp :: HTel -> (Spine HTm -> HTm) -> (Spine HTm -> HTm) -> Spine HTm -> HTm
+dcongSp :: HTel -> (Spine HTm -> HTy) -> (Spine HTm -> HTm) -> Spine HTm -> HTm
 dcongSp delta t = undefined
 
 -- inj : (c : Ctor D Δ Π ξ) -> {δ : Δ} {xs ys : Tms Γ (Π [δ])} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
@@ -232,9 +235,9 @@ inj = undefined
 conf :: CtorGlobal -> CtorGlobal -> Spine HTm -> Spine HTm -> Spine HTm -> HTm -> HTm
 conf = undefined
 
--- @@Todo: properly encode the < relation
--- cyc : {δ : Δ} {ψ : Ξ[δ]} (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
-cyc :: DataGlobal -> Spine HTm -> Spine HTm -> HTm -> HTm -> HTm -> HTm
+-- @@Todo: properly encode the < relation, and deal with indices!
+-- cyc : {δ : Δ} (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
+cyc :: DataGlobal -> Spine HTm -> HTm -> HTm -> HTm -> HTm
 cyc = undefined
 
 -- Never
@@ -403,7 +406,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
     -- Reason : Terms are well-typed *and* fully eta-expanded. @@Todo: Actually do the latter!
     let sh = telShapes ctx
     let c = c1
-    (_, cc) <- access (getCtorGlobal' c)
+    (ci, cc) <- access (getCtorGlobal' c)
     let n = cc.argsArity
 
     -- (Γ', σ : BiSub Γ' Γ(xs ..= ys)) <- unify Γ xs ys
@@ -426,12 +429,23 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
                   (sh <> n)
                   (sh :|> csh)
                   sh
-                  (\sp ps -> sp :|> Arg Explicit Many (dcongSp (hApp (HCtor (c, pp))) ps)),
+                  ( \sp ps ->
+                      sp
+                        :|> Arg
+                          Explicit
+                          Many
+                          ( dcongSp
+                              (cc.args pp)
+                              (hApp (HData ci.dataGlobal) . cc.returnIndices pp)
+                              (hApp (HCtor (c, pp)))
+                              ps
+                          )
+                  ),
               backward =
                 mapSub1
                   (sh :|> csh)
                   (sh <> n)
-                  (\sp p -> sp <> inj (HCtor (c, pp)) p)
+                  (\sp p -> sp <> inj c pp (HCtor (c, pp)) p)
             }
 
     -- return (Γ', (
@@ -451,7 +465,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
 
 conflict :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
-  ((HCtor (c1, pp), _), (HCtor (c2, _), _)) | c1 /= c2 -> do
+  ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 /= c2 -> do
     -- Γ ⊢ (c1 xs : D δ ξ[xs]) =? (c2 ys : D δ ξ[ys])
     --
     -- This is a conflict, so we need to return a disunifier.
@@ -472,7 +486,7 @@ conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
         Cannot [],
         BiSub
           { forward = initialSub voidSh (sh :|> csh),
-            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [conf (HCtor (c1, pp)) (HCtor (c2, pp)) p])
+            backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [conf c1 c2 pp xs ys p])
           }
       )
   _ -> return Nothing
@@ -483,6 +497,7 @@ cycle ctx ty a b = case (a, b) of
   (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
     -- Check if x occurs in xs, if so, then we have a cycle.
     let l = Lvl (length ctx)
+    ci <- access (getCtorGlobal c)
     if occurs l (== x) xs
       then do
         let sh = telShapes ctx
@@ -502,7 +517,7 @@ cycle ctx ty a b = case (a, b) of
             Cannot [],
             BiSub
               { forward = initialSub voidSh (sh :|> csh),
-                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [cyc (hApp (HCtor (c, pp)) xs) (HVar x) p])
+                backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [cyc ci.dataGlobal pp (hApp (HCtor (c, pp)) xs) (HVar x) p])
               }
           )
       else
