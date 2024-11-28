@@ -37,7 +37,7 @@ import Common
     nextLvl,
     ofShapes,
     spineShapes,
-    telShapes,
+    telShapes, CtorGlobal,
   )
 import Context
 import Context (unembedClosure1Here)
@@ -215,26 +215,26 @@ reflSp = undefined
 -- equalitySp' _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 -- dcong : (f : Tm Γ (Π A Τ)) -> {x y : Tm Γ A} -> Tms Γ (x = y) -> Tms Γ (f x = f y)
-dcong :: (HTm -> HTm) -> HTm -> HTm
-dcong = undefined
+dcong :: HTy -> (HTm -> HTm) -> (HTm -> HTm) -> HTm -> HTm
+dcong a t = undefined
 
 -- dcongSp : (f : Tm Γ (Πs Δ Τ)) -> {xs ys : Tms Γ Δ} -> Tms Γ (xs ..= ys) -> Tm Γ (f xs = f ys)
-dcongSp :: (Spine HTm -> HTm) -> Spine HTm -> HTm
-dcongSp = undefined
+dcongSp :: HTel -> (Spine HTm -> HTm) -> (Spine HTm -> HTm) -> Spine HTm -> HTm
+dcongSp delta t = undefined
 
 -- inj : (c : Ctor D Δ Π ξ) -> {δ : Δ} {xs ys : Tms Γ (Π [δ])} -> Tm Γ (c xs = c ys) -> Tms Γ (xs ..= ys)
-inj :: HTm -> HTm -> Spine HTm
+inj :: CtorGlobal -> Spine HTm -> HTm -> HTm -> Spine HTm
 inj = undefined
 
--- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {xs : Tms  ys : Tms Γ Π}
+-- conf : (c1 : Ctor D Δ Π₁, c2 : Ctor D Δ Π₂ ξ₂) -> {δ : Δ} {xs : Tms Γ Π₁[δ]} {ys : Tms Γ Π₂[δ]}
 --            -> Tm Γ (c1 xs = c2 ys)
 --            -> Tm Γ Empty
-conf :: HTm -> HTm -> HTm -> HTm
+conf :: CtorGlobal -> CtorGlobal -> Spine HTm -> Spine HTm -> Spine HTm -> HTm -> HTm
 conf = undefined
 
 -- @@Todo: properly encode the < relation
--- cyc : (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
-cyc :: HTm -> HTm -> HTm -> HTm
+-- cyc : {δ : Δ} {ψ : Ξ[δ]} (x t : D δ ψ) -> {{auto _ : x < t}} -> Tm Γ (x = t) -> Tm Γ Empty
+cyc :: DataGlobal -> Spine HTm -> Spine HTm -> HTm -> HTm -> HTm -> HTm
 cyc = undefined
 
 -- Never
