@@ -162,6 +162,7 @@ import Syntax
 import Unelaboration (Unelab)
 import Unification
 import Prelude hiding (pi)
+import Debug.Trace (traceM)
 
 data TcError
   = Mismatch [UnifyError]
@@ -815,6 +816,9 @@ defItem mq n ts ty cl clauses = do
   vtm <- evalHere tm'
   b <- normaliseProgram
   stm <- if b then quote (Lvl 0) vtm else return tm'
+
+  stm' <- pretty stm
+  traceM $ "Got " ++ stm'
 
   -- Instances
   when (InstanceTag `SET.member` ts) $ do

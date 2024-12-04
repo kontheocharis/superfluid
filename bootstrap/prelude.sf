@@ -9,6 +9,11 @@ data Bool : Type {
   false : Bool
 }
 
+def not : Bool -> Bool {
+  true => false,
+  false => true
+}
+
 -- Relevant sigma
 
 data Sigma (A : Type, B : A -> Type) : Type {
@@ -21,7 +26,7 @@ data Equal [A : Type] : A -> A -> Type {
 
 #unfold
 def dup : [A : Type] -> A -> A * A {
-  \a => (a, a)
+  [A] a => (a, a)
 }
 
 #unfold

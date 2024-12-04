@@ -105,13 +105,13 @@ unelabPat ns pat = do
         a' <- unelabPat' a
         b' <- unelabPat' b
         return $ pApp a' (S.singleton $ Arg m q b')
-      (SVar (Idx 0)) ->
+      (SVar (Idx _)) ->
         state
           ( \case
               (v : vs) -> (PName v, vs)
               [] -> error "impossible"
           )
-      _ -> error "impossible"
+      _ -> error $ "impossible, got pat " ++ show pat'
 
 unelabValue :: (Unelab m) => [Name] -> VTm -> m PTm
 unelabValue ns t = quote (Lvl (length ns)) t >>= unelab ns

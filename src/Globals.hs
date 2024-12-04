@@ -89,8 +89,7 @@ data CtorConstructions = CtorConstructions
     argsArity :: Tel (),
     ty :: Spine HTm -> HTy,
     returnIndices :: Spine HTm -> Spine HTm -> Spine HTm,
-    returnTy :: Spine HTm -> Spine HTm -> HTm,
-    varPat :: Pat
+    returnTy :: Spine HTm -> Spine HTm -> HTm
   }
 
 data DataGlobalInfo = DataGlobalInfo

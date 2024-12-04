@@ -80,7 +80,7 @@ where
 import Common
   ( Arg (..),
     Clause (..),
-    CtorGlobal,
+    CtorGlobal (..),
     DataGlobal,
     DefGlobal,
     Glob (..),
@@ -111,6 +111,7 @@ import Control.Monad.State (MonadState (..), State, evalState, modify)
 import Data.Foldable (Foldable (..))
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
+import Printing (Pretty (..))
 
 type VPat = VTm
 
@@ -490,6 +491,12 @@ unembed env = \case
   SUnrepr t -> HUnrepr (unembed env t)
 
 data Pat = LvlP Qty Name Lvl | CtorP (CtorGlobal, Spine HTm) (Spine Pat)
+
+instance (Monad m) => Pretty m Pat where
+  pretty (LvlP _ n _) = return $ show n
+  pretty (CtorP (c, _) sp) = do
+    c' <- pretty sp
+    return $ show c.globalName ++ if null c' then "" else " " ++ c'
 
 patBinds :: Pat -> [(Qty, Name)]
 patBinds (LvlP q n _) = [(q, n)]

@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Matching
   ( Matching (..),
@@ -105,11 +106,14 @@ import Syntax
     hGatherApps,
     hLams,
     joinTels,
-    lastVar,
+    lastVar, embed,
   )
 import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
 import Unification (CanUnify (..), canUnifyHere)
 import Prelude hiding (cycle, pi)
+import Debug.Trace (traceM)
+import Printing (Pretty(..))
+import Unelaboration (Unelab)
 
 data MatchingError = MatchingError
 
@@ -263,7 +267,7 @@ cyc d _ _ _ = hApp (HDef (knownDef (KnownCycle d))) . S.singleton . Arg Explicit
 --
 -- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
 void :: HTm -> HTm
-void ty = HApp Explicit Zero (HDef (knownDef KnownVoid)) ty
+void = HApp Explicit Zero (HDef (knownDef KnownVoid))
 
 voidSh :: Shapes
 voidSh = Param Explicit Many (Name "_") () :<| Empty
@@ -582,6 +586,16 @@ data Constraint = Constraint
     param :: Param HTy
   }
 
+instance (Unelab m, Has m Ctx) => Pretty m SimpleConstraint where
+  pretty (SimpleConstraint l x p pr) = pretty (Constraint l (HVar x) p pr)
+
+instance (Unelab m, Has m Ctx) => Pretty m Constraint where
+  pretty (Constraint l x p _) = do
+    x' <- pretty (embed l x)
+    p' <- pretty p
+    return $ x' ++ " = " ++ p'
+
+
 data SimpleConstraint = SimpleConstraint
   { lvl :: Lvl,
     lhs :: Lvl,
@@ -617,7 +631,11 @@ simplifyConstraint co = do
 refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
 refineClause s cl' = case cl' of
   Clause (cs, ps) t -> do
+    ps' <- mapM pretty cs
+    traceM $ "Refining constraints : " ++ show ps'
     cs' <- simplifyConstraints (map (subSimpleConstraint s) cs)
+    ps'' <- mapM (traverse pretty) cs'
+    traceM $ "Refined constraints : " ++ show ps''
     case cs' of
       Just cs'' -> return . Just $ Clause (cs'', ps) t
       Nothing -> return Nothing
@@ -694,6 +712,13 @@ hasNextPat cls = do
 -- This is done by the tactics below:
 caseTree :: (Matching m) => MatchingState m -> m HTm
 caseTree c = do
+  ctx' <- embedCtx c.ctx
+  c' <- pretty ctx'
+  cs' <- mapM (mapM pretty) (map (\(Clause (cs, _) _) -> cs) c.cls)
+  traceM $ "In context " ++ c'
+  traceM $ "and constraints " ++ show cs'
+  traceM $ "and clause count " ++ show (length c.cls)
+
   -- First we add all the variables to the context
   -- Then once we can't anymore, we split on the first-added constraint
   -- Once all the constraints are solved, we can typecheck the right-hand
@@ -714,6 +739,8 @@ done (MatchingState ctx q ty cls) = do
   case cls of
     Clause ([], Empty) (Just tm) : _ -> do
       -- @@Todo: qty
+      ctx' <- embedCtx ctx
+      pretty ctx' >>= traceM
       (tm', _) <- tm q ctx (Check ty)
       return (Just tm')
     _ -> return Nothing
@@ -787,13 +814,13 @@ addVar st@(MatchingState ctx q' ty cls) = do
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
 splitConstraint (MatchingState ctx q ty cls) = do
   case cls of
-    Clause (co : _, _) _ : clss -> case co of
+    Clause (co : _, _) _ : _ -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ _ (LvlP _ _ _) _ -> do
+      SimpleConstraint _ _ (LvlP {}) _ -> do
         -- All we need to do is remove the constraint from the clauses. @@Check: is this right?
         -- @@Todo: same quantity check?
-        Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint clss))
+        Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint cls))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ

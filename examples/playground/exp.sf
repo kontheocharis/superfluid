@@ -1,0 +1,40 @@
+
+
+
+def `//` (a : Int) (b : Int) : Int { -- infix operator
+}
+
+def `_[_]` [T] (l : List T) (i : Int) : T { -- infix operator
+}
+
+record Concat (T : Type) : Type {
+  concat : T -> T -> T
+}
+
+impl Concat List (
+  concat = \l1 l2 => l1 ++ l2
+)
+
+def `++` [T] [[Concat T]] (l1 : T) (l2 : T) : T { -- infix operator
+  [T] [[c]] => c.concat l1 l2
+}
+
+def quicksort [T] [[Monad T]] (l : List T) : List T {
+  [] => []
+  xs => {
+    let pivot = length xs // 2;
+    let left = filter (\x => x < xs[pivot]) xs;
+    let right = filter (\x => x >= xs[pivot]) xs;
+    quicksort left ++ [xs[pivot]] ++ quicksort right
+  }
+}
+
+
+def flip (t : Bool) : Bool { -- telescopic definition
+  true => false -- inline pattern matching
+  false => true
+}
+
+def main : IO () {
+
+}
