@@ -397,13 +397,13 @@ singleTerm = choice [list, literal, varOrHoleOrU, repTerm, unrepTerm, pairOrPare
 
 literal :: Parser PTm
 literal = locatedTerm $ do
-  ( try (reservedOp "\'") >> do
+  ( try (string "\'") >> do
       c <- parseChar
       _ <- reservedOp "\'"
       anyWhite
       return $ PLit (CharLit c)
     )
-    <|> ( try (reservedOp "\"") >> do
+    <|> ( try (string "\"") >> do
             s <- many parseStringChar
             _ <- reservedOp "\""
             anyWhite
