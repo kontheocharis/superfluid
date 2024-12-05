@@ -1,5 +1,6 @@
 // boot.js
 const { Buffer } = require("buffer");
+const fs = require("fs");
 
 // Type system
 const Type = null;
@@ -111,7 +112,7 @@ const js_panic = (msg) => {
 
 // IO Monad (CPS style)
 const IO = (f) => f;
-const io_return = (x) => (k) => x;
+const io_return = (x) => (k) => k(x);
 const io_bind = (ma) => (f) => (k) => ma((a) => f(a)(k));
 
 // Unsafe IO execution
@@ -126,10 +127,11 @@ const unsafe_io = (io) => {
 // JS IO operations
 const js_console_log = (x) => (k) => {
   console.log(x);
-  return k;
+  return k(null);
 };
 const js_read_file = (file) => (k) => {
-  return fs.readFileSync(file, "utf8");
+  const f = fs.readFileSync(file, "utf8");
+  return k(f);
 };
 
 // JS Buffer operations

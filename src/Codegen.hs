@@ -128,7 +128,7 @@ generateProgram :: (Gen m) => m JsProg
 generateProgram = do
   view >>= mapSigContentsM_ generateItem
   boot <- readBootFile
-  addDecl $ jsExprStat (jsInvoke $ jsGlobal (Name "main"))
+  addDecl $ jsExprStat (jsApp (jsGlobal (Name "main")) (S.singleton $ Arg Explicit Many jsId))
   ds <- view
   return $ jsProgFromStats boot ds
 
@@ -299,6 +299,9 @@ jsSwitch (JsExpr e) cs =
 
 jsInvoke :: JsExpr -> JsExpr
 jsInvoke (JsExpr e) = JsExpr $ "(" ++ e ++ ")()"
+
+jsId :: JsExpr
+jsId = JsExpr "(x) => x"
 
 jsArray :: [JsExpr] -> JsExpr
 jsArray es = JsExpr $ "[" ++ intercalate ", " (map (\(JsExpr e) -> e) es) ++ "]"
