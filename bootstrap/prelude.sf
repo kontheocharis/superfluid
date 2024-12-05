@@ -163,6 +163,8 @@ prim js-if-bounded : [A : Type] -> JsUint -> (n : JsUint) -> (JsBoundedUint n ->
 
 prim js-assert-defined : [T : Type] -> JsUnion T JsUndefined -> T
 
+prim js-to-string : [A : Type] -> A -> JsString
+
 prim js-zero : JsNumber
 
 prim js-one : JsNumber
@@ -236,8 +238,6 @@ prim js-or : JsBool -> JsBool -> JsBool
 
 prim js-not : JsBool -> JsBool
 
-prim js-panic : [T : Type] -> JsString -> T
-
 -- -- IO
 
 prim IO : Type -> Type
@@ -249,6 +249,8 @@ prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
 prim unsafe-io : [A : Type] -> IO A -> A
 
 -- -- JS IO
+
+prim js-panic : [T : Type] -> JsString -> IO T
 
 prim js-console-log : [T : Type] -> T -> IO ()
 
@@ -848,6 +850,12 @@ def parse-nat : String -> Maybe Nat {
   }
 }
 
+def show-nat : Nat -> String {
+  \n => {
+    unrepr (js-to-string (repr n))
+  }
+}
+
 def 0 Word : Type {
   Fin 65536
 }
@@ -1074,6 +1082,18 @@ def read-file-to-string : String -> IO String {
 def input : IO String {
   read-file-to-string "/dev/stdin"
 }
+
+def throw : [A : Type] -> String -> IO A {
+  \s => js-panic (repr s)
+}
+
+prim 0 Cell : Type -> Type
+
+prim cell : [A : Type] -> A -> IO (Cell A)
+
+prim get-cell : [A : Type] -> Cell A -> IO A
+
+prim set-cell : [A : Type] -> Cell A -> A -> IO ()
 
 -- data HttpRequest : Type {
 --   http-request : (

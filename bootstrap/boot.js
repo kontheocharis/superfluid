@@ -62,7 +62,8 @@ const js_string_length = (s) => s.length;
 const js_string_index = (s) => (n) => s[n];
 const js_string_slice = (s) => (start) => (end) => s.slice(start, end);
 const js_string_char_at = (s) => (n) => s.charAt(n);
-const js_string_elim = (s) => (a) => (f) => {
+const js_string_split = (s) => (sep) => s.split(sep);
+const js_string_elim = (a) => (f) => (s) => {
   if (s.length === 0) {
     return a;
   }
@@ -120,15 +121,22 @@ const js_and = (a) => (b) => a && b;
 const js_or = (a) => (b) => a || b;
 const js_not = (a) => !a;
 
-// Error handling
-const js_panic = (msg) => {
-  throw new Error(msg);
-};
-
 // IO Monad (CPS style)
 const IO = (f) => f;
 const io_return = (x) => (k) => k(x);
+const io_effect = (x) => (k) => k(x());
 const io_bind = (ma) => (f) => (k) => ma((a) => f(a)(k));
+
+// Error handling
+const js_panic = (msg) =>
+  io_effect(() => {
+    throw new Error(msg);
+  });
+
+const js_exit = (code) =>
+  io_effect(() => {
+    process.exit(code);
+  });
 
 // Unsafe IO execution
 const unsafe_io = (io) => {
@@ -140,14 +148,14 @@ const unsafe_io = (io) => {
 };
 
 // JS IO operations
-const js_console_log = (x) => (k) => {
-  console.log(x);
-  return k(null);
-};
-const js_read_file = (file) => (k) => {
-  const f = fs.readFileSync(file, "utf8");
-  return k(f);
-};
+const js_console_log = (x) =>
+  io_effect(() => {
+    return console.log(x);
+  });
+const js_read_file = (file) =>
+  io_effect(() => {
+    return fs.readFileSync(file, "utf8");
+  });
 
 // JS Buffer operations
 const JsBuffer = null;
@@ -204,8 +212,29 @@ const js_bound_trust_me = (x) => x;
 
 const js_assert_defined = (x) => x;
 
+const js_to_string = (x) => String(x);
+
 const prim = (x) => x;
 
 const conjure = null;
 
 const trust_me = null;
+
+// Cells
+
+const Cell = (value) => value;
+
+const cell = (value) =>
+  io_effect(() => ({
+    value,
+  }));
+
+const get_cell = (cell) => io_effect(() => cell.value);
+
+const set_cell = (cell) => (value) => {
+  return io_effect(() => {
+    cell.value = value;
+  });
+};
+
+Error.stackTraceLimit = Infinity;

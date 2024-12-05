@@ -639,11 +639,11 @@ ifExpr = locatedTerm $ do
       ( do
           try $ reserved "if"
           cond <- term
-          t <- curlies term
+          t <- lets
           return (cond, t)
       )
       (try $ reserved "else")
-  elseBranch <- curlies term
+  elseBranch <- lets
   return $ foldr (\(cond, t) acc -> PIf cond t acc) elseBranch ifs
 
 caseClause :: Parser (Clause PPat PTm)
