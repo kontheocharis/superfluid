@@ -153,6 +153,8 @@ prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
 
 prim js-length : [T : Type] -> JsArray T -> JsUint
 
+prim js-sort : [T : Type] -> (T -> T -> JsNumber) -> JsArray T -> JsArray T
+
 prim js-filter : [T : Type] -> (T -> JsBool) -> JsArray T -> JsArray T
 
 prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
@@ -178,6 +180,8 @@ prim js-uint-one : JsUint
 prim js-plus : JsNumber -> JsNumber -> JsNumber
 
 prim js-uint-plus : JsUint -> JsUint -> JsUint
+
+prim js-uint-minus : JsUint -> JsUint -> JsUint
 
 prim js-forget-bound : [n : JsUint] -> JsBoundedUint n -> JsUint
 
@@ -488,10 +492,10 @@ def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   }
 }
 
-def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
-  \f acc xs => case xs {
+def fold : [A : Type] -> [B : Type] -> B -> (A -> B -> B) -> List A -> B {
+  \acc f xs => case xs {
     [] => acc,
-    [x, ..xs'] => f x (fold f acc xs')
+    [x, ..xs'] => f x (fold acc f xs')
   }
 }
 
@@ -674,6 +678,7 @@ repr data Nat as JsUint {
 }
 
 repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
+repr def sub as \a b => unrepr (js-uint-minus (repr a) (repr b))
 repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
 repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
 repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
@@ -729,6 +734,35 @@ repr data List A as JsArray A {
   }
 }
 
+data Ordering {
+  ord-lt : Ordering,
+  ord-eq : Ordering,
+  ord-gt : Ordering
+}
+
+def nat-cmp : Nat -> Nat -> Ordering {
+  \a b => case nat-eq a b {
+    true => ord-eq,
+    false => case lt a b {
+      true => ord-lt,
+      false => ord-gt,
+    }
+  }
+}
+
+def sort : [A : Type] -> (A -> A -> Ordering) -> List A -> List A {
+  \cmp l => {
+    let cmp' = \a b => {
+      case cmp a b {
+        ord-lt => js-one,
+        ord-eq => js-zero,
+        ord-gt => js-minus js-zero js-one,
+      }
+    };
+    unrepr (js-sort cmp' (repr l))
+  }
+}
+
 repr def length as \l => unrepr (js-length (repr l))
 
 repr def filter as \p xs => unrepr (js-filter (\b' => repr (p b')) (repr xs))
@@ -744,7 +778,7 @@ repr def index as {
 
 repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
-repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
+repr def fold as \i f xs => js-reduce (\acc x => f x acc) i (repr xs)
 
 -- -- -- More definitions
 
@@ -1108,6 +1142,10 @@ prim cell : [A : Type] -> A -> IO (Cell A)
 prim get-cell : [A : Type] -> Cell A -> IO A
 
 prim set-cell : [A : Type] -> Cell A -> A -> IO ()
+
+def modify-cell : [A : Type] -> Cell A -> (A -> A) -> IO () {
+  \cell f => io-bind (get-cell cell) (\x => set-cell cell (f x))
+}
 
 -- data HttpRequest : Type {
 --   http-request : (

@@ -52,6 +52,7 @@ const js_array_switch_r = (emptyCase) => (nonEmptyCase) => (arr) =>
 const js_slice = (arr) => (start) => (end) => arr.slice(start, end);
 const js_length = (arr) => arr.length;
 const js_map = (a) => (fn) => a.map((x, i) => fn([x, i]));
+const js_sort = (cmp) => (a) => [...a].sort((a, b) => cmp(a)(b));
 const js_reduce = (fn) => (initial) => (arr) =>
   arr.reduce((acc, val) => fn(acc)(val), initial);
 const js_index = (a) => (n) => a[n];
@@ -81,6 +82,7 @@ const js_uint_zero = 0;
 const js_uint_one = 1;
 const js_plus = (a) => (b) => a + b;
 const js_uint_plus = (a) => (b) => a + b;
+const js_uint_minus = (a) => (b) => a - b;
 const js_forget_bound = (x) => x;
 const js_zero_or_pos = (zeroCase) => (posCase) => (i) =>
   i === 0 ? zeroCase() : posCase(i - 1);
@@ -237,5 +239,3 @@ const set_cell = (cell) => (value) => {
     cell.value = value;
   });
 };
-
-Error.stackTraceLimit = Infinity;
