@@ -55,6 +55,7 @@ const js_map = (a) => (fn) => a.map((x, i) => fn([x, i]));
 const js_reduce = (fn) => (initial) => (arr) =>
   arr.reduce((acc, val) => fn(acc)(val), initial);
 const js_index = (a) => (n) => a[n];
+const js_filter = (fn) => (a) => a.filter(fn);
 
 // String operations
 const js_string_concat = (a) => (b) => a + b;

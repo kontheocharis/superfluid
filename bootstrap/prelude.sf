@@ -153,6 +153,8 @@ prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
 
 prim js-length : [T : Type] -> JsArray T -> JsUint
 
+prim js-filter : [T : Type] -> (T -> JsBool) -> JsArray T -> JsArray T
+
 prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
 
 prim js-reduce : [T C : Type] -> (C -> T -> C) -> C -> JsArray T -> C
@@ -466,6 +468,16 @@ def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
   }
 }
 
+def filter : [A : Type] -> (A -> Bool) -> List A -> List A {
+  \p xs => case xs {
+    [] => [],
+    [x, ..xs'] => case p x {
+      true => [x, .. filter p xs'],
+      false => filter p xs'
+    }
+  }
+}
+
 def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   \p xs => case xs {
     [] => nothing,
@@ -718,6 +730,8 @@ repr data List A as JsArray A {
 }
 
 repr def length as \l => unrepr (js-length (repr l))
+
+repr def filter as \p xs => unrepr (js-filter (\b' => repr (p b')) (repr xs))
 
 repr def index as {
   \i l => {
