@@ -48,6 +48,22 @@ const js_reduce = (fn) => (initial) => (arr) =>
   arr.reduce((acc, val) => fn(acc)(val), initial);
 const js_index = (a) => (n) => a[n];
 
+// String operations
+const js_string_concat = (a) => (b) => a + b;
+const js_string_length = (s) => s.length;
+const js_string_index = (s) => (n) => s[n];
+const js_string_slice = (s) => (start) => (end) => s.slice(start, end);
+const js_string_char_at = (s) => (n) => s.charAt(n);
+const js_string_elim = (s) => (a) => (f) => {
+  if (s.length === 0) {
+    return a;
+  }
+  const head = s.charAt(0);
+  const tail = s.slice(1);
+  return f(head)(tail);
+};
+const js_string_from_char_code = (code) => String.fromCharCode(code);
+
 // Number operations
 const js_zero = 0;
 const js_one = 1;
@@ -111,6 +127,9 @@ const unsafe_io = (io) => {
 const js_console_log = (x) => (k) => {
   console.log(x);
   return k;
+};
+const js_read_file = (file) => (k) => {
+  return fs.readFileSync(file, "utf8");
 };
 
 // JS Buffer operations

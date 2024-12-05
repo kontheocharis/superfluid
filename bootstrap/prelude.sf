@@ -205,13 +205,13 @@ prim js-neq : [A B : Type] -> A -> B -> JsBool
 
 prim js-neqq : [A B : Type] -> A -> B -> JsBool
 
-prim js-lt : JsNumber -> JsNumber -> JsBool
+prim js-lt : [A B : Type] -> A -> B -> JsBool
 
-prim js-lte : JsNumber -> JsNumber -> JsBool
+prim js-lte : [A B : Type] -> A -> B -> JsBool
 
-prim js-gt : JsNumber -> JsNumber -> JsBool
+prim js-gt : [A B : Type] -> A -> B -> JsBool
 
-prim js-gte : JsNumber -> JsNumber -> JsBool
+prim js-gte : [A B : Type] -> A -> B -> JsBool
 
 prim js-and : JsBool -> JsBool -> JsBool
 
@@ -234,6 +234,8 @@ prim unsafe-io : [A : Type] -> IO A -> A
 -- -- JS IO
 
 prim js-console-log : [T : Type] -> T -> IO ()
+
+prim js-read-file : JsString -> IO JsString
 
 prim js-exit : [A : Type] -> JsNumber -> IO A
 
@@ -289,10 +291,6 @@ def debug-print : [A B : Type] -> A -> B -> B {
   \[A] [B] a b => {
     unsafe-io (io-bind (js-console-log a) (\_ => io-return b))
   }
-}
-
-def print : [A : Type] -> A -> IO () {
-  js-console-log
 }
 
 data Maybe (A : Type) : Type {
@@ -584,6 +582,14 @@ def lt : Nat -> Nat -> Bool {
   \m n => and (not (nat-eq m n)) (lte m n)
 }
 
+def gte : Nat -> Nat -> Bool {
+  \m n => not (lt m n)
+}
+
+def gt : Nat -> Nat -> Bool {
+  \m n => and (not (nat-eq m n)) (gte m n)
+}
+
 def bool-eq : (a : Bool, b : Bool) -> Bool {
   \a b => case a {
     true => case b {
@@ -657,6 +663,11 @@ repr def nat-eq-dep as \a b => {
     no (conjure _)
   }
 }
+repr def lte as \a b => unrepr (js-lte (repr a) (repr b))
+repr def lt as \a b => unrepr (js-lt (repr a) (repr b))
+
+repr def gte as \a b => unrepr (js-gte (repr a) (repr b))
+repr def gt as \a b => unrepr (js-gt (repr a) (repr b))
 
 repr data Fin i as JsBoundedUint (repr i) {
   fz as js-bounded-uint-zero,
@@ -714,6 +725,12 @@ data Char : Type {
   utf32-code : Fin (pow 2 32) -> Char,
 }
 
+def 0 char-eta : [c : Char] -> Equal c (case c { utf32-code f => utf32-code f }) {
+  \[c] => case c to (\c => Equal c (case c { utf32-code f => utf32-code f })) {
+    utf32-code f => refl
+  }
+}
+
 def char-eq : Char -> Char -> Bool {
   \c1 c2 => case c1 {
     utf32-code f1 => case c2 {
@@ -721,6 +738,36 @@ def char-eq : Char -> Char -> Bool {
     },
   }
 }
+
+repr data Char as (repr (Fin (pow 2 32))) {
+  utf32-code f as repr f,
+  case c to E {
+    utf32-code => f,
+  } as {
+    unsafe-cast (E c) (f (unrepr (repr c)))
+  }
+}
+
+-- Strings
+
+prim js-empty-string : JsString
+
+prim js-string-concat : JsString -> JsString -> JsString
+
+prim js-string-length : JsString -> JsUint
+
+prim js-string-index : JsString -> JsUint -> JsString
+
+prim js-string-substr : JsString -> JsUint -> JsUint -> JsString
+
+prim js-string-char-at : JsString -> JsUint -> JsString
+
+prim js-string-from-char-code : JsBoundedUint (repr (pow 2 32)) -> JsString
+
+prim js-string-elim : (0 P : JsString -> Type)
+    -> P js-empty-string
+    -> ((c : JsBoundedUint (repr (pow 2 32))) -> (cs : JsString) -> P (js-string-concat (js-string-from-char-code c) cs))
+    -> (s : JsString) -> P s
 
 data String : Type {
   snil : String,
@@ -737,6 +784,18 @@ def string-eq : String -> String -> Bool {
       snil => false,
       scons c2 s2' => and (char-eq c1 c2) (string-eq s1' s2'),
     },
+  }
+}
+
+repr data String as JsString {
+  snil as js-empty-string,
+  scons c s as js-string-concat (js-string-from-char-code (repr c)) (repr s),
+
+  case s to E {
+    snil => n,
+    scons => c,
+  } as {
+    js-string-elim (\x => E (unrepr x)) n (\l m => c (unrepr l) (unrepr m)) (repr s)
   }
 }
 
@@ -948,7 +1007,24 @@ def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
   }
 }
 
--- HTTP
+-- IO
+
+#unfold
+def print : String -> IO () {
+  \x => js-console-log (repr x)
+}
+
+#unfold
+def read-file-to-string : String -> IO String {
+  \x => {
+    io-bind (js-read-file (repr x)) (\x => io-return (unrepr x))
+  }
+}
+
+#unfold
+def input : IO String {
+  read-file-to-string "/dev/stdin"
+}
 
 -- data HttpRequest : Type {
 --   http-request : (
