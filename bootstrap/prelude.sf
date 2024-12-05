@@ -9,6 +9,15 @@ data Bool : Type {
   false : Bool
 }
 
+
+-- -- General primitives
+
+prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
+
+prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
+
+prim conjure : (0 A : Type) -> A
+
 -- Relevant sigma
 
 data Sigma (A : Type, B : A -> Type) : Type {
@@ -18,6 +27,8 @@ data Sigma (A : Type, B : A -> Type) : Type {
 data Equal [A : Type] : A -> A -> Type {
   refl : [x : A] -> Equal x x
 }
+
+prim trust-me : [A : Type, x : A, y : A] -> Equal x y
 
 #unfold
 def dup : [A : Type] -> A -> A * A {
@@ -76,9 +87,13 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   }
 }
 
-prim trust-me : [A : Type, x : A, y : A] -> Equal x y
+def transport-repr : (E : Type -> Type) -> [A : Type] -> E A -> E (repr A) {
+  \E [A] x => unsafe-cast (E (repr A)) x
+}
 
-prim conjure : (0 A : Type) -> A
+def transport-unrepr : (E : Type -> Type) -> [A : Type] -> E (repr A) -> E A {
+  \E [A] x => unsafe-cast (E A) x
+}
 
 -- -- JS primitives
 
@@ -105,6 +120,8 @@ prim JsString : Type
 prim js-null : JsNull
 
 prim js-undefined : JsUndefined
+
+prim js-optional-case : [A B : Type] -> B -> (A -> B) -> JsUnion A JsNull -> B
 
 prim js-true : JsBool
 
@@ -276,12 +293,6 @@ prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> J
 prim js-buffer-eq : JsBuffer -> JsBuffer -> JsBool
 
 prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
-
--- -- General primitives
-
-prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
-
-prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
 
 -- def from-js : [A : Type] -> JS -> A {
 --   \a => cast a
@@ -758,9 +769,13 @@ prim js-string-length : JsString -> JsUint
 
 prim js-string-index : JsString -> JsUint -> JsString
 
-prim js-string-substr : JsString -> JsUint -> JsUint -> JsString
+prim js-string-slice : JsString -> JsUint -> JsUint -> JsString
 
-prim js-string-char-at : JsString -> JsUint -> JsString
+prim js-string-split : JsString -> JsString -> JsArray JsString
+
+prim js-string-char-at : JsString -> JsUint -> JsBoundedUint (repr (pow 2 32))
+
+prim js-parse-uint : JsString -> JsUnion JsUint JsNull
 
 prim js-string-from-char-code : JsBoundedUint (repr (pow 2 32)) -> JsString
 
@@ -796,6 +811,40 @@ repr data String as JsString {
     scons => c,
   } as {
     js-string-elim (\x => E (unrepr x)) n (\l m => c (unrepr l) (unrepr m)) (repr s)
+  }
+}
+
+def string-split : String -> String -> List String {
+  \a b => {
+    transport-unrepr List (unrepr (js-string-split (repr a) (repr b)))
+  }
+}
+
+def string-length : String -> Nat {
+  \s => unrepr (js-string-length (repr s))
+}
+
+def string-index : String -> Nat -> Maybe Char {
+  \s n => {
+    if lt n (string-length s) {
+      just (unrepr (js-string-char-at (repr s) (repr n)))
+    } else {
+      nothing
+    }
+  }
+}
+
+def string-concat : String -> String -> String {
+  \a b => unrepr (js-string-concat (repr a) (repr b))
+}
+
+def string-slice : String -> Nat -> Nat -> String {
+  \s start end => unrepr (js-string-slice (repr s) (repr start) (repr end))
+}
+
+def parse-nat : String -> Maybe Nat {
+  \s => {
+    js-optional-case nothing (\x => just (unrepr x)) (js-parse-uint (repr s))
   }
 }
 

@@ -26,6 +26,13 @@ const js_undefined = undefined;
 const js_true = true;
 const js_false = false;
 
+const js_optional_case = (emptyCase) => (nonEmptyCase) => (x) => {
+  if (x === null) {
+    return emptyCase;
+  }
+  return nonEmptyCase(x);
+};
+
 // Conditional
 const js_if = (cond) => (thenBranch) => (elseBranch) =>
   cond ? thenBranch() : elseBranch();
@@ -99,6 +106,14 @@ const js_lt = (a) => (b) => a < b;
 const js_lte = (a) => (b) => a <= b;
 const js_gt = (a) => (b) => a > b;
 const js_gte = (a) => (b) => a >= b;
+
+const js_parse_uint = (s) => {
+  const x = parseInt(s, 10);
+  if (x >= 0 && Number.isInteger(x)) {
+    return x;
+  }
+  return null;
+};
 
 // Boolean operations
 const js_and = (a) => (b) => a && b;
