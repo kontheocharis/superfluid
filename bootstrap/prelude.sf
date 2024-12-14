@@ -18,24 +18,25 @@ def not : Bool -> Bool {
   false => true
 }
 
--- data Nat : Type {
---   z : Nat,
---   s : Nat -> Nat
--- }
+data Nat : Type {
+  z : Nat,
+  s : Nat -> Nat
+}
 
--- data Vec (A : Type) : Nat -> Type {
---   vnil : Vec A z,
---   vcons : [n : Nat] -> A -> Vec A n -> Vec A (s n)
--- }
+data Vec (A : Type) : Nat -> Type {
+  vnil : Vec A z,
+  vcons : [n : Nat] -> A -> Vec A n -> Vec A (s n)
+}
 
--- data Fin : Nat -> Type {
---   fz : [n : Nat] -> Fin (s n),
---   fs : [n : Nat] -> Fin n -> Fin (s n)
--- }
+data Fin : Nat -> Type {
+  fz : [n : Nat] -> Fin (s n),
+  fs : [n : Nat] -> Fin n -> Fin (s n)
+}
 
--- def index : [A : Type, n : Nat] -> (v : Vec A n) -> (f : Fin n) -> A {
---   [A] [n] v f => ?h1
--- }
+def add : Nat -> Nat -> Nat {
+  z n => ?h1,
+  (s m) n => ?h2,
+}
 
 -- Relevant sigma
 

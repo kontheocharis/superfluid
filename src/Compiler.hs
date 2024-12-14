@@ -181,6 +181,7 @@ instance Pretty Comp CompilerError where
       ParseCompilerError a -> pretty a
       ElabCompilerError a -> pretty a
       AccCompilerError a -> pretty a
+      MatchingCompilerError a -> pretty a
     return $ ">> " ++ x
 
 newtype Comp a = Comp {unComp :: ExceptT CompilerError (StateT Compiler IO) a}

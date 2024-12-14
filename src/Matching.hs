@@ -118,6 +118,9 @@ import Data.List (intercalate)
 
 data MatchingError = MatchingError
 
+instance (Monad m) => Pretty m MatchingError where
+  pretty MatchingError = return "Matching error"
+
 class (Eval m, Has m Loc, Tc m) => Matching m where
   matchingError :: MatchingError -> m a
 
