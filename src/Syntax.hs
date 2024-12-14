@@ -1,4 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Syntax
   ( STm (..),
@@ -104,7 +107,7 @@ import Common
     membersIn,
     nextLvl,
     ofShapes,
-    telShapes,
+    telShapes, Has (..),
   )
 import Control.Monad (void)
 import Control.Monad.State (MonadState (..), State, evalState, modify)
@@ -516,7 +519,7 @@ unembedPat env (SPat t bs) = flip evalState 0 $ unembedPat' t
         (SVar _, Empty) -> do
           i <- get
           let (q, n) = bs !! i
-          modify (+ 1)
+          Control.Monad.State.modify (+ 1)
           return (LvlP q n (idxToLvl (Lvl (length env)) (Idx i)))
         (SCtor (c, pp), sp) -> do
           sp' <- mapSpineM unembedPat' sp

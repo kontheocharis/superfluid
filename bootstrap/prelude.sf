@@ -1,5 +1,9 @@
 -- General types
 
+data Equal [A : Type] : A -> A -> Type {
+  refl : [x : A] -> Equal x x
+}
+
 data Unit : Type {
   tt : Unit
 }
@@ -14,972 +18,991 @@ def not : Bool -> Bool {
   false => true
 }
 
+-- data Nat : Type {
+--   z : Nat,
+--   s : Nat -> Nat
+-- }
+
+-- data Vec (A : Type) : Nat -> Type {
+--   vnil : Vec A z,
+--   vcons : [n : Nat] -> A -> Vec A n -> Vec A (s n)
+-- }
+
+-- data Fin : Nat -> Type {
+--   fz : [n : Nat] -> Fin (s n),
+--   fs : [n : Nat] -> Fin n -> Fin (s n)
+-- }
+
+-- def index : [A : Type, n : Nat] -> (v : Vec A n) -> (f : Fin n) -> A {
+--   [A] [n] v f => ?h1
+-- }
+
 -- Relevant sigma
 
-data Sigma (A : Type, B : A -> Type) : Type {
-  pair : (a : A) -> B a -> Sigma A B
-}
-
-data Equal [A : Type] : A -> A -> Type {
-  refl : [x : A] -> Equal x x
-}
-
-#unfold
-def dup : [A : Type] -> A -> A * A {
-  [A] a => (a, a)
-}
-
-#unfold
-def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
-  \(a, _) => a
-}
-
-#unfold
-def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
-  \[_] [B] p => case p to (\p => B (fst p)) {
-    (a, b) => b
-  }
-}
-
--- Right-irrelevant sigma
-
-data Subset (A : Type) (B : A -> Type) : Type {
-  element : (a : A) -> (0 _ : B a) -> Subset A B
-}
-
-#unfold
-def inclusion : [A : Type, B : A -> Type] -> (x : Subset A B) -> A {
-  \x => case x {
-    element a b => a
-  }
-}
-
-#unfold
-def 0 membership : [A : Type, B : A -> Type] -> (x : Subset A B) -> B (inclusion x) {
-  \[_] [B] p => case p to (\p => B (inclusion p)) {
-    element a b => b
-  }
-}
-
-#unfold
-def 0 subset-eta : [A : Type, B : A -> Type] -> [x : Subset A B] -> Equal x (element (inclusion x) (membership x)) {
-  \[x] => case x to (\x => Equal x (element (inclusion x) (membership x))) {
-    (element a b) => refl
-  }
-}
-
-#unfold
-def id : [A : Type] -> A -> A {
-  \a => a
-}
-
-#unfold
-def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
-  \[A] b t f => case b {
-    true => t tt,
-    false => f tt
-  }
-}
-
-prim trust-me : [A : Type, x : A, y : A] -> Equal x y
-
-prim conjure : (0 A : Type) -> A
-
--- -- JS primitives
-
-prim JsUnion : Type -> Type -> Type
-
-prim JsNull : Type
-
-prim JsUndefined : Type
-
-prim JsBool : Type
-
-prim JsArray : Type -> Type
-
-prim JsBigInt : Type
-
-prim JsUint : Type
-
-prim JsBoundedUint : (0 _ : JsUint) -> Type
-
-prim JsNumber : Type
-
-prim JsString : Type
-
-prim js-null : JsNull
-
-prim js-undefined : JsUndefined
-
-prim js-true : JsBool
-
-prim js-false : JsBool
-
-prim js-if : [A : Type] -> JsBool -> (() -> A) -> (() -> A) -> A
-
-prim js-if-dep : [A : JsBool -> Type] -> (b : JsBool) -> (() -> A js-true) -> (() -> A js-false) -> A b
-
-prim js-empty-array : [T : Type] -> JsArray T
-
-prim js-array-extend-l : [T : Type] -> T -> JsArray T -> JsArray T
-
-prim js-array-extend-r : [T : Type] -> JsArray T -> T -> JsArray T
-
-prim js-array-switch-l : [T : Type] -> [E : JsArray T -> Type]
-  -> (Unit -> E js-empty-array)
-  -> ((x : T) -> (xs : JsArray T) -> E (js-array-extend-l x xs))
-  -> (l : JsArray T)
-  -> E l
-
-prim js-array-switch-r : [T : Type] -> [E : JsArray T -> Type]
-  -> (Unit -> E js-empty-array)
-  -> ((xs : JsArray T) -> (x : T) -> E (js-array-extend-r xs x))
-  -> (l : JsArray T)
-  -> E l
-
-prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
-
-prim js-length : [T : Type] -> JsArray T -> JsUint
-
-prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
-
-prim js-reduce : [T C : Type] -> (C -> T -> C) -> C -> JsArray T -> C
-
-prim js-index : [T : Type] -> (a : JsArray T) -> JsBoundedUint (js-length a) -> T
-
-prim js-if-bounded : [A : Type] -> JsUint -> (n : JsUint) -> (JsBoundedUint n -> A) -> (() -> A) -> A
-
-prim js-assert-defined : [T : Type] -> JsUnion T JsUndefined -> T
-
-prim js-zero : JsNumber
-
-prim js-one : JsNumber
-
-prim js-uint-zero : JsUint
-
-prim js-uint-one : JsUint
-
-prim js-plus : JsNumber -> JsNumber -> JsNumber
-
-prim js-uint-plus : JsUint -> JsUint -> JsUint
-
-prim js-forget-bound : [n : JsUint] -> JsBoundedUint n -> JsUint
-
-prim js-zero-or-pos : [A : JsUint -> Type]
-  -> (() -> A js-uint-zero)
-  -> ((n : JsUint) -> A (js-uint-plus js-uint-one n))
-  -> (i : JsUint)
-  -> A i
-
-prim js-bounded-uint-zero : [n : JsUint] -> JsBoundedUint (js-uint-plus js-uint-one n)
-
-prim js-bounded-uint-inc : [n : JsUint] -> JsBoundedUint n -> JsBoundedUint (js-uint-plus js-uint-one n)
-
-prim js-bounded-zero-or-pos : [A : (0 n : JsUint) -> JsBoundedUint n -> Type]
-  -> ([n : JsUint] -> A (js-uint-plus js-uint-one n) (js-bounded-uint-zero [n]))
-  -> ([n : JsUint] -> (n' : JsBoundedUint n) -> A (js-uint-plus js-uint-one n) (js-bounded-uint-inc n'))
-  -> [n : JsUint]
-  -> (i : JsBoundedUint n)
-  -> A n i
-
-prim js-minus : JsNumber -> JsNumber -> JsNumber
-
-prim js-times : JsNumber -> JsNumber -> JsNumber
-
-prim js-uint-times : JsUint -> JsUint -> JsUint
-
-prim js-div : JsNumber -> JsNumber -> JsNumber
-
-prim js-mod : JsNumber -> JsNumber -> JsNumber
-
-prim js-uint-mod : JsUint -> JsUint -> JsUint
-
-prim js-uint-div : JsUint -> JsUint -> JsUint
-
-prim js-pow : JsNumber -> JsNumber -> JsNumber
-
-prim js-uint-pow : JsUint -> JsUint -> JsUint
-
-prim js-neg : JsNumber -> JsNumber
-
-prim js-eq : [A B : Type] -> A -> B -> JsBool
-
-prim js-eqq : [A B : Type] -> A -> B -> JsBool
-
-prim js-neq : [A B : Type] -> A -> B -> JsBool
-
-prim js-neqq : [A B : Type] -> A -> B -> JsBool
-
-prim js-lt : JsNumber -> JsNumber -> JsBool
-
-prim js-lte : JsNumber -> JsNumber -> JsBool
-
-prim js-gt : JsNumber -> JsNumber -> JsBool
-
-prim js-gte : JsNumber -> JsNumber -> JsBool
-
-prim js-and : JsBool -> JsBool -> JsBool
-
-prim js-or : JsBool -> JsBool -> JsBool
-
-prim js-not : JsBool -> JsBool
-
-prim js-panic : [T : Type] -> JsString -> T
-
--- -- IO
-
-prim IO : Type -> Type
-
-prim io-return : [A : Type] -> A -> IO A
-
-prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
-
-prim unsafe-io : [A : Type] -> IO A -> A
-
--- -- JS IO
-
-prim js-console-log : [T : Type] -> T -> IO ()
-
-prim js-exit : [A : Type] -> JsNumber -> IO A
-
--- -- JS Buffer
-
-prim JsBuffer : Type
-
-prim JsBufferMod : Type -> Type
-
-prim js-buffer-bind : [A B : Type] -> JsBufferMod A -> (A -> JsBufferMod B) -> JsBufferMod B
-
-prim js-buffer-return : [A : Type] -> A -> JsBufferMod A
-
-prim js-buffer-get : JsBufferMod JsBuffer
-
-prim js-buffer-set : JsBuffer -> JsBufferMod ()
-
-prim js-buffer-empty : JsBuffer
-
-prim js-buffer-run : [A : Type] -> JsBuffer -> JsBufferMod A -> JsBuffer * A
-
-prim js-buffer-alloc : (byte-length : JsUint) -> JsBuffer
-
-prim js-buffer-byte-length : JsBuffer -> JsUint
-
-prim js-buffer-copy : (source : JsBuffer, source-start : JsUint, source-end : JsUint, start : JsUint) -> JsBufferMod ()
-
-prim js-buffer-write-uint16-be : (value : JsUint, offset : JsUint) -> JsBufferMod ()
-
-prim js-buffer-write-uint8 : (value : JsUint, offset : JsUint) -> JsBufferMod ()
-
-prim js-buffer-read-uint16-be : (buffer : JsBuffer, offset : JsUint) -> JsUint
-
-prim js-buffer-read-uint8 : (buffer : JsBuffer, offset : JsUint) -> JsUint
-
-prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> JsBuffer
-
-prim js-buffer-eq : JsBuffer -> JsBuffer -> JsBool
-
-prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
-
--- -- General primitives
-
-prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
-
-prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
-
--- def from-js : [A : Type] -> JS -> A {
---   \a => cast a
+-- data Sigma (A : Type, B : A -> Type) : Type {
+--   pair : (a : A) -> B a -> Sigma A B
 -- }
 
-def debug-print : [A B : Type] -> A -> B -> B {
-  \[A] [B] a b => {
-    unsafe-io (io-bind (js-console-log a) (\_ => io-return b))
-  }
-}
-
-def print : [A : Type] -> A -> IO () {
-  js-console-log
-}
-
-data Maybe (A : Type) : Type {
-  nothing : Maybe A,
-  just : A -> Maybe A
-}
-
-def is-just : [A : Type] -> Maybe A -> Bool {
-  \case {
-    nothing => false,
-    just _ => true,
-  }
-}
-
-data Either (L : Type) (R : Type) : Type {
-  left : L -> Either L R,
-  right : R -> Either L R
-}
-
-data Nat : Type {
-  z : Nat,
-  s : Nat -> Nat
-}
-
-data List (A : Type) : Type {
-  nil : List A,
-  cons : A -> List A -> List A
-}
-
-data Fin : Nat -> Type {
-  fz : [n : Nat] -> Fin (s n),
-  fs : [n : Nat] -> Fin n -> Fin (s n)
-}
-
-data Empty : Type {}
-
-def void : [A : Type] -> Empty -> A {
-  \m => case m {}
-}
-
-data Dec (A : Type) : Type {
-  yes : A -> Dec A,
-  no : ((0 _ : A) -> Empty) -> Dec A
-}
-
-def add : Nat -> Nat -> Nat {
-  \m n => case m {
-    z => n,
-    s m' => s (add m' n),
-  }
-}
-
-def sub : Nat -> Nat -> Nat {
-  \m n => case n {
-    z => m,
-    s n' => case m {
-      z => z,
-      s m' => sub m' n',
-    }
-  }
-}
-
-def mul : Nat -> Nat -> Nat {
-  \m n => case m {
-    z => z,
-    s m' => add n (mul m' n),
-  }
-}
-
-def is-even : Nat -> Bool {
-  \n => case n {
-    z => true,
-    s n' => case n' {
-      z => false,
-      s n'' => is-even n'',
-    }
-  }
-}
-
-def pow : Nat -> Nat -> Nat {
-  \m n => case n {
-    z => s z,
-    s n' => mul m (pow m n'),
-  }
-}
-
-def and : Bool -> Bool -> Bool {
-  \a b => case a {
-    true => b,
-    false => false,
-  }
-}
-
-def or : Bool -> Bool -> Bool {
-  \a b => case a {
-    true => true,
-    false => b,
-  }
-}
-
-def not : Bool -> Bool {
-  \a => case a {
-    true => false,
-    false => true,
-  }
-}
-
-def fin-to-nat : [n : Nat] -> Fin n -> Nat {
-  \f => case f {
-    fz => z,
-    fs f' => s (fin-to-nat f'),
-  }
-}
-
-def fin-is-even : [n : Nat] -> Fin n -> Bool {
-  \x => case x {
-    fz => true,
-    fs x => case x {
-      fz => false,
-      fs y => fin-is-even y
-    }
-  }
-}
-
-def upgrade : [n : Nat] -> (k : Nat) -> Fin n -> Fin (add k n) {
-  \[n] k => case k to (\m => Fin n -> Fin (add m n)) {
-    z => id,
-    s k' => \x => fs (upgrade k' x)
-  }
-}
-
-def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
-  \a b => case a {
-    fz => case b {
-      fz => true,
-      fs y => false
-    },
-    fs x => case b {
-      fz => false,
-      fs y => fin-eq x y
-    }
-  }
-}
-
-def length : [A : Type] -> List A -> Nat {
-  \xs => case xs {
-    [] => z,
-    [_, ..xs'] => s (length xs'),
-  }
-}
-
-def 0 type : [A : Type] -> A -> Type {
-  \[A] _ => A
-}
-
-def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
-  \f xs => case xs {
-    [] => [],
-    [x, ..xs'] => [f x, .. map f xs']
-  }
-}
-
-def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
-  \p xs => case xs {
-    [] => nothing,
-    [x, ..xs'] => case p x {
-      true => just x,
-      false => find p xs'
-    }
-  }
-}
-
-def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
-  \f acc xs => case xs {
-    [] => acc,
-    [x, ..xs'] => f x (fold f acc xs')
-  }
-}
-
-def index : [A : Type] -> Nat -> List A -> Maybe A {
-  \n xs => case xs {
-    [] => nothing,
-    [x, ..xs'] => case n {
-      z => just x,
-      s n' => index n' xs'
-    }
-  }
-}
-
--- Try combinator!
-#unfold
-def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
-  \P e => case e to (\x y _ => P x -> P y) {
-    refl => id
-  }
-}
-
-#unfold
-def subst-type : [A B : Type] -> Equal A B -> A -> B {
-  subst [Type] (\X => X)
-}
-
-def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
-  \f e => case e to (\x y _ => Equal (f x) (f y)) {
-    refl => refl
-  }
-}
-
-def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
-  \e => case e to (\x y _ => Equal y x) {
-    refl => refl
-  }
-}
-
--- We cannot currently prove UIP because we don't have dependent pattern
--- matching with the deletion rule.
-def uip : [A : Type, x : A] -> (p : Equal x x) -> Equal p refl {
-  \p => trust-me
-}
-
-def equality-is-prop : [A : Type, x : A, y : A] -> (p q : Equal x y) -> Equal p q {
-  \p q => {
-    (case q to (\x y q => (p : Equal x y) -> Equal p q) {
-      refl => uip
-    }) p
-  }
-}
-
-def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
-  \p => subst [Nat] (\n => case n {
-    z => Unit,
-    s _ => Empty,
-  }) p tt
-}
-
-def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
-  \m p => m (sym p)
-}
-
-def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
-  \e => subst [Nat] (\x => Equal n (case x {
-    z => n,
-    s k => k
-  })) e refl
-}
-
-def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
-  \m p => m (s-inj p)
-}
-
-def nat-eq-dep : (n : Nat, m : Nat) -> Dec (Equal n m) {
-  \n m => case n to (\n => Dec (Equal n m)) {
-    z => case m to (\m => Dec (Equal z m)) {
-      z => yes refl,
-      s m' => no z-neq-s,
-    },
-    s n' => case m to (\m => Dec (Equal (s n') m)) {
-      z => no (co-sym z-neq-s),
-      s m' => case nat-eq-dep n' m' to (\e => Dec (Equal (s n') (s m'))) {
-        yes e => yes (cong s e),
-        no f => no (s-co-cong f)
-      }
-    }
-  }
-}
-
-def dec-to-bool : [A : Type] -> Dec A -> Bool {
-  \case {
-    yes _ => true,
-    no _ => false
-  }
-}
-
-def nat-eq : (n : Nat, m : Nat) -> Bool {
-  \n m => dec-to-bool (nat-eq-dep n m)
-}
-
-def lte : Nat -> Nat -> Bool {
-  \m n => case m {
-    z => true,
-    s m' => case n {
-      z => false,
-      s n' => lte m' n',
-    }
-  }
-}
-
-def lt : Nat -> Nat -> Bool {
-  \m n => and (not (nat-eq m n)) (lte m n)
-}
-
-def bool-eq : (a : Bool, b : Bool) -> Bool {
-  \a b => case a {
-    true => case b {
-      true => true,
-      false => false,
-    },
-    false => case b {
-      true => false,
-      false => true,
-    }
-  }
-}
-
-def mod : Nat -> Nat -> Nat {
-  \a n => case n {
-    z => a,
-    s k => case lt a n {
-      true => a,
-      false => mod (sub a (s k)) (s k)
-    },
-  }
-}
-
-def div : Nat -> Nat -> Nat {
-  \a n => case lt a n {
-    true => z,
-    false => s (div (sub a n) n),
-  }
-}
-
--- -- Default representations
-repr data Bool as JsBool {
-  true as js-true,
-  false as js-false,
-
-  case b to E {
-    true => t,
-    false => f,
-  } as {
-    js-if-dep [\x => E (unrepr x)] (repr b) (\_ => t) (\_ => f)
-  }
-}
-
-repr def and as \a b => unrepr (js-and (repr a) (repr b))
-repr def or as \a b => unrepr (js-or (repr a) (repr b))
-repr def not as \a => unrepr (js-not (repr a))
-
-repr data Nat as JsUint {
-  z as js-uint-zero,
-  s n as js-uint-plus js-uint-one (repr n),
-  case n to E {
-    z => b,
-    s => r,
-  } as {
-    js-zero-or-pos [\x => E (unrepr x)] (\_ => b) (\x => r (unrepr x)) (repr n)
-  }
-}
-
-repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
-repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
-repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
-repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
-repr def mod as \a b => unrepr (js-uint-mod (repr a) (repr b))
-repr def div as \a b => unrepr (js-uint-div (repr a) (repr b))
-repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
-repr def nat-eq-dep as \a b => {
-  let res : Bool = unrepr (js-eqq (repr a) (repr b));
-  if res {
-    yes trust-me
-  } else {
-    no (conjure _)
-  }
-}
-
-repr data Fin i as JsBoundedUint (repr i) {
-  fz as js-bounded-uint-zero,
-  fs n as js-bounded-uint-inc (repr n),
-  case n to E {
-    fz => b,
-    fs => r,
-  } as {
-    js-bounded-zero-or-pos [\n f => E (unrepr n) (unrepr f)]
-      (\[n] => b [unrepr n])
-      (\[n] f => r [unrepr n] (unrepr f)) (repr n)
-  }
-}
-
-repr def fin-to-nat as \n => {
-  unrepr (js-forget-bound (repr n))
-}
-
-repr def fin-is-even as \n => {
-  unrepr (js-eqq (js-uint-mod (js-forget-bound (repr n)) (repr 2)) js-uint-zero)
-}
-
-repr def fin-eq as \x y => unrepr (js-eqq (repr x) (repr y))
-
-repr data List A as JsArray A {
-  nil as js-empty-array,
-  cons x xs as js-array-extend-l x (repr xs),
-
-  case l to E {
-    nil => n,
-    cons => c,
-  } as {
-    js-array-switch-l [A] [\x => E (unrepr x)] (\_ => n) (\a xs => c a (unrepr xs)) (repr l)
-  }
-}
-
-repr def length as \l => unrepr (js-length (repr l))
-
-repr def index as {
-  \i l => {
-    let l' = repr l;
-    js-if-bounded (repr i) (js-length l')
-      (\b => just (js-index l' b))
-      (\_ => nothing)
-  }
-}
-
-repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
-
-repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
-
--- -- -- More definitions
-
-data Char : Type {
-  utf32-code : Fin (pow 2 32) -> Char,
-}
-
-def char-eq : Char -> Char -> Bool {
-  \c1 c2 => case c1 {
-    utf32-code f1 => case c2 {
-      utf32-code f2 => fin-eq f1 f2,
-    },
-  }
-}
-
-data String : Type {
-  snil : String,
-  scons : Char -> String -> String,
-}
-
-def string-eq : String -> String -> Bool {
-  \s1 s2 => case s1 {
-    snil => case s2 {
-      snil => true,
-      scons _ _ => false,
-    },
-    scons c1 s1' => case s2 {
-      snil => false,
-      scons c2 s2' => and (char-eq c1 c2) (string-eq s1' s2'),
-    },
-  }
-}
-
-def 0 Word : Type {
-  Fin 65536
-}
-
-def 0 Byte : Type {
-  Fin 256
-}
-
-data ASCII : Type {
-  ascii-code : Fin 256 -> ASCII,
-}
-
-repr data ASCII as Byte {
-  ascii-code x as x,
-  case a to E {
-    ascii-code => c
-  } as {
-    unsafe-complete E a (c (repr a)) -- need some kind of record eta rules to avoid this, or manual substitutions
-  }
-}
-
-def ascii-eq : ASCII -> ASCII -> Bool {
-  \a1 a2 => case a1 {
-    ascii-code f1 => case a2 {
-      ascii-code f2 => fin-eq f1 f2,
-    },
-  }
-}
-
-def word-to-nat : Word -> Nat {
-  fin-to-nat
-}
-
-def 0 Holds : Bool -> Type {
-  \b => Equal b true
-}
-
-def determine : (x : Bool) -> Maybe (Holds x) {
-  \x => case x to (\x => Maybe (Equal x true)) {
-    true => just refl,
-    false => nothing,
-  }
-}
-
--- Byte lists and vectors
-
-data ByteList : Type {
-  bnil : ByteList,
-  bcons : Byte -> ByteList -> ByteList
-}
-
-def byte-list-length : ByteList -> Nat {
-  \l => case l {
-    bnil => z,
-    bcons _ xs => s (byte-list-length xs)
-  }
-}
-
-data ByteVec : Nat -> Type {
-  bvnil : ByteVec z,
-  bvcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
-}
-
-def 0 byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
-  \[n] b => n
-}
-
-def byte-vec-eq : [n m : Nat] -> ByteVec n -> ByteVec m -> Bool {
-  \[n] a b => case a {
-    bvnil => case b {
-      bvnil => true,
-      bvcons _ _ => false
-    },
-    bvcons x xs => case b {
-      bvnil => false,
-      bvcons y ys => and (fin-eq x y) (byte-vec-eq xs ys)
-    }
-  }
-}
-
-def byte-vec-lookup : [n : Nat, T : Type] -> ByteVec n -> List (ByteVec n * (() -> T)) -> (() -> T) -> T {
-  \s l d => case l {
-    nil => d (),
-    cons x xs => {
-      let (k, v) = x;
-      if-then-else (byte-vec-eq s k) (\_ => v ()) (\_ => byte-vec-lookup s xs d)
-    }
-  }
-}
-
-repr data ByteList as JsBuffer {
-  bnil as js-buffer-empty,
-  bcons x xs as {
-    let old = repr xs;
-    let old-len = js-buffer-byte-length old;
-    let new-len = js-uint-plus old-len (repr 1);
-    let b = js-buffer-run (js-buffer-alloc new-len) ({
-      js-buffer-bind
-        (js-buffer-copy old (repr 0) old-len (repr 1))
-        (\_ => js-buffer-write-uint8 (js-forget-bound (repr x)) (repr 0))
-    });
-    fst b
-  },
-
-  case b to E {
-    bnil => n,
-    bcons => c
-  } as {
-    let b' = repr b;
-    js-if (js-eqq (js-buffer-byte-length b') (repr 0))
-      (\_ => unsafe-complete E b n)
-      (\_ => {
-        let x : Byte = unrepr (js-bound-trust-me [repr 256] (js-buffer-read-uint8 b' (repr 0)));
-        let xs : ByteList = unrepr (js-buffer-subarray b' (repr 1) (js-buffer-byte-length b'));
-        let m = c x xs;
-        unsafe-complete E b m
-      })
-  }
-}
-
--- The `n` can be computed from the data structure!!
-repr data ByteVec n as Subset ByteList (\l => Equal (byte-list-length l) n) {
-  bvnil as element bnil refl,
-  bvcons x xs as {
-    let (element l p) = repr xs;
-    element (bcons x l) (cong s p)
-  },
-
-  case b to E {
-    bvnil => n,
-    bvcons => c
-  } as {
-    let b' = repr b;
-    let res = case b' to (\p => E (byte-list-length (inclusion p)) (unrepr (element (inclusion p) refl))) {
-      element l p => case l to (\l => E (byte-list-length l) (unrepr (element l refl))) {
-        bnil => n,
-        bcons x xs => c [byte-list-length xs] x (unrepr (element xs refl)),
-      }
-    };
-    -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
-    -- @@Todo: do this without cast and trust me
-    unsafe-cast (E (byte-vec-length b) b) res
-  }
-}
-
-repr def byte-list-length as \l => {
-  unrepr (js-buffer-byte-length (repr l))
-}
-
-repr def byte-vec-eq as \b b' => {
-  unrepr (js-buffer-eq (repr (inclusion (repr b))) (repr (inclusion (repr b'))))
-}
-
--- Panic
-
-def panic : [A : Type] -> String -> A {
-  \a => unsafe-io (io-bind (js-console-log a) (\_ => js-exit js-one))
-}
-
--- REPR helpers
-
-def 0 Reprs : Nat -> Type -> Type {
-  \l T => case l {
-    z => T,
-    s l' => repr (Reprs l' T)
-  }
-}
-
-def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
-  \l t => case l to (\l => Reprs l T) {
-    z => t,
-    s l' => repr (reprs l' t)
-  }
-}
-
-def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
-  \l => case l to (\l => Reprs l T -> T) {
-    z => id,
-    s l' => \r => unreprs l' (unrepr r)
-  }
-}
-
-def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
-  subst-type
-}
-
-def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
-  \p => subst-type (sym p)
-}
-
-def 0 ReprBy : Type -> Type -> Type {
-  \T U => (l : Nat) * Equal (Reprs l T) U
-}
-
-def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
-  \r a => {
-    let (l, p) = r;
-    subst-type p (reprs l a)
-  }
-}
-
-def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
-  \r b => {
-    let (l, p) = r;
-    unreprs l (subst-type (sym p) b)
-  }
-}
-
--- HTTP
-
--- data HttpRequest : Type {
---   http-request : (
---     method : String,
---     url : String,
---     header : String -> Maybe String,
---     body : String,
---   ) -> HttpRequest
+-- data Equal [A : Type] : A -> A -> Type {
+--   refl : [x : A] -> Equal x x
 -- }
 
--- data HttpResponse : Type {
---   http-response : (
---     status : Nat,
---     headers : List (String * String),
---     body : String,
---   ) -> HttpResponse
+-- #unfold
+-- def dup : [A : Type] -> A -> A * A {
+--   [A] a => (a, a)
 -- }
 
--- data HttpServer : Type {
---   http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
+-- #unfold
+-- def fst : [A : Type, B : A -> Type] -> Sigma A B -> A {
+--   \(a, _) => a
 -- }
 
--- def launch-http-server : HttpServer -> IO () {
+-- #unfold
+-- def snd : [A : Type, B : A -> Type] -> (p : Sigma A B) -> B (fst p) {
+--   \[_] [B] p => case p to (\p => B (fst p)) {
+--     (a, b) => b
+--   }
+-- }
+
+-- -- Right-irrelevant sigma
+
+-- data Subset (A : Type) (B : A -> Type) : Type {
+--   element : (a : A) -> (0 _ : B a) -> Subset A B
+-- }
+
+-- #unfold
+-- def inclusion : [A : Type, B : A -> Type] -> (x : Subset A B) -> A {
+--   \x => case x {
+--     element a b => a
+--   }
+-- }
+
+-- #unfold
+-- def 0 membership : [A : Type, B : A -> Type] -> (x : Subset A B) -> B (inclusion x) {
+--   \[_] [B] p => case p to (\p => B (inclusion p)) {
+--     element a b => b
+--   }
+-- }
+
+-- #unfold
+-- def 0 subset-eta : [A : Type, B : A -> Type] -> [x : Subset A B] -> Equal x (element (inclusion x) (membership x)) {
+--   \[x] => case x to (\x => Equal x (element (inclusion x) (membership x))) {
+--     (element a b) => refl
+--   }
+-- }
+
+-- #unfold
+-- def id : [A : Type] -> A -> A {
+--   \a => a
+-- }
+
+-- #unfold
+-- def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
+--   \[A] b t f => case b {
+--     true => t tt,
+--     false => f tt
+--   }
+-- }
+
+-- prim trust-me : [A : Type, x : A, y : A] -> Equal x y
+
+-- prim conjure : (0 A : Type) -> A
+
+-- -- -- JS primitives
+
+-- prim JsUnion : Type -> Type -> Type
+
+-- prim JsNull : Type
+
+-- prim JsUndefined : Type
+
+-- prim JsBool : Type
+
+-- prim JsArray : Type -> Type
+
+-- prim JsBigInt : Type
+
+-- prim JsUint : Type
+
+-- prim JsBoundedUint : (0 _ : JsUint) -> Type
+
+-- prim JsNumber : Type
+
+-- prim JsString : Type
+
+-- prim js-null : JsNull
+
+-- prim js-undefined : JsUndefined
+
+-- prim js-true : JsBool
+
+-- prim js-false : JsBool
+
+-- prim js-if : [A : Type] -> JsBool -> (() -> A) -> (() -> A) -> A
+
+-- prim js-if-dep : [A : JsBool -> Type] -> (b : JsBool) -> (() -> A js-true) -> (() -> A js-false) -> A b
+
+-- prim js-empty-array : [T : Type] -> JsArray T
+
+-- prim js-array-extend-l : [T : Type] -> T -> JsArray T -> JsArray T
+
+-- prim js-array-extend-r : [T : Type] -> JsArray T -> T -> JsArray T
+
+-- prim js-array-switch-l : [T : Type] -> [E : JsArray T -> Type]
+--   -> (Unit -> E js-empty-array)
+--   -> ((x : T) -> (xs : JsArray T) -> E (js-array-extend-l x xs))
+--   -> (l : JsArray T)
+--   -> E l
+
+-- prim js-array-switch-r : [T : Type] -> [E : JsArray T -> Type]
+--   -> (Unit -> E js-empty-array)
+--   -> ((xs : JsArray T) -> (x : T) -> E (js-array-extend-r xs x))
+--   -> (l : JsArray T)
+--   -> E l
+
+-- prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
+
+-- prim js-length : [T : Type] -> JsArray T -> JsUint
+
+-- prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
+
+-- prim js-reduce : [T C : Type] -> (C -> T -> C) -> C -> JsArray T -> C
+
+-- prim js-index : [T : Type] -> (a : JsArray T) -> JsBoundedUint (js-length a) -> T
+
+-- prim js-if-bounded : [A : Type] -> JsUint -> (n : JsUint) -> (JsBoundedUint n -> A) -> (() -> A) -> A
+
+-- prim js-assert-defined : [T : Type] -> JsUnion T JsUndefined -> T
+
+-- prim js-zero : JsNumber
+
+-- prim js-one : JsNumber
+
+-- prim js-uint-zero : JsUint
+
+-- prim js-uint-one : JsUint
+
+-- prim js-plus : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-uint-plus : JsUint -> JsUint -> JsUint
+
+-- prim js-forget-bound : [n : JsUint] -> JsBoundedUint n -> JsUint
+
+-- prim js-zero-or-pos : [A : JsUint -> Type]
+--   -> (() -> A js-uint-zero)
+--   -> ((n : JsUint) -> A (js-uint-plus js-uint-one n))
+--   -> (i : JsUint)
+--   -> A i
+
+-- prim js-bounded-uint-zero : [n : JsUint] -> JsBoundedUint (js-uint-plus js-uint-one n)
+
+-- prim js-bounded-uint-inc : [n : JsUint] -> JsBoundedUint n -> JsBoundedUint (js-uint-plus js-uint-one n)
+
+-- prim js-bounded-zero-or-pos : [A : (0 n : JsUint) -> JsBoundedUint n -> Type]
+--   -> ([n : JsUint] -> A (js-uint-plus js-uint-one n) (js-bounded-uint-zero [n]))
+--   -> ([n : JsUint] -> (n' : JsBoundedUint n) -> A (js-uint-plus js-uint-one n) (js-bounded-uint-inc n'))
+--   -> [n : JsUint]
+--   -> (i : JsBoundedUint n)
+--   -> A n i
+
+-- prim js-minus : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-times : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-uint-times : JsUint -> JsUint -> JsUint
+
+-- prim js-div : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-mod : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-uint-mod : JsUint -> JsUint -> JsUint
+
+-- prim js-uint-div : JsUint -> JsUint -> JsUint
+
+-- prim js-pow : JsNumber -> JsNumber -> JsNumber
+
+-- prim js-uint-pow : JsUint -> JsUint -> JsUint
+
+-- prim js-neg : JsNumber -> JsNumber
+
+-- prim js-eq : [A B : Type] -> A -> B -> JsBool
+
+-- prim js-eqq : [A B : Type] -> A -> B -> JsBool
+
+-- prim js-neq : [A B : Type] -> A -> B -> JsBool
+
+-- prim js-neqq : [A B : Type] -> A -> B -> JsBool
+
+-- prim js-lt : JsNumber -> JsNumber -> JsBool
+
+-- prim js-lte : JsNumber -> JsNumber -> JsBool
+
+-- prim js-gt : JsNumber -> JsNumber -> JsBool
+
+-- prim js-gte : JsNumber -> JsNumber -> JsBool
+
+-- prim js-and : JsBool -> JsBool -> JsBool
+
+-- prim js-or : JsBool -> JsBool -> JsBool
+
+-- prim js-not : JsBool -> JsBool
+
+-- prim js-panic : [T : Type] -> JsString -> T
+
+-- -- -- IO
+
+-- prim IO : Type -> Type
+
+-- prim io-return : [A : Type] -> A -> IO A
+
+-- prim io-bind : [A : Type] -> [B : Type] -> IO A -> (A -> IO B) -> IO B
+
+-- prim unsafe-io : [A : Type] -> IO A -> A
+
+-- -- -- JS IO
+
+-- prim js-console-log : [T : Type] -> T -> IO ()
+
+-- prim js-exit : [A : Type] -> JsNumber -> IO A
+
+-- -- -- JS Buffer
+
+-- prim JsBuffer : Type
+
+-- prim JsBufferMod : Type -> Type
+
+-- prim js-buffer-bind : [A B : Type] -> JsBufferMod A -> (A -> JsBufferMod B) -> JsBufferMod B
+
+-- prim js-buffer-return : [A : Type] -> A -> JsBufferMod A
+
+-- prim js-buffer-get : JsBufferMod JsBuffer
+
+-- prim js-buffer-set : JsBuffer -> JsBufferMod ()
+
+-- prim js-buffer-empty : JsBuffer
+
+-- prim js-buffer-run : [A : Type] -> JsBuffer -> JsBufferMod A -> JsBuffer * A
+
+-- prim js-buffer-alloc : (byte-length : JsUint) -> JsBuffer
+
+-- prim js-buffer-byte-length : JsBuffer -> JsUint
+
+-- prim js-buffer-copy : (source : JsBuffer, source-start : JsUint, source-end : JsUint, start : JsUint) -> JsBufferMod ()
+
+-- prim js-buffer-write-uint16-be : (value : JsUint, offset : JsUint) -> JsBufferMod ()
+
+-- prim js-buffer-write-uint8 : (value : JsUint, offset : JsUint) -> JsBufferMod ()
+
+-- prim js-buffer-read-uint16-be : (buffer : JsBuffer, offset : JsUint) -> JsUint
+
+-- prim js-buffer-read-uint8 : (buffer : JsBuffer, offset : JsUint) -> JsUint
+
+-- prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> JsBuffer
+
+-- prim js-buffer-eq : JsBuffer -> JsBuffer -> JsBool
+
+-- prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
+
+-- -- -- General primitives
+
+-- prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
+
+-- prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
+
+-- -- def from-js : [A : Type] -> JS -> A {
+-- --   \a => cast a
+-- -- }
+
+-- def debug-print : [A B : Type] -> A -> B -> B {
+--   \[A] [B] a b => {
+--     unsafe-io (io-bind (js-console-log a) (\_ => io-return b))
+--   }
+-- }
+
+-- def print : [A : Type] -> A -> IO () {
+--   js-console-log
+-- }
+
+-- data Maybe (A : Type) : Type {
+--   nothing : Maybe A,
+--   just : A -> Maybe A
+-- }
+
+-- def is-just : [A : Type] -> Maybe A -> Bool {
 --   \case {
---     http-server port handler => {
---       ?launch-http-server
+--     nothing => false,
+--     just _ => true,
+--   }
+-- }
+
+-- data Either (L : Type) (R : Type) : Type {
+--   left : L -> Either L R,
+--   right : R -> Either L R
+-- }
+
+-- data Nat : Type {
+--   z : Nat,
+--   s : Nat -> Nat
+-- }
+
+-- data List (A : Type) : Type {
+--   nil : List A,
+--   cons : A -> List A -> List A
+-- }
+
+-- data Fin : Nat -> Type {
+--   fz : [n : Nat] -> Fin (s n),
+--   fs : [n : Nat] -> Fin n -> Fin (s n)
+-- }
+
+-- data Empty : Type {}
+
+-- def void : [A : Type] -> Empty -> A {
+--   \m => case m {}
+-- }
+
+-- data Dec (A : Type) : Type {
+--   yes : A -> Dec A,
+--   no : ((0 _ : A) -> Empty) -> Dec A
+-- }
+
+-- def add : Nat -> Nat -> Nat {
+--   \m n => case m {
+--     z => n,
+--     s m' => s (add m' n),
+--   }
+-- }
+
+-- def sub : Nat -> Nat -> Nat {
+--   \m n => case n {
+--     z => m,
+--     s n' => case m {
+--       z => z,
+--       s m' => sub m' n',
 --     }
 --   }
 -- }
+
+-- def mul : Nat -> Nat -> Nat {
+--   \m n => case m {
+--     z => z,
+--     s m' => add n (mul m' n),
+--   }
+-- }
+
+-- def is-even : Nat -> Bool {
+--   \n => case n {
+--     z => true,
+--     s n' => case n' {
+--       z => false,
+--       s n'' => is-even n'',
+--     }
+--   }
+-- }
+
+-- def pow : Nat -> Nat -> Nat {
+--   \m n => case n {
+--     z => s z,
+--     s n' => mul m (pow m n'),
+--   }
+-- }
+
+-- def and : Bool -> Bool -> Bool {
+--   \a b => case a {
+--     true => b,
+--     false => false,
+--   }
+-- }
+
+-- def or : Bool -> Bool -> Bool {
+--   \a b => case a {
+--     true => true,
+--     false => b,
+--   }
+-- }
+
+-- def not : Bool -> Bool {
+--   \a => case a {
+--     true => false,
+--     false => true,
+--   }
+-- }
+
+-- def fin-to-nat : [n : Nat] -> Fin n -> Nat {
+--   \f => case f {
+--     fz => z,
+--     fs f' => s (fin-to-nat f'),
+--   }
+-- }
+
+-- def fin-is-even : [n : Nat] -> Fin n -> Bool {
+--   \x => case x {
+--     fz => true,
+--     fs x => case x {
+--       fz => false,
+--       fs y => fin-is-even y
+--     }
+--   }
+-- }
+
+-- def upgrade : [n : Nat] -> (k : Nat) -> Fin n -> Fin (add k n) {
+--   \[n] k => case k to (\m => Fin n -> Fin (add m n)) {
+--     z => id,
+--     s k' => \x => fs (upgrade k' x)
+--   }
+-- }
+
+-- def fin-eq : [n : Nat] -> [m : Nat] -> Fin n -> Fin m -> Bool {
+--   \a b => case a {
+--     fz => case b {
+--       fz => true,
+--       fs y => false
+--     },
+--     fs x => case b {
+--       fz => false,
+--       fs y => fin-eq x y
+--     }
+--   }
+-- }
+
+-- def length : [A : Type] -> List A -> Nat {
+--   \xs => case xs {
+--     [] => z,
+--     [_, ..xs'] => s (length xs'),
+--   }
+-- }
+
+-- def 0 type : [A : Type] -> A -> Type {
+--   \[A] _ => A
+-- }
+
+-- def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
+--   \f xs => case xs {
+--     [] => [],
+--     [x, ..xs'] => [f x, .. map f xs']
+--   }
+-- }
+
+-- def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
+--   \p xs => case xs {
+--     [] => nothing,
+--     [x, ..xs'] => case p x {
+--       true => just x,
+--       false => find p xs'
+--     }
+--   }
+-- }
+
+-- def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
+--   \f acc xs => case xs {
+--     [] => acc,
+--     [x, ..xs'] => f x (fold f acc xs')
+--   }
+-- }
+
+-- def index : [A : Type] -> Nat -> List A -> Maybe A {
+--   \n xs => case xs {
+--     [] => nothing,
+--     [x, ..xs'] => case n {
+--       z => just x,
+--       s n' => index n' xs'
+--     }
+--   }
+-- }
+
+-- -- Try combinator!
+-- #unfold
+-- def subst : [A : Type, x : A, y : A] -> (P : A -> Type) -> Equal x y -> P x -> P y {
+--   \P e => case e to (\x y _ => P x -> P y) {
+--     refl => id
+--   }
+-- }
+
+-- #unfold
+-- def subst-type : [A B : Type] -> Equal A B -> A -> B {
+--   subst [Type] (\X => X)
+-- }
+
+-- def cong : [A : Type, B : Type, x : A, y : A] -> (f : A -> B) -> Equal x y -> Equal (f x) (f y) {
+--   \f e => case e to (\x y _ => Equal (f x) (f y)) {
+--     refl => refl
+--   }
+-- }
+
+-- def sym : [A : Type, x : A, y : A] -> Equal x y -> Equal y x {
+--   \e => case e to (\x y _ => Equal y x) {
+--     refl => refl
+--   }
+-- }
+
+-- -- We cannot currently prove UIP because we don't have dependent pattern
+-- -- matching with the deletion rule.
+-- def uip : [A : Type, x : A] -> (p : Equal x x) -> Equal p refl {
+--   \p => trust-me
+-- }
+
+-- def equality-is-prop : [A : Type, x : A, y : A] -> (p q : Equal x y) -> Equal p q {
+--   \p q => {
+--     (case q to (\x y q => (p : Equal x y) -> Equal p q) {
+--       refl => uip
+--     }) p
+--   }
+-- }
+
+-- def z-neq-s : [n : Nat] -> Equal z (s n) -> Empty {
+--   \p => subst [Nat] (\n => case n {
+--     z => Unit,
+--     s _ => Empty,
+--   }) p tt
+-- }
+
+-- def co-sym : [A : Type, x : A, y : A] -> (Equal x y -> Empty) -> (Equal y x -> Empty) {
+--   \m p => m (sym p)
+-- }
+
+-- def s-inj : [n : Nat, m : Nat] -> Equal (s n) (s m) -> Equal n m {
+--   \e => subst [Nat] (\x => Equal n (case x {
+--     z => n,
+--     s k => k
+--   })) e refl
+-- }
+
+-- def s-co-cong : [x : Nat, y : Nat] -> (Equal x y -> Empty) -> (Equal (s x) (s y) -> Empty) {
+--   \m p => m (s-inj p)
+-- }
+
+-- def nat-eq-dep : (n : Nat, m : Nat) -> Dec (Equal n m) {
+--   \n m => case n to (\n => Dec (Equal n m)) {
+--     z => case m to (\m => Dec (Equal z m)) {
+--       z => yes refl,
+--       s m' => no z-neq-s,
+--     },
+--     s n' => case m to (\m => Dec (Equal (s n') m)) {
+--       z => no (co-sym z-neq-s),
+--       s m' => case nat-eq-dep n' m' to (\e => Dec (Equal (s n') (s m'))) {
+--         yes e => yes (cong s e),
+--         no f => no (s-co-cong f)
+--       }
+--     }
+--   }
+-- }
+
+-- def dec-to-bool : [A : Type] -> Dec A -> Bool {
+--   \case {
+--     yes _ => true,
+--     no _ => false
+--   }
+-- }
+
+-- def nat-eq : (n : Nat, m : Nat) -> Bool {
+--   \n m => dec-to-bool (nat-eq-dep n m)
+-- }
+
+-- def lte : Nat -> Nat -> Bool {
+--   \m n => case m {
+--     z => true,
+--     s m' => case n {
+--       z => false,
+--       s n' => lte m' n',
+--     }
+--   }
+-- }
+
+-- def lt : Nat -> Nat -> Bool {
+--   \m n => and (not (nat-eq m n)) (lte m n)
+-- }
+
+-- def bool-eq : (a : Bool, b : Bool) -> Bool {
+--   \a b => case a {
+--     true => case b {
+--       true => true,
+--       false => false,
+--     },
+--     false => case b {
+--       true => false,
+--       false => true,
+--     }
+--   }
+-- }
+
+-- def mod : Nat -> Nat -> Nat {
+--   \a n => case n {
+--     z => a,
+--     s k => case lt a n {
+--       true => a,
+--       false => mod (sub a (s k)) (s k)
+--     },
+--   }
+-- }
+
+-- def div : Nat -> Nat -> Nat {
+--   \a n => case lt a n {
+--     true => z,
+--     false => s (div (sub a n) n),
+--   }
+-- }
+
+-- -- -- Default representations
+-- repr data Bool as JsBool {
+--   true as js-true,
+--   false as js-false,
+
+--   case b to E {
+--     true => t,
+--     false => f,
+--   } as {
+--     js-if-dep [\x => E (unrepr x)] (repr b) (\_ => t) (\_ => f)
+--   }
+-- }
+
+-- repr def and as \a b => unrepr (js-and (repr a) (repr b))
+-- repr def or as \a b => unrepr (js-or (repr a) (repr b))
+-- repr def not as \a => unrepr (js-not (repr a))
+
+-- repr data Nat as JsUint {
+--   z as js-uint-zero,
+--   s n as js-uint-plus js-uint-one (repr n),
+--   case n to E {
+--     z => b,
+--     s => r,
+--   } as {
+--     js-zero-or-pos [\x => E (unrepr x)] (\_ => b) (\x => r (unrepr x)) (repr n)
+--   }
+-- }
+
+-- repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
+-- repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
+-- repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
+-- repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
+-- repr def mod as \a b => unrepr (js-uint-mod (repr a) (repr b))
+-- repr def div as \a b => unrepr (js-uint-div (repr a) (repr b))
+-- repr def nat-eq as \a b => unrepr (js-eqq (repr a) (repr b))
+-- repr def nat-eq-dep as \a b => {
+--   let res : Bool = unrepr (js-eqq (repr a) (repr b));
+--   if res {
+--     yes trust-me
+--   } else {
+--     no (conjure _)
+--   }
+-- }
+
+-- repr data Fin i as JsBoundedUint (repr i) {
+--   fz as js-bounded-uint-zero,
+--   fs n as js-bounded-uint-inc (repr n),
+--   case n to E {
+--     fz => b,
+--     fs => r,
+--   } as {
+--     js-bounded-zero-or-pos [\n f => E (unrepr n) (unrepr f)]
+--       (\[n] => b [unrepr n])
+--       (\[n] f => r [unrepr n] (unrepr f)) (repr n)
+--   }
+-- }
+
+-- repr def fin-to-nat as \n => {
+--   unrepr (js-forget-bound (repr n))
+-- }
+
+-- repr def fin-is-even as \n => {
+--   unrepr (js-eqq (js-uint-mod (js-forget-bound (repr n)) (repr 2)) js-uint-zero)
+-- }
+
+-- repr def fin-eq as \x y => unrepr (js-eqq (repr x) (repr y))
+
+-- repr data List A as JsArray A {
+--   nil as js-empty-array,
+--   cons x xs as js-array-extend-l x (repr xs),
+
+--   case l to E {
+--     nil => n,
+--     cons => c,
+--   } as {
+--     js-array-switch-l [A] [\x => E (unrepr x)] (\_ => n) (\a xs => c a (unrepr xs)) (repr l)
+--   }
+-- }
+
+-- repr def length as \l => unrepr (js-length (repr l))
+
+-- repr def index as {
+--   \i l => {
+--     let l' = repr l;
+--     js-if-bounded (repr i) (js-length l')
+--       (\b => just (js-index l' b))
+--       (\_ => nothing)
+--   }
+-- }
+
+-- repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
+
+-- repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
+
+-- -- -- -- More definitions
+
+-- data Char : Type {
+--   utf32-code : Fin (pow 2 32) -> Char,
+-- }
+
+-- def char-eq : Char -> Char -> Bool {
+--   \c1 c2 => case c1 {
+--     utf32-code f1 => case c2 {
+--       utf32-code f2 => fin-eq f1 f2,
+--     },
+--   }
+-- }
+
+-- data String : Type {
+--   snil : String,
+--   scons : Char -> String -> String,
+-- }
+
+-- def string-eq : String -> String -> Bool {
+--   \s1 s2 => case s1 {
+--     snil => case s2 {
+--       snil => true,
+--       scons _ _ => false,
+--     },
+--     scons c1 s1' => case s2 {
+--       snil => false,
+--       scons c2 s2' => and (char-eq c1 c2) (string-eq s1' s2'),
+--     },
+--   }
+-- }
+
+-- def 0 Word : Type {
+--   Fin 65536
+-- }
+
+-- def 0 Byte : Type {
+--   Fin 256
+-- }
+
+-- data ASCII : Type {
+--   ascii-code : Fin 256 -> ASCII,
+-- }
+
+-- repr data ASCII as Byte {
+--   ascii-code x as x,
+--   case a to E {
+--     ascii-code => c
+--   } as {
+--     unsafe-complete E a (c (repr a)) -- need some kind of record eta rules to avoid this, or manual substitutions
+--   }
+-- }
+
+-- def ascii-eq : ASCII -> ASCII -> Bool {
+--   \a1 a2 => case a1 {
+--     ascii-code f1 => case a2 {
+--       ascii-code f2 => fin-eq f1 f2,
+--     },
+--   }
+-- }
+
+-- def word-to-nat : Word -> Nat {
+--   fin-to-nat
+-- }
+
+-- def 0 Holds : Bool -> Type {
+--   \b => Equal b true
+-- }
+
+-- def determine : (x : Bool) -> Maybe (Holds x) {
+--   \x => case x to (\x => Maybe (Equal x true)) {
+--     true => just refl,
+--     false => nothing,
+--   }
+-- }
+
+-- -- Byte lists and vectors
+
+-- data ByteList : Type {
+--   bnil : ByteList,
+--   bcons : Byte -> ByteList -> ByteList
+-- }
+
+-- def byte-list-length : ByteList -> Nat {
+--   \l => case l {
+--     bnil => z,
+--     bcons _ xs => s (byte-list-length xs)
+--   }
+-- }
+
+-- data ByteVec : Nat -> Type {
+--   bvnil : ByteVec z,
+--   bvcons : [n : Nat] -> Byte -> ByteVec n -> ByteVec (s n)
+-- }
+
+-- def 0 byte-vec-length : [n : Nat] -> ByteVec n -> Nat {
+--   \[n] b => n
+-- }
+
+-- def byte-vec-eq : [n m : Nat] -> ByteVec n -> ByteVec m -> Bool {
+--   \[n] a b => case a {
+--     bvnil => case b {
+--       bvnil => true,
+--       bvcons _ _ => false
+--     },
+--     bvcons x xs => case b {
+--       bvnil => false,
+--       bvcons y ys => and (fin-eq x y) (byte-vec-eq xs ys)
+--     }
+--   }
+-- }
+
+-- def byte-vec-lookup : [n : Nat, T : Type] -> ByteVec n -> List (ByteVec n * (() -> T)) -> (() -> T) -> T {
+--   \s l d => case l {
+--     nil => d (),
+--     cons x xs => {
+--       let (k, v) = x;
+--       if-then-else (byte-vec-eq s k) (\_ => v ()) (\_ => byte-vec-lookup s xs d)
+--     }
+--   }
+-- }
+
+-- repr data ByteList as JsBuffer {
+--   bnil as js-buffer-empty,
+--   bcons x xs as {
+--     let old = repr xs;
+--     let old-len = js-buffer-byte-length old;
+--     let new-len = js-uint-plus old-len (repr 1);
+--     let b = js-buffer-run (js-buffer-alloc new-len) ({
+--       js-buffer-bind
+--         (js-buffer-copy old (repr 0) old-len (repr 1))
+--         (\_ => js-buffer-write-uint8 (js-forget-bound (repr x)) (repr 0))
+--     });
+--     fst b
+--   },
+
+--   case b to E {
+--     bnil => n,
+--     bcons => c
+--   } as {
+--     let b' = repr b;
+--     js-if (js-eqq (js-buffer-byte-length b') (repr 0))
+--       (\_ => unsafe-complete E b n)
+--       (\_ => {
+--         let x : Byte = unrepr (js-bound-trust-me [repr 256] (js-buffer-read-uint8 b' (repr 0)));
+--         let xs : ByteList = unrepr (js-buffer-subarray b' (repr 1) (js-buffer-byte-length b'));
+--         let m = c x xs;
+--         unsafe-complete E b m
+--       })
+--   }
+-- }
+
+-- -- The `n` can be computed from the data structure!!
+-- repr data ByteVec n as Subset ByteList (\l => Equal (byte-list-length l) n) {
+--   bvnil as element bnil refl,
+--   bvcons x xs as {
+--     let (element l p) = repr xs;
+--     element (bcons x l) (cong s p)
+--   },
+
+--   case b to E {
+--     bvnil => n,
+--     bvcons => c
+--   } as {
+--     let b' = repr b;
+--     let res = case b' to (\p => E (byte-list-length (inclusion p)) (unrepr (element (inclusion p) refl))) {
+--       element l p => case l to (\l => E (byte-list-length l) (unrepr (element l refl))) {
+--         bnil => n,
+--         bcons x xs => c [byte-list-length xs] x (unrepr (element xs refl)),
+--       }
+--     };
+--     -- let length-pres : Equal (byte-list-length (fst b')) (byte-vec-length b) = trust-me; -- we can probably prove this
+--     -- @@Todo: do this without cast and trust me
+--     unsafe-cast (E (byte-vec-length b) b) res
+--   }
+-- }
+
+-- repr def byte-list-length as \l => {
+--   unrepr (js-buffer-byte-length (repr l))
+-- }
+
+-- repr def byte-vec-eq as \b b' => {
+--   unrepr (js-buffer-eq (repr (inclusion (repr b))) (repr (inclusion (repr b'))))
+-- }
+
+-- -- Panic
+
+-- def panic : [A : Type] -> String -> A {
+--   \a => unsafe-io (io-bind (js-console-log a) (\_ => js-exit js-one))
+-- }
+
+-- -- REPR helpers
+
+-- def 0 Reprs : Nat -> Type -> Type {
+--   \l T => case l {
+--     z => T,
+--     s l' => repr (Reprs l' T)
+--   }
+-- }
+
+-- def reprs : [T : Type] -> (l : Nat) -> T -> Reprs l T {
+--   \l t => case l to (\l => Reprs l T) {
+--     z => t,
+--     s l' => repr (reprs l' t)
+--   }
+-- }
+
+-- def unreprs : [T : Type] -> (l : Nat) -> Reprs l T -> T {
+--   \l => case l to (\l => Reprs l T -> T) {
+--     z => id,
+--     s l' => \r => unreprs l' (unrepr r)
+--   }
+-- }
+
+-- def repr-subst : [A B : Type] -> Equal (repr A) B -> repr A -> B {
+--   subst-type
+-- }
+
+-- def repr-subst' : [A B : Type] -> Equal (repr A) B -> B -> repr A {
+--   \p => subst-type (sym p)
+-- }
+
+-- def 0 ReprBy : Type -> Type -> Type {
+--   \T U => (l : Nat) * Equal (Reprs l T) U
+-- }
+
+-- def reprs-subst : [A B : Type] -> ReprBy A B -> A -> B {
+--   \r a => {
+--     let (l, p) = r;
+--     subst-type p (reprs l a)
+--   }
+-- }
+
+-- def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
+--   \r b => {
+--     let (l, p) = r;
+--     unreprs l (subst-type (sym p) b)
+--   }
+-- }
+
+-- -- HTTP
+
+-- -- data HttpRequest : Type {
+-- --   http-request : (
+-- --     method : String,
+-- --     url : String,
+-- --     header : String -> Maybe String,
+-- --     body : String,
+-- --   ) -> HttpRequest
+-- -- }
+
+-- -- data HttpResponse : Type {
+-- --   http-response : (
+-- --     status : Nat,
+-- --     headers : List (String * String),
+-- --     body : String,
+-- --   ) -> HttpResponse
+-- -- }
+
+-- -- data HttpServer : Type {
+-- --   http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
+-- -- }
+
+-- -- def launch-http-server : HttpServer -> IO () {
+-- --   \case {
+-- --     http-server port handler => {
+-- --       ?launch-http-server
+-- --     }
+-- --   }
+-- -- }

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -27,6 +28,7 @@ import Common
     Tag,
     Tel,
     mapSpineM,
+    members,
     unMetaVar,
   )
 import Control.Monad.Extra (concatMapM)
@@ -39,8 +41,9 @@ import Data.List.Extra (intercalate, (!?))
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..))
+import qualified Data.Sequence as S
 import Data.Set (Set)
-import Evaluation (Eval, evalInOwnCtx, quote)
+import Evaluation (Eval, evalInOwnCtx, quote, quoteClosure)
 import Globals
   ( CtorGlobalInfo (..),
     DataGlobalInfo (..),
@@ -53,21 +56,23 @@ import Globals
     getGlobalTags,
   )
 import Meta (lookupMetaVar, lookupMetaVarName, lookupMetaVarQty)
-import Presyntax (PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, MaybeQty (..), singleTermClause)
+import Presyntax (MaybeQty (..), PCtor (MkPCtor), PData (MkPData), PDef (MkPDef), PItem (..), PPrim (..), PProgram (..), PTm (..), pApp, singleTermClause)
 import Printing (Pretty (..))
+import Substitution (Sub)
 import Syntax
   ( BoundState (..),
     Bounds,
     Case (..),
     Closure (..),
+    HTel,
+    HTm,
     SPat (..),
     STm (..),
     VPatB (..),
     VTm (..),
+    embed,
     pattern VVar,
   )
-import qualified Data.Sequence as S
-import Substitution (Sub)
 
 class (Eval m) => Unelab m
 
@@ -227,8 +232,8 @@ instance (Unelab m, Has m [Name]) => Pretty m STm where
 instance (Unelab m, Has m [Name]) => Pretty m Closure where
   pretty cl = do
     n <- view
-    cl' <- evalInOwnCtx (Lvl (length (n :: [Name]))) cl
-    pretty cl'
+    cl' <- quoteClosure (Lvl (length (n :: [Name]))) cl
+    enter (const (map (\(Lvl m) -> Name ("cl" ++ show m)) (members (Lvl cl.numVars)))) $ pretty cl'
 
 instance (Unelab m, Has m [Name]) => Pretty m VPatB where
   pretty (VPatB pat names) = enter (map snd names ++) $ pretty pat
@@ -237,3 +242,9 @@ instance (Unelab m, Has m [Name]) => Pretty m (Tel STm) where
   pretty tel = do
     n <- view
     unelabTel n tel >>= pretty
+
+instance (Unelab m, Has m [Name]) => Pretty m HTm where
+  pretty h = do
+    n :: [Name] <- view
+    let s = embed (Lvl (length n)) h
+    pretty s

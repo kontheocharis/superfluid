@@ -87,7 +87,7 @@ import Substitution
     liftSubN,
     mapSub1,
     mapSubN,
-    proj,
+    proj, hCtxToTel,
   )
 import Syntax
   ( Case (..),
@@ -111,9 +111,10 @@ import Syntax
 import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
 import Unification (CanUnify (..), canUnifyHere)
 import Prelude hiding (cycle, pi)
-import Debug.Trace (traceM)
+import Debug.Trace (traceM, trace)
 import Printing (Pretty(..))
 import Unelaboration (Unelab)
+import Data.List (intercalate)
 
 data MatchingError = MatchingError
 
@@ -178,7 +179,7 @@ equality ty a b =
 -- internally:
 -- refl : [A : Type] -> (0 x : A) -> Equal [A] x x
 refl :: HTm -> HTm -> HTm
-refl ty = HApp Explicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Implicit Zero ty)))
+refl ty = HApp Implicit Zero (HCtor (knownCtor KnownRefl, S.singleton (Arg Implicit Zero ty)))
 
 -- Higher equality (written as `=P,e=`)
 --
@@ -291,6 +292,22 @@ canConvert ctx a b = do
       Yes -> return True
       _ -> return False
 
+traceProblem ::  (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m ()
+traceProblem ctx t a b = do
+  c' <- embedCtx ctx
+  enter (const c') $ do
+    traceM "Problem:"
+    traceM "Context:"
+    traceM =<< pretty c'
+    traceM "Tel:"
+    traceM =<< pretty t
+    traceM "Spine 1:"
+    traceM =<< pretty a
+    traceM "Spine 2:"
+    traceM =<< pretty b
+    return ()
+
+
 -- Unification:
 unifyPLSpines :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m Unification
 unifyPLSpines ctx HEmpty Empty Empty = do
@@ -328,7 +345,7 @@ unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ q x :<| xs) (Arg _ q' y :<| ys
       o /\ o',
       BiSub
         { forward = composeSub (liftSubN (spineShapes xs) s.forward) s'.forward,
-          backward = composeSub s.backward (liftSubN (spineShapes xs) s'.backward)
+          backward = composeSub s'.backward (liftSubN (spineShapes xs) s.backward)
         }
     )
 unifyPLSpines _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
@@ -410,6 +427,10 @@ solution ctx ty a b = case (a, b) of
                             <> ofShapes (S.singleton csh) [refl ty b]
                       )
                 }
+        traceM "SOL"
+        pretty s.forward >>= traceM
+        pretty s.backward >>= traceM
+        traceM "ENDSOL"
         return $ Just (ctx', S.singleton csh, Can, s)
   (_, HVar x) -> solution ctx ty (HVar x) a
   _ -> return Nothing
@@ -615,7 +636,17 @@ subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
 subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
 
 simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
-simplifyConstraints cs = mconcat <$> mapM simplifyConstraint cs
+simplifyConstraints (c : cs) = do
+  cs' <- simplifyConstraint c
+  case cs' of
+    Just cs'' -> do
+      rest <- simplifyConstraints cs
+      case rest of
+        Just rest' -> return . Just $ cs'' ++ rest'
+        Nothing -> return Nothing
+    Nothing -> return Nothing
+simplifyConstraints [] = return (Just [])
+
 
 simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
 simplifyConstraint co = do
@@ -626,14 +657,18 @@ simplifyConstraint co = do
           simplifyConstraints
             (zipWith (\x y -> Constraint l x.arg y.arg q) (toList sp) (toList sp'))
       | otherwise -> return Nothing
-    _ -> return Nothing
+    _ -> error "invalid constraint"
 
 refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
 refineClause s cl' = case cl' of
   Clause (cs, ps) t -> do
     ps' <- mapM pretty cs
     traceM $ "Refining constraints : " ++ show ps'
-    cs' <- simplifyConstraints (map (subSimpleConstraint s) cs)
+    traceM $ "Substitution is : "
+    pretty s >>= traceM
+    let csn = map (subSimpleConstraint s) cs
+    mapM pretty csn >>= traceM . intercalate " "
+    cs' <- simplifyConstraints csn
     ps'' <- mapM (traverse pretty) cs'
     traceM $ "Refined constraints : " ++ show ps''
     case cs' of
@@ -683,11 +718,21 @@ tmAsPat q t = case hGatherApps t of
 
 ifForcePi :: (Matching m) => Qty -> HCtx -> PiMode -> HTy -> (Param HTy -> (HTm -> HTy) -> m a) -> m a -> m a
 ifForcePi q ctx m ty the els = runTc' q ctx $ do
+  pt <- pretty ty
+  traceM $ "Forcing pi type HOAS: " ++ pt
   ty' <- embedEvalHere ty
+  tyy'' <- pretty ty'
+  traceM $ "Forcing pi type: " ++ tyy''
+
+  c <- getCtx >>= pretty
+  traceM $ "Tc CTX: " ++ c
+
   ifForcePiType
     m
     ty'
     ( \m' q' x a b -> do
+        pb <- pretty b
+        traceM $ "Now in " ++ pb
         a' <- quoteUnembedHere a
         b' <- unembedClosure1Here b
         the (Param m' q' x a') b'
@@ -793,6 +838,8 @@ addVar st@(MatchingState ctx q' ty cls) = do
         m'
         ty
         ( \p@(Param m q x a) b -> do
+            a' <- pretty a
+            traceM $ " Type of a : " ++ a'
             let ctxShapes = telShapes ctx
             let s t = extendSub (idSub ctxShapes) (Param m q x ()) (hoistBinders Empty ctxShapes t)
             let ctx' = ctx :|> Param m q x a
@@ -843,6 +890,14 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- Create the telescope (ρ : Ψ)(x : D δ ρ)
           let psiTel = extendTel dc.params (Param p.mode p.qty p.name . hApp (HData d))
 
+          traceM $ "Prev context is "
+          pretty (hCtxToTel ctx)  >>= traceM
+
+          traceM $ "Current context is "
+          pretty (hCtxToTel ctx')  >>= traceM
+
+          traceProblem ctx' psiTel psix psix'
+
           -- Unify:
           -- Γχ (x : D δ ψ) xΓ (π : Πi) ⊢ (ψ, x) =(ρ : Ψ)(D δ ρ)= (ξi[δ,π], ci π)
           --
@@ -852,7 +907,16 @@ splitConstraint (MatchingState ctx q ty cls) = do
           -- @@Todo: if unification is negative, emit eliminator!
 
           -- For each clause with pattern πj, equate πj to π:
-          cls' <- fmap catMaybes $ mapM (refineClause s.forward) cls
+          cp <- pretty (hCtxToTel ctx)
+          traceM $ "Context is " ++ cp
+          cpa <- pretty (hCtxToTel ctx')
+          traceM $ "Context with args is " ++ cpa
+          cpu <- pretty (hCtxToTel ctx'')
+          traceM $ "Context with unification is " ++ cpu
+          traceM "This is by bi-substitution: "
+          pretty s.forward >>= traceM . ("Forward: " ++)
+          pretty s.backward >>= traceM . ("Backward: " ++)
+          cls' <- fmap catMaybes $ mapM (refineClause s.backward) cls
 
           -- Build the rest of the clause in Γ'', which will first give:
           --    Γ'' |- e : T σ .

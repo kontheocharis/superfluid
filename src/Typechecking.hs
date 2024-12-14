@@ -440,8 +440,12 @@ ifForcePiType ::
   m a
 ifForcePiType m ty the els = do
   ty' <- unfoldHere ty
+  p <- pretty ty'
+  traceM $ "P type " ++ p
   case ty' of
     VNorm (VPi m' q x a b) -> do
+      a' <- pretty b
+      traceM $ "Got type " ++ a'
       if m == m'
         then the m' q x a b
         else els m' q x a b

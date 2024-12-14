@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Substitution
@@ -23,22 +24,30 @@ module Substitution
     unembedClosure1,
     hoistBinders,
     hoistBinders',
+    shapesToBinds,
+    hCtxToTel,
   )
 where
 
-import Common (Arg (..), Clause (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Spine, Tel, members, membersIn, nextLvl, nextLvls, Shapes, Shape)
+import Common (Arg (..), Clause (..), Has (..), Lvl (..), Name (..), Param (..), PiMode (..), Qty (..), Shape, Shapes, Spine, Tel, members, membersIn, nextLvl, nextLvls)
+import Control.Monad (forM)
+import Data.Foldable (Foldable (..))
+import Data.List (intercalate)
 import Data.Maybe (fromJust)
 import Data.Sequence (Seq (..), fromList)
 import qualified Data.Sequence as S
 import Evaluation (Eval, quoteClosure)
+import Printing (Pretty (..))
 import Syntax
   ( Case (..),
     Closure (..),
+    HCtx,
     HTel (..),
     HTm (..),
     patBinds,
     unembed,
   )
+import Debug.Trace (traceM)
 
 -- Substitution
 
@@ -55,13 +64,15 @@ hoistBinders :: Shapes -> Shapes -> HTm -> (Spine HTm -> HTm)
 hoistBinders c (sh :<| shs) t sp = hoistBinder c sh t (hoistBinders c shs t sp)
 hoistBinders _ Empty t _ = t
 
-hoistBinder :: Shapes -> Shape -> HTm -> (HTm -> HTm)
+hoistBinder :: (Subst a) => Shapes -> Shape -> a -> (HTm -> a)
 hoistBinder c sh t x = sub (extendSub (idSub c) sh (const x)) t -- @@Check: is const x right?
 
 unembedClosure1 :: (Eval m) => Lvl -> Closure -> m (HTm -> HTm)
 unembedClosure1 l c = do
-  c' <- unembed (map HVar (members (nextLvl l))) <$> quoteClosure l c
-  return $ hoistBinder (defaultShapes (Lvl $ length c.env)) (Param Explicit Many (Name "_") ()) c'
+  c' <- quoteClosure l c
+  return $ \x -> unembed (x : reverse (map HVar $ members l)) c'
+
+  -- return $ hoistBinder (defaultShapes (Lvl $ length c.env)) (Param Explicit Many (Name "_") ()) c'
 
 hoistBinders' :: Shapes -> Shapes -> HTm -> ([HTm] -> HTm)
 hoistBinders' sh t sp = hoistBinders sh t sp . fromList . map (Arg Explicit Many)
@@ -77,17 +88,17 @@ nonEmptyDomL f = \case
   Arg _ _ x :<| s -> f x s
 
 -- Basically allows us to split the domain of a substitution into two parts
--- if we know that the domain is greater than l
-domGt :: Int -> (Spine HTm -> Spine HTm -> a) -> (Spine HTm -> a)
-domGt l f x = case S.splitAt l x of
-  (_, Empty) -> error "Domain too small"
+-- if we know that the domain is greater than or equal to l
+domGte :: Int -> (Spine HTm -> Spine HTm -> a) -> (Spine HTm -> a)
+domGte l f x = case S.splitAt l x of
+  -- (_, Empty) -> error "Domain too small"
   (xs, ys) -> f xs ys
 
 mapSub1 :: Shapes -> Shapes -> (Spine HTm -> HTm -> Spine HTm) -> Sub
 mapSub1 dom cod f = Sub dom cod $ nonEmptyDom f
 
 mapSubN :: Shapes -> Shapes -> Shapes -> (Spine HTm -> Spine HTm -> Spine HTm) -> Sub
-mapSubN dom cod n f = Sub dom cod $ domGt (length n) f
+mapSubN dom cod n f = Sub dom cod $ domGte (length n) f
 
 -- ε : Sub Γ •
 terminalSub :: Shapes -> Sub
@@ -116,14 +127,15 @@ liftSubN n s =
     (s.domSh <> n)
     (s.codSh <> n)
     ( \sp ->
-        let beginning = S.length s.domSh - S.length n
+        let beginning = S.length s.domSh
          in s.mapping (S.take beginning sp) <> S.drop beginning sp
     )
 
 getVar :: Lvl -> Sub -> Arg HTm
-getVar x s =
-  let ms = fromList . map (Arg Explicit Many . HVar) $ members (Lvl (length s.domSh))
-   in (fromJust $ s.mapping ms S.!? x.unLvl)
+getVar x s = let ms = getMembers s in (fromJust $ ms S.!? x.unLvl)
+
+getMembers :: Sub -> Spine HTm
+getMembers s = s.mapping $ fromList . map (Arg Explicit Many . HVar) $ members (Lvl (length s.domSh))
 
 -- π₁ : Sub Γ (Δ , A) -> Sub Γ Δ
 proj :: Sub -> Sub
@@ -135,6 +147,21 @@ projN n s = Sub s.domSh (S.take (length s.domSh - n) s.codSh) $ \sp -> S.take (l
 
 bindsToShapes :: [(Qty, Name)] -> Shapes
 bindsToShapes = fromList . map (\(q, n) -> Param Explicit q n ())
+
+shapesToBinds :: Shapes -> [(Qty, Name)]
+shapesToBinds = map (\(Param _ q n _) -> (q, n)) . toList
+
+hCtxToTel :: HCtx -> HTel
+hCtxToTel = hCtxToTel' Empty
+  where
+    hCtxToTel' _ Empty = HEmpty
+    hCtxToTel' sh (Param m q n a :<| xs) =
+      HWithParam
+        m
+        q
+        n
+        a
+        (hoistBinder sh (Param m q n ()) (hCtxToTel' (sh :|> Param m q n ()) xs))
 
 class Subst a where
   -- [_]_ : (σ : Sub Γ Δ) -> P Δ (A σ) -> P Γ A
@@ -242,3 +269,29 @@ instance Subst HTel where
 
   occurs _ _ HEmpty = False
   occurs l x (HWithParam _ _ _ t tel) = occurs l x t || occurs (nextLvl l) x (tel (HVar l))
+
+instance (Monad m, Has m [Name], Pretty m HTm) => Pretty m Sub where
+  pretty s = do
+    let domNs = shapesToBinds s.domSh
+    let codNs = shapesToBinds s.codSh
+    result <- enter (const $ map snd domNs) $ do
+      let ms = zip codNs (toList $ getMembers s)
+      inner <- (intercalate ", " <$>) . forM ms $ \((_, n), t) -> do
+        a <- pretty n
+        b <- pretty t
+        return $ a ++ " ↦ " ++ b
+      return $ "(" ++ inner ++ ")"
+    return $ "(" ++ intercalate ", " (map (show . snd) domNs) ++ ") => " ++ result
+
+instance (Monad m, Has m [Name], Pretty m HTm) => Pretty m HTel where
+  pretty x = do
+    x' <- pretty' x
+    return $ "(" ++ x' ++ ")"
+    where
+      pretty' HEmpty = return ""
+      pretty' (HWithParam m q n a f) = do
+        a' <- pretty a
+        n' <- pretty n
+        ns :: [Name] <- view
+        f' <- enter (++ [n]) $ pretty' (f (HVar (Lvl (length ns))))
+        return $ show m ++ " " ++ show q ++ " " ++ n' ++ " " ++ a' ++ if null f' then "" else ", " ++ f'

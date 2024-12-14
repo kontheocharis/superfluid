@@ -59,7 +59,6 @@ import Common
     Tel,
     composeZ,
     lvlToIdx,
-    mapSpine,
     mapSpineM,
     nextLvl,
     nextLvls,
@@ -615,13 +614,13 @@ ensureIsCtor l v c a = do
     _ -> a
 
 embedEval :: (Eval m) => Lvl -> HTm -> m VTm
-embedEval l t = eval (map VV $ members l) (embed l t)
+embedEval l t = eval (reverse . map VV $ members l) (embed l t)
 
 quoteUnembed :: (Eval m) => Lvl -> VTm -> m HTm
 quoteUnembed l t = do
   t' <- quote l t
   let env = map HVar $ members l
-  return $ unembed env t'
+  return $ unembed (reverse env) t'
 
 hSimplify :: (Eval m) => Lvl -> HTm -> m HTm
 hSimplify l t = embedEval l t >>= quoteUnembed l
