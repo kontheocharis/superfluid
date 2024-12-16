@@ -3,9 +3,9 @@
 {-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 module Matching
   ( Matching (..),
@@ -48,11 +48,13 @@ import Control.Applicative (asum)
 import Control.Monad (forM)
 import Control.Monad.Extra (firstJustM)
 import Data.Foldable (Foldable (..), toList)
+import Data.List (intercalate)
 import Data.Maybe (catMaybes)
 import Data.Semiring (Semiring (times))
 import Data.Sequence (Seq (..))
 import qualified Data.Sequence as S
 import Data.Traversable (for)
+import Debug.Trace (trace, traceM)
 import Evaluation
   ( Eval (..),
     embedEval,
@@ -64,7 +66,7 @@ import Globals
     CtorGlobalInfo (..),
     DataConstructions (..),
     DataGlobalInfo (..),
-    KnownGlobal (KnownConf, KnownCycle, KnownDCongSp, KnownEqual, KnownHEqual, KnownInj, KnownRefl, KnownVoid, KnownEmpty),
+    KnownGlobal (KnownConf, KnownCycle, KnownDCongSp, KnownEmpty, KnownEqual, KnownHEqual, KnownInj, KnownRefl, KnownVoid),
     getCtorGlobal,
     getCtorGlobal',
     getDataGlobal,
@@ -73,6 +75,7 @@ import Globals
     knownData,
     knownDef,
   )
+import Printing (Pretty (..))
 import Substitution
   ( BiSub (..),
     Shape,
@@ -81,13 +84,14 @@ import Substitution
     Subst (..),
     composeSub,
     extendSub,
+    hCtxToTel,
     hoistBinders,
     hoistBinders',
     idSub,
     liftSubN,
     mapSub1,
     mapSubN,
-    proj, hCtxToTel,
+    proj,
   )
 import Syntax
   ( Case (..),
@@ -100,21 +104,19 @@ import Syntax
     VTm (..),
     VTy,
     ctxSize,
+    embed,
     extendCtxWithTel,
     extendTel,
     hApp,
     hGatherApps,
     hLams,
     joinTels,
-    lastVar, embed,
+    lastVar,
   )
 import Typechecking (Child, InPat (InPat), ModeG (..), Tc (..), ifForcePiType)
+import Unelaboration (Unelab)
 import Unification (CanUnify (..), canUnifyHere)
 import Prelude hiding (cycle, pi)
-import Debug.Trace (traceM, trace)
-import Printing (Pretty(..))
-import Unelaboration (Unelab)
-import Data.List (intercalate)
 
 data MatchingError = MatchingError
 
@@ -295,7 +297,7 @@ canConvert ctx a b = do
       Yes -> return True
       _ -> return False
 
-traceProblem ::  (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m ()
+traceProblem :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m ()
 traceProblem ctx t a b = do
   c' <- embedCtx ctx
   enter (const c') $ do
@@ -309,7 +311,6 @@ traceProblem ctx t a b = do
     traceM "Spine 2:"
     traceM =<< pretty b
     return ()
-
 
 -- Unification:
 unifyPLSpines :: (Matching m) => HCtx -> HTel -> Spine HTm -> Spine HTm -> m Unification
@@ -599,7 +600,7 @@ deletion ctx ty a b = do
 
 type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
-type ConstrainedClause pats tm = Clause (SimpleConstraints, pats) tm
+type ConstrainedClause pats tm = Clause (SimpleConstraints, HCtx, pats) tm
 
 -- Constraints
 
@@ -619,7 +620,6 @@ instance (Unelab m, Has m Ctx) => Pretty m Constraint where
     p' <- pretty p
     return $ x' ++ " = " ++ p'
 
-
 data SimpleConstraint = SimpleConstraint
   { lvl :: Lvl,
     lhs :: Lvl,
@@ -638,33 +638,36 @@ instance Subst Constraint where
 subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
 subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
 
-simplifyConstraints :: (Matching m) => Constraints -> m (Maybe SimpleConstraints)
+simplifyConstraints :: (Matching m) => Constraints -> m (Maybe (SimpleConstraints, HCtx))
 simplifyConstraints (c : cs) = do
   cs' <- simplifyConstraint c
   case cs' of
-    Just cs'' -> do
+    Just (cs'', is) -> do
       rest <- simplifyConstraints cs
       case rest of
-        Just rest' -> return . Just $ cs'' ++ rest'
+        Just (restCs, restIs) -> return . Just $ (cs'' ++ restCs, is <> restIs)
         Nothing -> return Nothing
     Nothing -> return Nothing
-simplifyConstraints [] = return (Just [])
+simplifyConstraints [] = return (Just ([], Empty))
 
-
-simplifyConstraint :: (Matching m) => Constraint -> m (Maybe SimpleConstraints)
+simplifyConstraint :: (Matching m) => Constraint -> m (Maybe (SimpleConstraints, HCtx))
 simplifyConstraint co = do
   case co of
-    Constraint l (HVar x) p q -> return . Just $ [SimpleConstraint l x p q]
+    Constraint l (HVar x) p q -> return . Just $ ([SimpleConstraint l x p q], Empty)
     Constraint l (hGatherApps -> (HCtor (c, _), sp)) (CtorP (c', _) sp') q
       | c == c' ->
           simplifyConstraints
             (zipWith (\x y -> Constraint l x.arg y.arg q) (toList sp) (toList sp'))
       | otherwise -> return Nothing
-    _ -> error "invalid constraint"
+    Constraint _ _ (LvlP _ n _) p -> do
+      return . Just $ ([], Empty :|> p {name = n})
+    _ -> do
+      co' <- pretty co
+      error $ "invalid constraint: " ++ co'
 
 refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (ConstrainedClause p t))
 refineClause s cl' = case cl' of
-  Clause (cs, ps) t -> do
+  Clause (cs, ctx, ps) t -> do
     ps' <- mapM pretty cs
     traceM $ "Refining constraints : " ++ show ps'
     traceM $ "Substitution is : "
@@ -672,10 +675,10 @@ refineClause s cl' = case cl' of
     let csn = map (subSimpleConstraint s) cs
     mapM pretty csn >>= traceM . intercalate " "
     cs' <- simplifyConstraints csn
-    ps'' <- mapM (traverse pretty) cs'
-    traceM $ "Refined constraints : " ++ show ps''
     case cs' of
-      Just cs'' -> return . Just $ Clause (cs'', ps) t
+      Just (cs'', is) -> do
+        let ctx' = sub s (ctx <> is)
+        return . Just $ Clause (cs'', ctx', ps) t
       Nothing -> return Nothing
 
 -- Matching
@@ -746,8 +749,8 @@ ifForcePi q ctx m ty the els = runTc' q ctx $ do
 hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m (Maybe (Arg ()))
 hasNextPat cls = do
   case cls of
-    Clause (_, Empty) _ : _ -> return Nothing
-    Clause (_, a :<| _) _ : _ -> return . Just $ a {arg = ()}
+    Clause (_, _, Empty) _ : _ -> return Nothing
+    Clause (_, _, a :<| _) _ : _ -> return . Just $ a {arg = ()}
     [] -> return Nothing
 
 -- In context Γ (ctx), and return type T (ty) we have a list of unelaborated
@@ -762,7 +765,7 @@ caseTree :: (Matching m) => MatchingState m -> m HTm
 caseTree c = do
   ctx' <- embedCtx c.ctx
   c' <- pretty ctx'
-  cs' <- mapM (mapM pretty) (map (\(Clause (cs, _) _) -> cs) c.cls)
+  cs' <- mapM (mapM pretty) (map (\(Clause (cs, _, _) _) -> cs) c.cls)
   traceM $ "In context " ++ c'
   traceM $ "and constraints " ++ show cs'
   traceM $ "and clause count " ++ show (length c.cls)
@@ -783,9 +786,9 @@ caseTree c = do
 --
 -- We simply take the first clause and typecheck its term.
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
-done (MatchingState ctx q ty cls) = do
+done (MatchingState _ q ty cls) = do
   case cls of
-    Clause ([], Empty) (Just tm) : _ -> do
+    Clause ([], ctx, Empty) (Just tm) : _ -> do
       -- @@Todo: qty
       ctx' <- embedCtx ctx
       pretty ctx' >>= traceM
@@ -804,17 +807,22 @@ addNextConstraint ::
   ConstrainedClauses (HChildPat m) (HChildTm m) ->
   m (ConstrainedClauses (HChildPat m) (HChildTm m))
 addNextConstraint st param f cls = forM cls $ \case
-  (Clause (cs, p :<| ps) t) -> do
+  (Clause (cs, ctx, p :<| ps) t) -> do
     -- @@Todo: deal with implicits
     (p', _) <- p.arg (st.qty `times` param.qty) st.ctx (Check param.ty)
-    return $ Clause (cs ++ [f p'], ps) t
-  (Clause (_, Empty) _) -> error "No next pattern to add constraint to"
+    return $ Clause (cs ++ [f p'], ctx, ps) t
+  (Clause (_, _, Empty) _) -> error "No next pattern to add constraint to"
 
 -- Given a list of clauses C, remove the first constraint from each clause.
 removeFirstConstraint :: ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
 removeFirstConstraint = map $ \case
-  (Clause (_ : cs, ps) t) -> Clause (cs, ps) t
-  (Clause ([], _) _) -> error "No constraints to remove"
+  (Clause (_ : cs, ctx, ps) t) -> Clause (cs, ctx, ps) t
+  (Clause ([], _, _) _) -> error "No constraints to remove"
+
+-- Add an introduction to the first clause
+addFirstIntro :: Param HTy -> ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
+addFirstIntro p (Clause (cs, ctx, ps) t : cls) = Clause (cs, ctx :|> p, ps) t : cls
+addFirstIntro _ [] = error "No clauses to add introduction to"
 
 -- The goal computes to a Π-type, and there is a next pattern:
 --
@@ -864,13 +872,14 @@ addVar st@(MatchingState ctx q' ty cls) = do
 splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
 splitConstraint (MatchingState ctx q ty cls) = do
   case cls of
-    Clause (co : _, _) _ : _ -> case co of
+    Clause (co : _, _, _) _ : _ -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
-      SimpleConstraint _ _ (LvlP {}) _ -> do
+      SimpleConstraint _ _ (LvlP _ n _) p -> do
         -- All we need to do is remove the constraint from the clauses. @@Check: is this right?
         -- @@Todo: same quantity check?
-        Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint cls))
+        traceM $ " Got constraint name " ++ show n
+        Just <$> caseTree (MatchingState ctx q ty (addFirstIntro (p {name = n}) . removeFirstConstraint $ cls))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         -- Get the current subject type, i.e. D δ ψ
@@ -894,10 +903,10 @@ splitConstraint (MatchingState ctx q ty cls) = do
           let psiTel = extendTel dc.params (Param p.mode p.qty p.name . hApp (HData d))
 
           traceM $ "Prev context is "
-          pretty (hCtxToTel ctx)  >>= traceM
+          pretty (hCtxToTel ctx) >>= traceM
 
           traceM $ "Current context is "
-          pretty (hCtxToTel ctx')  >>= traceM
+          pretty (hCtxToTel ctx') >>= traceM
 
           traceProblem ctx' psiTel psix psix'
 
@@ -997,7 +1006,7 @@ clausesWithEmptyConstraints ::
   ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
   let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (tcPat p m))) ps
-   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause ([], ps') t'
+   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause ([], Empty, ps') t'
 
 -- Typecheck a list of syntax clauses, producing a
 -- corresponding case tree using primitive eliminators.
