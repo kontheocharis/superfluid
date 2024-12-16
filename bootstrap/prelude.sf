@@ -18,9 +18,14 @@ data IsBool : Bool -> Type {
   is-false : IsBool false
 }
 
-def weird : (b : Bool) -> IsBool b -> Bool {
-  true is-true => true,
-  false is-false => false
+data Maybe (A : Type) : Type {
+  nothing : Maybe A,
+  just : A -> Maybe A
+}
+
+def get : Maybe Bool -> Bool {
+  nothing => false,
+  (just b) => b
 }
 
 -- data Nat : Type {

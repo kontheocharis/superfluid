@@ -27,6 +27,7 @@ module Context
     enterCtx,
     accessCtx,
     modifyCtx,
+    addCtxEntry,
     setCtx,
     evalHere,
     evalPatHere,
@@ -120,7 +121,7 @@ data Ctx = Ctx
     qtys :: [Qty],
     bounds :: Bounds,
     nameList :: [Name],
-    instances :: [Bool],
+    modes :: [PiMode],
     names :: Map Name Lvl
   }
   deriving (Show)
@@ -136,7 +137,7 @@ instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m CtxEntry where
     tm' <- case bound of
       Defined -> (" = " ++) <$> pretty tm
       Bound _ -> return ""
-    return $ (if i then "#instance " else "") ++ (if q /= Many then show q else "") ++ name' ++ " : " ++ ty' ++ tm'
+    return $ (if i == Instance then "#instance " else "") ++ (if q /= Many then show q else "") ++ name' ++ " : " ++ ty' ++ tm'
 
 instance (Monad m, Pretty m Name, Pretty m VTy) => Pretty m Ctx where
   pretty c =
@@ -154,7 +155,7 @@ emptyCtx =
       types = [],
       bounds = [],
       nameList = [],
-      instances = [],
+      modes = [],
       qtys = [],
       names = M.empty
     }
@@ -165,7 +166,7 @@ data CtxEntry = CtxEntry
     tm :: VTm,
     lvl :: Lvl,
     qty :: Qty,
-    inst :: Bool,
+    mode :: PiMode,
     bound :: BoundState
   }
 
@@ -184,7 +185,7 @@ bind m x q ty ctx =
           tm = VNeu (VVar ctx.lvl),
           lvl = ctx.lvl,
           qty = q,
-          inst = m == Instance,
+          mode = m,
           bound = Bound q
         }
     )
@@ -196,8 +197,8 @@ insertedBind = bind
 localInstances :: Ctx -> [(Idx, VTy)]
 localInstances ctx =
   [ (Idx i, assertIsNeeded ty)
-    | (i, (ty, inst)) <- zip [0 ..] (zip ctx.types ctx.instances),
-      inst
+    | (i, (ty, m)) <- zip [0 ..] (zip ctx.types ctx.modes),
+      m == Instance
   ]
 
 define :: Name -> Qty -> VTm -> VTy -> Ctx -> Ctx
@@ -209,7 +210,7 @@ define x q t ty ctx =
           bound = Defined,
           lvl = ctx.lvl,
           qty = q,
-          inst = False,
+          mode = Explicit,
           name = x
         }
     )
@@ -224,7 +225,7 @@ typelessBind x q ctx =
           lvl = ctx.lvl,
           bound = Bound q,
           qty = q,
-          inst = False,
+          mode = Explicit,
           name = x
         }
     )
@@ -239,7 +240,7 @@ addCtxEntry e ctx =
       bounds = e.bound : ctx.bounds,
       names = M.insert e.name ctx.lvl ctx.names,
       qtys = e.qty : ctx.qtys,
-      instances = e.inst : ctx.instances,
+      modes = e.mode : ctx.modes,
       nameList = e.name : ctx.nameList
     }
 
@@ -267,7 +268,7 @@ indexCtx ctx idx@(Idx i) = do
       tm = ctx.env !! i,
       lvl = idxToLvl ctx.lvl idx,
       qty = ctx.qtys !! i,
-      inst = ctx.instances !! i,
+      mode = ctx.modes !! i,
       bound = ctx.bounds !! i
     }
 

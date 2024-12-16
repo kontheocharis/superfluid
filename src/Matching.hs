@@ -145,6 +145,18 @@ embedCtx = embedCtx' emptyCtx
       let c' = bind m x q a' c
       embedCtx' c' ps
 
+unembedCtx :: (Matching m) => Ctx -> m HCtx
+unembedCtx ctx = do
+  let entries = ctxEntries ctx
+  enter (const emptyCtx) $ unembedCtx' entries
+  where
+    unembedCtx' :: (Matching m) => [CtxEntry] -> m HCtx
+    unembedCtx' [] = return Empty
+    unembedCtx' (e : es) = do
+      e' <- Param e.mode e.qty e.name <$> quoteUnembedHere (assertIsNeeded e.ty)
+      es' <- enter (addCtxEntry e) $ unembedCtx' es
+      return $ e' :<| es'
+
 -- Unification
 
 -- The unify outcome is a "decorated" bit that tells us whether the unification
@@ -670,7 +682,8 @@ refineClause :: (Matching m) => Sub -> ConstrainedClause p t -> m (Maybe (Constr
 refineClause s cl' = case cl' of
   Clause (cs, ctx, ps) t -> do
     ps' <- mapM pretty cs
-    traceM $ "Refining constraints : " ++ show ps'
+    pctx <- embedCtx ctx
+    enterCtx (const pctx) . traceM $ "Refining constraints : " ++ show ps'
     traceM $ "Substitution is : "
     pretty s >>= traceM
     let csn = map (subSimpleConstraint s) cs
@@ -688,7 +701,7 @@ type HMode = ModeG HTy
 
 type HChildTm m = Qty -> HCtx -> HMode -> m (HTm, HTy)
 
-type HChildPat m = Qty -> HCtx -> HMode -> m (Pat, HTy)
+type HChildPat m = Qty -> HCtx -> HMode -> m (Pat, HTy, HCtx)
 
 data MatchingState m = MatchingState
   { ctx :: HCtx,
@@ -842,8 +855,8 @@ addNextConstraint ::
 addNextConstraint st param f cls = forM cls $ \case
   (Clause (cs, ctx, p :<| ps) t) -> do
     -- @@Todo: deal with implicits
-    (p', _) <- p.arg (st.qty `times` param.qty) st.ctx (Check param.ty)
-    return $ Clause (cs ++ [f p'], ctx, ps) t
+    (p', _, ctx') <- p.arg (st.qty `times` param.qty) ctx (Check param.ty)
+    return $ Clause (cs ++ [f p'], ctx', ps) t
   (Clause (_, _, Empty) _) -> error "No next pattern to add constraint to"
 
 -- Given a list of clauses C, remove the first constraint from each clause.
@@ -876,6 +889,7 @@ intro st@(MatchingState ctx q' ty cls) = do
     Nothing -> return Nothing
     -- @@Todo: if the args don't match in PiMode, insert!
     Just (Arg m' _ ()) -> do
+      debug $ "Intro with mode " ++ show m'
       ifForcePi
         q'
         ctx
@@ -1015,15 +1029,17 @@ split (MatchingState ctx q ty cls) = do
 -- Typechecking (uses the `Typechecking` module)
 
 -- Typecheck a pattern
-tcPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy)
+tcPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy, HCtx)
 tcPat c mode = do
   mode' <- traverse embedEvalHere mode
-  (tm, ty) <- enterPat $ c mode'
-  tm' <- unembedHere tm
-  ty' <- quoteUnembedHere ty
-  q <- qty
-  pat <- tmAsPat q tm'
-  return (pat, ty')
+  enterPat $ do
+     (tm, ty) <- c mode'
+     ctx' <- getCtx >>= unembedCtx
+     q <- qty
+     tm' <- unembedHere tm
+     pat <- tmAsPat q tm'
+     ty' <- quoteUnembedHere ty
+     return (pat , ty', ctx')
 
 -- Typecheck a term
 tcTm :: (Matching m) => Child m -> HMode -> m (HTm, HTy)
