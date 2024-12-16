@@ -519,6 +519,9 @@ instance (HasProjectFiles m) => Pretty m Loc where
 class (Monad m) => Logger m where
   msg :: String -> m ()
 
+  debug :: String -> m ()
+  debug x = msg $ "Debug: " ++ x
+
   warnMsg :: String -> m ()
   warnMsg x = msg $ "Warning: " ++ x
 

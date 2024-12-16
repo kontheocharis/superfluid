@@ -40,7 +40,7 @@ import Common
     nextLvl,
     ofShapes,
     spineShapes,
-    telShapes,
+    telShapes, Logger (..),
   )
 import Context
 import Context (unembedClosure1Here)
@@ -118,10 +118,11 @@ import Unelaboration (Unelab)
 import Unification (CanUnify (..), canUnifyHere)
 import Prelude hiding (cycle, pi)
 
-data MatchingError = MatchingError
+data MatchingError = MatchingError | IncompleteClauses
 
 instance (Monad m) => Pretty m MatchingError where
   pretty MatchingError = return "Matching error"
+  pretty IncompleteClauses = return "Incomplete clauses"
 
 class (Eval m, Has m Loc, Tc m) => Matching m where
   matchingError :: MatchingError -> m a
@@ -272,8 +273,8 @@ cyc d _ _ _ = hApp (HDef (knownDef (KnownCycle d))) . S.singleton . Arg Explicit
 -- type behaves like the empty context instead.
 --
 -- never : [A : Ty Γ] -> Tm Γ Empty -> Tm Γ A
-void :: HTm -> HTm
-void = HApp Explicit Zero (HDef (knownDef KnownVoid))
+void :: HTy -> HTm -> HTm
+void ty = HApp Explicit Zero (HApp Implicit Zero (HDef (knownDef KnownVoid)) ty)
 
 voidSh :: Shapes
 voidSh = Param Explicit Many (Name "_") () :<| Empty
@@ -281,8 +282,8 @@ voidSh = Param Explicit Many (Name "_") () :<| Empty
 voidCtx :: HCtx
 voidCtx = S.singleton (Param Explicit Many (Name "_") (HData (knownData KnownEmpty)))
 
-initialSub :: Shapes -> Shapes -> Sub
-initialSub vSh sh = mapSub1 vSh sh (\_ x -> fmap (\p -> Arg p.mode p.qty (void x)) sh)
+initialSub :: Shapes -> HCtx -> Sub
+initialSub vSh sh = mapSub1 vSh (telShapes sh) (\_ x -> fmap (\p -> Arg p.mode p.qty (void p.ty x)) sh)
 
 -- Definitional equality checker. Uses TC's unification.
 canConvert :: (Matching m) => HCtx -> HTm -> HTm -> m Bool
@@ -509,7 +510,7 @@ injectivity ctx ty a b = case (hGatherApps a, hGatherApps b) of
 conflict :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
   ((HCtor (c1, pp), xs), (HCtor (c2, _), ys)) | c1 /= c2 -> do
-    -- Γ ⊢ (c1 xs : D δ ξ[xs]) =? (c2 ys : D δ ξ[ys])
+    -- Γ ⊢ c1 xs =? c2 ys : D δ ξ
     --
     -- This is a conflict, so we need to return a disunifier.
     -- Make a new name and shape for the new context
@@ -528,7 +529,7 @@ conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
         S.singleton csh,
         Cannot [],
         BiSub
-          { forward = initialSub voidSh (sh :|> csh),
+          { forward = initialSub voidSh (ctx :|> csh {ty = equality ty a b}),
             backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [conf c1 c2 pp xs ys p])
           }
       )
@@ -537,7 +538,7 @@ conflict ctx ty a b = case (hGatherApps a, hGatherApps b) of
 cycle :: (Matching m) => HCtx -> HTy -> HTm -> HTm -> m (Maybe Unification)
 cycle ctx ty a b = case (a, b) of
   (_, HVar x) -> cycle ctx ty (HVar x) a
-  (HVar x, hGatherApps -> (HCtor (c, pp), xs)) -> do
+  (a'@(HVar x), b'@(hGatherApps -> (HCtor (c, pp), xs))) -> do
     -- Check if x occurs in xs, if so, then we have a cycle.
     let l = Lvl (length ctx)
     ci <- access (getCtorGlobal c)
@@ -559,7 +560,7 @@ cycle ctx ty a b = case (a, b) of
             S.singleton csh,
             Cannot [],
             BiSub
-              { forward = initialSub voidSh (sh :|> csh),
+              { forward = initialSub voidSh (ctx :|> csh {ty = equality ty a' b'}),
                 backward = mapSub1 (sh :|> csh) voidSh (\_ p -> ofShapes voidSh [cyc ci.dataGlobal pp (hApp (HCtor (c, pp)) xs) (HVar x) p])
               }
           )
@@ -745,6 +746,22 @@ ifForcePi q ctx m ty the els = runTc' q ctx $ do
     )
     (\_ _ _ _ _ -> els) -- @@Todo: errors
 
+-- Check if the context is void, and return the level of the void member.
+ctxIsVoid :: (Matching m) => HCtx -> m (Maybe Lvl)
+ctxIsVoid (ps :|> p) = do
+  ty' <- unfoldHoas Empty p.ty
+  case hGatherApps ty' of
+    (HData d, _) | d == knownData KnownEmpty -> return . Just $ ctxSize ps
+    _ -> return Nothing
+ctxIsVoid Empty = return Nothing
+
+unfoldHoas :: (Matching m) => HCtx -> HTm -> m HTm
+unfoldHoas ctx x = do
+  ctx' <- embedCtx ctx
+  enterCtx (const ctx') $ do
+    x' <- embedEvalHere x >>= unfoldHere
+    quoteUnembed (ctxSize ctx) x'
+
 -- Check if clauses C are of the form (csᵢ (pᵢ psᵢ) -> tᵢ)ᵢ
 hasNextPat :: (Matching m) => ConstrainedClauses ps ts -> m (Maybe (Arg ()))
 hasNextPat cls = do
@@ -774,11 +791,27 @@ caseTree c = do
   -- Then once we can't anymore, we split on the first-added constraint
   -- Once all the constraints are solved, we can typecheck the right-hand
   -- side of the first clause that matches.
-  let tactics = [addVar c, splitConstraint c, done c]
+  let tactics = [intro c, split c, absurd c, done c]
   result <- asum <$> sequence tactics
   case result of
     Just r -> return r
     Nothing -> error "no case tree tactic matched"
+
+-- There are no clauses left.
+--
+-- If we are in a `void` context (Γ = Γ₁(p : ⊥)Γ₂) then we can emit the
+-- void eliminator to get the goal.
+--
+-- Otherwise, pattern matching is incomplete.
+absurd :: (Matching m) => MatchingState m -> m (Maybe HTm)
+absurd (MatchingState ctx _ ty cls) = do
+  case cls of
+    [] -> do -- @@Todo: handle impossible
+      voidLvl <- ctxIsVoid ctx
+      case voidLvl of
+        Just l -> return . Just $ void ty (HVar l)
+        Nothing -> matchingError IncompleteClauses
+    _ -> return Nothing
 
 -- There is no next pattern and the constraints have been solved:
 --
@@ -836,8 +869,8 @@ addFirstIntro _ [] = error "No clauses to add introduction to"
 --    Γ(x : A) ⊢ C(x : A) ~> e : B[x]
 --   -----------------------------------------
 --    Γ ⊢ C ~> (λ x . e[x]) : (x : A) -> B
-addVar :: (Matching m) => MatchingState m -> m (Maybe HTm)
-addVar st@(MatchingState ctx q' ty cls) = do
+intro :: (Matching m) => MatchingState m -> m (Maybe HTm)
+intro st@(MatchingState ctx q' ty cls) = do
   ps <- hasNextPat cls
   case ps of
     Nothing -> return Nothing
@@ -869,8 +902,8 @@ addVar st@(MatchingState ctx q' ty cls) = do
 -- - If pᵢ is a variable (@@Check for all i?), we can use the solution rule.
 -- - Otherwise we need to generate an eliminator that matches the outer layer of
 --   all the pᵢs and recurses on the inner layers.
-splitConstraint :: (Matching m) => MatchingState m -> m (Maybe HTm)
-splitConstraint (MatchingState ctx q ty cls) = do
+split :: (Matching m) => MatchingState m -> m (Maybe HTm)
+split (MatchingState ctx q ty cls) = do
   case cls of
     Clause (co : _, _, _) _ : _ -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
@@ -882,6 +915,9 @@ splitConstraint (MatchingState ctx q ty cls) = do
         Just <$> caseTree (MatchingState ctx q ty (addFirstIntro (p {name = n}) . removeFirstConstraint $ cls))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
+        pco <- pretty co
+        debug $ "Splitting on constraint: " ++ pco
+
         -- Get the current subject type, i.e. D δ ψ
         (d, delta, psi) <- forceData ctx p.ty
         (di, dc) <- access (getDataGlobal' d)

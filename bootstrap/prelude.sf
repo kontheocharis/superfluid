@@ -13,9 +13,14 @@ data Bool : Type {
   false : Bool
 }
 
-def and : Bool -> Bool -> Bool {
-  true x => x,
-  _ _ => false
+data IsBool : Bool -> Type {
+  is-true : IsBool true,
+  is-false : IsBool false
+}
+
+def weird : (b : Bool) -> IsBool b -> Bool {
+  true is-true => true,
+  false is-false => false
 }
 
 -- data Nat : Type {
