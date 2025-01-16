@@ -42,7 +42,7 @@ import Globals
     Sig,
     dataGlobalFromInfo,
     getCtorGlobal,
-    getDataGlobal,
+    getDataGlobal, getDataGlobal',
   )
 import Syntax
   ( Closure (..),
@@ -146,7 +146,9 @@ hCtorReturnIndices :: (Constr m) => CtorGlobalInfo -> m HCtorReturnIndices
 hCtorReturnIndices ci = do
   let (_, sRet) = sGatherPis ci.ty
   let (_, sRetSp) = sGatherApps sRet
-  return $ \ps is -> mapSpine (unembed (spineToEnv (ps <> is))) sRetSp
+  dd <- access (getDataGlobal ci.dataGlobal)
+  let sRetIndices = S.drop (length dd.params) sRetSp
+  return $ \ps is -> mapSpine (unembed (spineToEnv (ps <> is))) sRetIndices
 
 type HMethodTy = Spine HTm -> HTm -> HTm
 

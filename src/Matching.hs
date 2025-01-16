@@ -343,7 +343,7 @@ unifyPLSpines ctx HEmpty Empty Empty = do
           backward = idSub (telShapes ctx)
         }
     )
-unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ q x :<| xs) (Arg _ q' y :<| ys) | q == q' = do
+unifyPLSpines ctx (HWithParam _ _ _ ty ts) (Arg _ _ x :<| xs) (Arg _ _ y :<| ys) = do
   -- Solving unify Γ ⊢ (x, ..xs) = (y, ..ys) : (_ : A)Δ
 
   -- (Γ', σ : Sub Γ' Γ(χ = y)) <- unify Γ A x y
@@ -950,7 +950,7 @@ split (MatchingState ctx q ty cls) = do
           let psix' = cc.returnIndices delta pi :|> Arg p.mode p.qty (hApp (HCtor (c, delta)) pi)
 
           -- Create the telescope (ρ : Ψ)(x : D δ ρ)
-          let psiTel = extendTel dc.params (Param p.mode p.qty p.name . hApp (HData d))
+          let psiTel = extendTel (dc.indices delta) (Param p.mode p.qty p.name . hApp (HData d))
 
           traceM $ "Prev context is "
           pretty (hCtxToTel ctx) >>= traceM
@@ -978,7 +978,7 @@ split (MatchingState ctx q ty cls) = do
           traceM "This is by bi-substitution: "
           pretty s.forward >>= traceM . ("Forward: " ++)
           pretty s.backward >>= traceM . ("Backward: " ++)
-          cls' <- fmap catMaybes $ mapM (refineClause s.backward) cls
+          cls' <- fmap catMaybes $ mapM (refineClause s.forward) cls
 
           -- Build the rest of the clause in Γ'', which will first give:
           --    Γ'' |- e : T σ .

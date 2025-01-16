@@ -23,7 +23,7 @@ data Maybe (A : Type) : Type {
   just : A -> Maybe A
 }
 
-def get : Maybe Bool -> Bool {
+def get : (a : Maybe Bool) -> Bool {
   nothing => false,
   (just b) => b
 }
