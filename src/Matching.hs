@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -28,6 +29,7 @@ import Common
     Has (..),
     HasNameSupply (uniqueName),
     Loc,
+    Logger (..),
     Lvl (..),
     Name (..),
     Param (..),
@@ -39,8 +41,9 @@ import Common
     mapSpine,
     nextLvl,
     ofShapes,
+    plainShape,
     spineShapes,
-    telShapes, Logger (..),
+    telShapes,
   )
 import Context
 import Context (unembedClosure1Here)
@@ -74,6 +77,7 @@ import Globals
     knownCtor,
     knownData,
     knownDef,
+    splitParamsAndIndices,
   )
 import Printing (Pretty (..))
 import Substitution
@@ -88,10 +92,12 @@ import Substitution
     hoistBinders,
     hoistBinders',
     idSub,
+    liftSub,
     liftSubN,
     mapSub1,
     mapSubN,
     proj,
+    replaceVar,
   )
 import Syntax
   ( Case (..),
@@ -640,40 +646,73 @@ data SimpleConstraint = SimpleConstraint
     param :: Param HTy
   }
 
-type Constraints = [Constraint]
+data HList i t = HNil | HCons t (i -> HList i t)
 
-type SimpleConstraints = [SimpleConstraint]
+instance Functor (HList i) where
+  fmap f HNil = HNil
+  fmap f (HCons x xs) = HCons (f x) (fmap f . xs)
+
+instance Semigroup (HList i t) where
+  HNil <> xs = xs
+  HCons x xs <> ys = HCons x (\i -> xs i <> ys)
+
+instance Monoid (HList i t) where
+  mempty = HNil
+
+type Constraints = HList HTm Constraint
+
+type ConstraintSet = HList HTm Constraint
+
+type SimpleConstraints = HList HTm SimpleConstraint
 
 instance Subst Constraint where
-  sub s (Constraint l x p q) = Constraint l (sub s x) p q -- @@Todo: subst in pat or remove data params from pat!
-  occurs l f (Constraint _ y _ _) = occurs l f y -- @@Todo: occurs in pat??
+  sub s (Constraint l x p q) = Constraint l (sub s x) p (sub s q)
+  occurs l f (Constraint _ x p _) = occurs l f x || occurs l f p
+
+instance Subst Constraints where
+  sub _ HNil = HNil
+  sub s (HCons x xs) = HCons (sub s x) (sub (liftSub plainShape s) . xs)
+  occurs l f HNil = False -- @@OhNo!
 
 subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
 subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
 
+subSimpleConstraints :: Sub -> SimpleConstraints -> Constraints
+subSimpleConstraints s HNil = HNil
+subSimpleConstraints s (HCons x xs) = HCons (subSimpleConstraint s x) (subSimpleConstraints (liftSub plainShape s) . xs)
+
 simplifyConstraints :: (Matching m) => Constraints -> m (Maybe (SimpleConstraints, HCtx))
-simplifyConstraints (c : cs) = do
+simplifyConstraints (HCons c cs) = do
   cs' <- simplifyConstraint c
   case cs' of
     Just (cs'', is) -> do
-      rest <- simplifyConstraints cs
+      rest <- simplifyConstraints (cs c.lhs)
       case rest of
-        Just (restCs, restIs) -> return . Just $ (cs'' ++ restCs, is <> restIs)
+        Just (restCs, restIs) -> return . Just $ (cs'' <> restCs, is <> restIs)
         Nothing -> return Nothing
     Nothing -> return Nothing
-simplifyConstraints [] = return (Just ([], Empty))
+simplifyConstraints HNil = return (Just (HNil, Empty))
+
+zipToConstraints :: Lvl -> Spine HTm -> Spine Pat -> HTel -> Constraints
+zipToConstraints l (Arg _ _ x :<| xs) (Arg _ _ p :<| ps) (HWithParam m q n ty tel) =
+  HCons (Constraint l x p (Param m q n ty)) (zipToConstraints (nextLvl l) xs ps . tel)
+zipToConstraints _ Empty Empty HEmpty = HNil
+zipToConstraints _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
 simplifyConstraint :: (Matching m) => Constraint -> m (Maybe (SimpleConstraints, HCtx))
 simplifyConstraint co = do
   case co of
-    Constraint l (HVar x) p q -> return . Just $ ([SimpleConstraint l x p q], Empty)
-    Constraint l (hGatherApps -> (HCtor (c, _), sp)) (CtorP (c', _) sp') q
-      | c == c' ->
-          simplifyConstraints
-            (zipWith (\x y -> Constraint l x.arg y.arg q) (toList sp) (toList sp'))
+    Constraint l (HVar x) p q -> return . Just $ (HCons (SimpleConstraint l x p q) (const HNil), Empty)
+    Constraint l (hGatherApps -> (HCtor (c, _), sp)) (CtorP (c', _) sp') (Param {ty = (hGatherApps -> (HData d, dsp))})
+      | c == c' -> do
+          (_, dc) <- access (getDataGlobal' d)
+          (_, cc) <- access (getCtorGlobal' c)
+          let (dpp, _) = splitParamsAndIndices dc dsp
+          let ctorArgs = cc.args dpp
+          simplifyConstraints (zipToConstraints l sp sp' ctorArgs)
       | otherwise -> return Nothing
     Constraint _ _ (LvlP _ n _) p -> do
-      return . Just $ ([], Empty :|> p {name = n})
+      return . Just $ (HNil, Empty :|> p {name = n})
     _ -> do
       co' <- pretty co
       error $ "invalid constraint: " ++ co'
@@ -686,9 +725,9 @@ refineClause s cl' = case cl' of
     enterCtx (const pctx) . traceM $ "Refining constraints : " ++ show ps'
     traceM $ "Substitution is : "
     pretty s >>= traceM
-    let csn = map (subSimpleConstraint s) cs
-    mapM pretty csn >>= traceM . intercalate " "
+    let csn = subSimpleConstraints s cs
     cs' <- simplifyConstraints csn
+    traceM $ "Substitution done"
     case cs' of
       Just (cs'', is) -> do
         let ctx' = sub s (ctx <> is)
@@ -819,7 +858,8 @@ caseTree c = do
 absurd :: (Matching m) => MatchingState m -> m (Maybe HTm)
 absurd (MatchingState ctx _ ty cls) = do
   case cls of
-    [] -> do -- @@Todo: handle impossible
+    [] -> do
+      -- @@Todo: handle impossible
       voidLvl <- ctxIsVoid ctx
       case voidLvl of
         Just l -> return . Just $ void ty (HVar l)
@@ -834,13 +874,17 @@ absurd (MatchingState ctx _ ty cls) = do
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
 done (MatchingState _ q ty cls) = do
   case cls of
-    Clause ([], ctx, Empty) (Just tm) : _ -> do
+    Clause (HNil, ctx, Empty) (Just tm) : _ -> do
       -- @@Todo: qty
       ctx' <- embedCtx ctx
       pretty ctx' >>= traceM
       (tm', _) <- tm q ctx (Check ty)
       return (Just tm')
     _ -> return Nothing
+
+hSnoc :: (Monoid (a i), Monad a) => HList i t -> (a i -> t) -> HList i t
+hSnoc HNil f = HCons (f mempty) (const HNil)
+hSnoc (HCons x xs) f = HCons x (\i -> hSnoc (xs i) (\is -> f (is <> return i)))
 
 -- Given a 'constraint scheme' (p . [x = p]), i.e. a constraint parametrized by
 -- a pattern, and an argument type `ty`,  apply this constraint to the first
@@ -849,26 +893,21 @@ addNextConstraint ::
   (Matching m) =>
   MatchingState m ->
   Param HTy ->
-  (Pat -> SimpleConstraint) ->
+  (Pat -> HCtx -> SimpleConstraint) ->
   ConstrainedClauses (HChildPat m) (HChildTm m) ->
   m (ConstrainedClauses (HChildPat m) (HChildTm m))
 addNextConstraint st param f cls = forM cls $ \case
   (Clause (cs, ctx, p :<| ps) t) -> do
     -- @@Todo: deal with implicits
     (p', _, ctx') <- p.arg (st.qty `times` param.qty) ctx (Check param.ty)
-    return $ Clause (cs ++ [f p'], ctx', ps) t
+    return $ Clause (hSnoc cs (\ts -> f ctx' p'), ctx', ps) t
   (Clause (_, _, Empty) _) -> error "No next pattern to add constraint to"
 
 -- Given a list of clauses C, remove the first constraint from each clause.
 removeFirstConstraint :: ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
 removeFirstConstraint = map $ \case
-  (Clause (_ : cs, ctx, ps) t) -> Clause (cs, ctx, ps) t
-  (Clause ([], _, _) _) -> error "No constraints to remove"
-
--- Add an introduction to the first clause
-addFirstIntro :: Param HTy -> ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
-addFirstIntro p (Clause (cs, ctx, ps) t : cls) = Clause (cs, ctx :|> p, ps) t : cls
-addFirstIntro _ [] = error "No clauses to add introduction to"
+  (Clause (HCons co cs, ctx, ps) t) -> Clause (cs (HVar co.lhs), ctx :|> co.param, ps) t
+  (Clause (HNil, _, _) _) -> error "No constraints to remove"
 
 -- The goal computes to a Π-type, and there is a next pattern:
 --
@@ -919,14 +958,14 @@ intro st@(MatchingState ctx q' ty cls) = do
 split :: (Matching m) => MatchingState m -> m (Maybe HTm)
 split (MatchingState ctx q ty cls) = do
   case cls of
-    Clause (co : _, _, _) _ : _ -> case co of
+    Clause (HCons co _, _, _) _ : _ -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
       SimpleConstraint _ _ (LvlP _ n _) p -> do
         -- All we need to do is remove the constraint from the clauses. @@Check: is this right?
         -- @@Todo: same quantity check?
         traceM $ " Got constraint name " ++ show n
-        Just <$> caseTree (MatchingState ctx q ty (addFirstIntro (p {name = n}) . removeFirstConstraint $ cls))
+        Just <$> caseTree (MatchingState ctx q ty (removeFirstConstraint cls))
       -- 2. This constraint is of the form Γx (x : D δ ψ) xΓ ⊢ [(x : D δ ψ) = (ck πk : D δ (ξk[δ,πk]))]
       SimpleConstraint _ x (CtorP _ _) p -> do
         pco <- pretty co
@@ -1033,13 +1072,13 @@ tcPat :: (Matching m) => Child m -> HMode -> m (Pat, HTy, HCtx)
 tcPat c mode = do
   mode' <- traverse embedEvalHere mode
   enterPat $ do
-     (tm, ty) <- c mode'
-     ctx' <- getCtx >>= unembedCtx
-     q <- qty
-     tm' <- unembedHere tm
-     pat <- tmAsPat q tm'
-     ty' <- quoteUnembedHere ty
-     return (pat , ty', ctx')
+    (tm, ty) <- c mode'
+    ctx' <- getCtx >>= unembedCtx
+    q <- qty
+    tm' <- unembedHere tm
+    pat <- tmAsPat q tm'
+    ty' <- quoteUnembedHere ty
+    return (pat, ty', ctx')
 
 -- Typecheck a term
 tcTm :: (Matching m) => Child m -> HMode -> m (HTm, HTy)
@@ -1058,7 +1097,7 @@ clausesWithEmptyConstraints ::
   ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
   let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (tcPat p m))) ps
-   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause ([], Empty, ps') t'
+   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause (HNil, Empty, ps') t'
 
 -- Typecheck a list of syntax clauses, producing a
 -- corresponding case tree using primitive eliminators.

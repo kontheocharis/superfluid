@@ -26,6 +26,7 @@ module Substitution
     hoistBinders',
     shapesToBinds,
     hCtxToTel,
+    replaceVar,
   )
 where
 
@@ -130,6 +131,10 @@ liftSubN n s =
         let beginning = S.length s.domSh
          in s.mapping (S.take beginning sp) <> S.drop beginning sp
     )
+
+-- Replace
+replaceVar :: Shapes -> Shapes -> Lvl -> HTm -> Sub
+replaceVar dom cod l t = Sub dom cod $ \sp -> S.update l.unLvl (Arg Explicit Many t) sp
 
 getVar :: Lvl -> Sub -> Arg HTm
 getVar x s = let ms = getMembers s in (fromJust $ ms S.!? x.unLvl)
@@ -294,4 +299,4 @@ instance (Monad m, Has m [Name], Pretty m HTm) => Pretty m HTel where
         n' <- pretty n
         ns :: [Name] <- view
         f' <- enter (++ [n]) $ pretty' (f (HVar (Lvl (length ns))))
-        return $ show m ++ " " ++ show q ++ " " ++ n' ++ " " ++ a' ++ if null f' then "" else ", " ++ f'
+        return $ show m ++ show q ++ n' ++ " : " ++ a' ++ if null f' then "" else ", " ++ f'

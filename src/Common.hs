@@ -65,6 +65,7 @@ module Common
     Shape,
     Shapes,
     ofShapes,
+    plainShape,
   )
 where
 
@@ -346,6 +347,9 @@ spineShapes = fmap (\(Arg m q _) -> Param m q (Name "_") ())
 
 ofShapes :: Shapes -> [a] -> Spine a
 ofShapes sh xs = foldr (\(Param m q _ (), t) sp -> Arg m q t :<| sp) Empty (zip (toList sh) xs)
+
+plainShape :: Shape
+plainShape = Param Explicit Zero (Name "_") ()
 
 -- Metas
 

@@ -51,6 +51,7 @@ module Globals
     addInstanceItem,
     getCtorGlobal',
     getDataGlobal',
+    splitParamsAndIndices,
   )
 where
 
@@ -73,6 +74,8 @@ import Data.Maybe (fromJust)
 import Data.Set (Set)
 import qualified Data.Set as S
 import Syntax (Closure, HTel, HTm, HTy, Pat, STm (..), STy, VTm (..), VTy)
+import Data.Sequence (Seq)
+import qualified Data.Sequence as SEQ
 
 data CtorGlobalInfo = CtorGlobalInfo
   { name :: Name,
@@ -111,6 +114,9 @@ data DataConstructions = DataConstructions
     indices :: Spine HTm -> HTel,
     indicesArity :: Tel ()
   }
+
+splitParamsAndIndices :: DataConstructions -> Seq a -> (Seq a, Seq a)
+splitParamsAndIndices dc = SEQ.splitAt (SEQ.length dc.paramsArity)
 
 data DefGlobalInfo = DefGlobalInfo
   { name :: Name,
