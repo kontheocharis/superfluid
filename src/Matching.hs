@@ -619,7 +619,7 @@ deletion ctx ty a b = do
 
 type ConstrainedClauses pat tm = [ConstrainedClause (Spine pat) tm]
 
-type ConstrainedClause pats tm = Clause (SimpleConstraints, HCtx, pats) tm
+type ConstrainedClause pats tm = Clause (SimpleConstraintSet, HCtx, pats) tm
 
 -- Constraints
 
@@ -661,9 +661,11 @@ instance Monoid (HList i t) where
 
 type Constraints = HList HTm Constraint
 
-type ConstraintSet = HList HTm Constraint
-
 type SimpleConstraints = HList HTm SimpleConstraint
+
+type SimpleConstraintSet = [SimpleConstraint]
+
+type ConstraintSet = [Constraint]
 
 instance Subst Constraint where
   sub s (Constraint l x p q) = Constraint l (sub s x) p (sub s q)
@@ -677,11 +679,10 @@ instance Subst Constraints where
 subSimpleConstraint :: Sub -> SimpleConstraint -> Constraint
 subSimpleConstraint s (SimpleConstraint l x p q) = sub s (Constraint l (HVar x) p q)
 
-subSimpleConstraints :: Sub -> SimpleConstraints -> Constraints
-subSimpleConstraints s HNil = HNil
-subSimpleConstraints s (HCons x xs) = HCons (subSimpleConstraint s x) (subSimpleConstraints (liftSub plainShape s) . xs)
+subSimpleConstraints :: Sub -> SimpleConstraintSet -> ConstraintSet
+subSimpleConstraints s = map (subSimpleConstraint s)
 
-simplifyConstraints :: (Matching m) => Constraints -> m (Maybe (SimpleConstraints, HCtx))
+simplifyConstraints :: (Matching m) => Constraints -> m (Maybe (SimpleConstraintSet, HCtx))
 simplifyConstraints (HCons c cs) = do
   cs' <- simplifyConstraint c
   case cs' of
@@ -691,7 +692,7 @@ simplifyConstraints (HCons c cs) = do
         Just (restCs, restIs) -> return . Just $ (cs'' <> restCs, is <> restIs)
         Nothing -> return Nothing
     Nothing -> return Nothing
-simplifyConstraints HNil = return (Just (HNil, Empty))
+simplifyConstraints HNil = return (Just ([], Empty))
 
 zipToConstraints :: Lvl -> Spine HTm -> Spine Pat -> HTel -> Constraints
 zipToConstraints l (Arg _ _ x :<| xs) (Arg _ _ p :<| ps) (HWithParam m q n ty tel) =
@@ -699,10 +700,10 @@ zipToConstraints l (Arg _ _ x :<| xs) (Arg _ _ p :<| ps) (HWithParam m q n ty te
 zipToConstraints _ Empty Empty HEmpty = HNil
 zipToConstraints _ _ _ _ = error "Mismatching spines should never occur in well-typed terms"
 
-simplifyConstraint :: (Matching m) => Constraint -> m (Maybe (SimpleConstraints, HCtx))
+simplifyConstraint :: (Matching m) => Constraint -> m (Maybe (SimpleConstraintSet, HCtx))
 simplifyConstraint co = do
   case co of
-    Constraint l (HVar x) p q -> return . Just $ (HCons (SimpleConstraint l x p q) (const HNil), Empty)
+    Constraint l (HVar x) p q -> return . Just $ ([SimpleConstraint l x p q], Empty)
     Constraint l (hGatherApps -> (HCtor (c, _), sp)) (CtorP (c', _) sp') (Param {ty = (hGatherApps -> (HData d, dsp))})
       | c == c' -> do
           (_, dc) <- access (getDataGlobal' d)
@@ -712,7 +713,7 @@ simplifyConstraint co = do
           simplifyConstraints (zipToConstraints l sp sp' ctorArgs)
       | otherwise -> return Nothing
     Constraint _ _ (LvlP _ n _) p -> do
-      return . Just $ (HNil, Empty :|> p {name = n})
+      return . Just $ ([], Empty :|> p {name = n})
     _ -> do
       co' <- pretty co
       error $ "invalid constraint: " ++ co'
@@ -874,7 +875,7 @@ absurd (MatchingState ctx _ ty cls) = do
 done :: (Matching m) => MatchingState m -> m (Maybe HTm)
 done (MatchingState _ q ty cls) = do
   case cls of
-    Clause (HNil, ctx, Empty) (Just tm) : _ -> do
+    Clause ([], ctx, Empty) (Just tm) : _ -> do
       -- @@Todo: qty
       ctx' <- embedCtx ctx
       pretty ctx' >>= traceM
@@ -900,14 +901,14 @@ addNextConstraint st param f cls = forM cls $ \case
   (Clause (cs, ctx, p :<| ps) t) -> do
     -- @@Todo: deal with implicits
     (p', _, ctx') <- p.arg (st.qty `times` param.qty) ctx (Check param.ty)
-    return $ Clause (hSnoc cs (\ts -> f ctx' p'), ctx', ps) t
+    return $ Clause (cs ++ [f ctx' p'], ctx', ps) t
   (Clause (_, _, Empty) _) -> error "No next pattern to add constraint to"
 
 -- Given a list of clauses C, remove the first constraint from each clause.
 removeFirstConstraint :: ConstrainedClauses (HChildPat m) (HChildTm m) -> ConstrainedClauses (HChildPat m) (HChildTm m)
 removeFirstConstraint = map $ \case
-  (Clause (HCons co cs, ctx, ps) t) -> Clause (cs (HVar co.lhs), ctx :|> co.param, ps) t
-  (Clause (HNil, _, _) _) -> error "No constraints to remove"
+  (Clause (co : cs, ctx, ps) t) -> Clause (cs, ctx :|> co.param, ps) t
+  (Clause ([], _, _) _) -> error "No constraints to remove"
 
 -- The goal computes to a Π-type, and there is a next pattern:
 --
@@ -941,7 +942,7 @@ intro st@(MatchingState ctx q' ty cls) = do
             let s t = extendSub (idSub ctxShapes) (Param m q x ()) (hoistBinders Empty ctxShapes t)
             let ctx' = ctx :|> Param m q x a
             let b' = b (HVar (lastVar ctx'))
-            cls' <- addNextConstraint st p (\pt -> SimpleConstraint (ctxSize ctx') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
+            cls' <- addNextConstraint st p (\pt ctx'' -> SimpleConstraint (ctxSize ctx'') (lastVar ctx') pt p) cls -- implicit weakening everywhere!
             rest <- caseTree (MatchingState ctx' q' b' cls')
             return . Just $ HLam m q x (\t -> sub (s t) rest)
         )
@@ -958,7 +959,7 @@ intro st@(MatchingState ctx q' ty cls) = do
 split :: (Matching m) => MatchingState m -> m (Maybe HTm)
 split (MatchingState ctx q ty cls) = do
   case cls of
-    Clause (HCons co _, _, _) _ : _ -> case co of
+    Clause (co : _, _, _) _ : _ -> case co of
       -- 1. This constraint is of the form Γ ⊢ [x = x'], where x and x' are variables.
       -- @@Check:  is it appropriate to just look at the first clause?
       SimpleConstraint _ _ (LvlP _ n _) p -> do
@@ -1097,7 +1098,7 @@ clausesWithEmptyConstraints ::
   ConstrainedClauses (HChildPat m) (HChildTm m)
 clausesWithEmptyConstraints cls = flip map cls $ \(Clause ps r) ->
   let ps' = fmap (fmap (\p q ctx m -> runTc' q ctx (tcPat p m))) ps
-   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause (HNil, Empty, ps') t'
+   in let t' = fmap (\t q ctx m -> runTc' q ctx (tcTm t m)) r in Clause ([], Empty, ps') t'
 
 -- Typecheck a list of syntax clauses, producing a
 -- corresponding case tree using primitive eliminators.
