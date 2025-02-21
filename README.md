@@ -20,12 +20,13 @@ It is meant as a tool for experimenting with efficient compilation of dependent 
 
 A brief overview of its features:
 
-- Dependent function types `(a : A) -> B`
-- Implicit function types `[a : A] -> B`
-- Instance function types, which are automatically resolved `[[Monad M]] -> A -> M A`
+- Dependent function types `(a : A) -> B`.
+- Implicit function types `[a : A] -> B`.
+- Instance function types, which are automatically resolved `[[Monad M]] -> A -> M A`.
 - Access to the universe `Type`, with `Type : Type` (no universe levels).
-- Quantitative type theory with 1, 0, \omega
+- Quantitative type theory with 1, 0, \omega.
 - Whitespace, insensitive; grouping is done with braces `{}`.
+- Typed holes with `?foo`.
 
 ## Basic syntax
 
@@ -209,6 +210,33 @@ the generated code is written to a file with the same name as the input file, bu
 
 This can then be run with Node.js. Often you might need a larger stack size.
 For example, `node --stack-size=200000 examples/paper/fizzbuzz.sf.js`.
+
+## Examples
+
+The `bootstrap/prelude` already contains quite a few examples of custom representations, including:
+
+- `Fin` and `Nat` as JS numbers, with representations for common numeric operations.
+- `List` as JS arrays
+- `ByteList` and `ByteVec` as JS buffers
+- `String` as JS strings
+- `Bool` as JS booleans
+
+Also see the `examples/` directory for:
+
+- `paper/refinement.sf`: Zero-cost conversion between lists and vectors (the coherence rules are missing).
+- `paper/fizzbuzz.sf`: Just a plain fizzbuzz implementation, but actually runs fast due to `Nat` representation.
+- `paper/amicable.sf`: Finding amicable numbers. Again, runs fast due to `Nat` representation.
+  However we can run the function at compile-time too, which doesn't have access
+  to the fast `Nat` representation, and thus is really slow (but can do symbolic
+  theorem proving!).
+- `paper/binary.sf`: Storing player and inventory data structures as a
+   contiguous byte buffer using representations (WIP).
+- `paper/network.sf`: UDP buffers with zero-copy serialization and
+   deserialization into records (WIP).
+
+I have also written day 1 of Advent of Code 2024 Superfluid: <https://github.com/kontheocharis/advent-of-code-2024>.
+
+More examples coming very soon.
 
 # Acknowledgments
 

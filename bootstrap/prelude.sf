@@ -1146,32 +1146,3 @@ prim set-cell : [A : Type] -> Cell A -> A -> IO ()
 def modify-cell : [A : Type] -> Cell A -> (A -> A) -> IO () {
   \cell f => io-bind (get-cell cell) (\x => set-cell cell (f x))
 }
-
--- data HttpRequest : Type {
---   http-request : (
---     method : String,
---     url : String,
---     header : String -> Maybe String,
---     body : String,
---   ) -> HttpRequest
--- }
-
--- data HttpResponse : Type {
---   http-response : (
---     status : Nat,
---     headers : List (String * String),
---     body : String,
---   ) -> HttpResponse
--- }
-
--- data HttpServer : Type {
---   http-server : (port : Nat) -> (handler : (url : String, req : HttpRequest) -> IO HttpResponse) -> HttpServer
--- }
-
--- def launch-http-server : HttpServer -> IO () {
---   \case {
---     http-server port handler => {
---       ?launch-http-server
---     }
---   }
--- }
