@@ -8,7 +8,7 @@ Requirements: `stack`.
 
 ```
 git clone https://github.com/superfluid-lang/superfluid.git
-stack install
+stack build
 ```
 
 Then run `stack run -- -h` to see the available options.
