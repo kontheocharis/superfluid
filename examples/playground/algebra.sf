@@ -1,0 +1,18 @@
+
+data Conv (A : Type) (B : Type) : Type {
+  conv : (A -> B) -> Conv A B
+}
+
+def the : (A : Type) -> [[A]] -> A {
+  \A [[a]] => a
+}
+
+def convert : [A B : Type] [[Conv A B]] -> A -> B {
+  \[[conv]] => case conv {
+    conv f => f,
+  }
+}
+
+def boolToNat : Conv Bool Nat {
+
+}

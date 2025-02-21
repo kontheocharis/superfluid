@@ -84,7 +84,7 @@ data PiMode
   = Implicit
   | Explicit
   | Instance
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 instance Show PiMode where
   show Implicit = "implicit"
@@ -105,7 +105,7 @@ data WithNames a = WithNames {names :: [Name], value :: a}
 -- | A pattern clause, generic over the syntax types
 data Clause p t
   = Clause {pat :: p, branch :: Maybe t}
-  deriving (Eq, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 pattern Possible :: p -> t -> Clause p t
 pattern Possible p t = Clause p (Just t)
@@ -133,7 +133,7 @@ data Lit t
   | CharLit Char
   | NatLit Natural
   | FinLit Natural t
-  deriving (Eq, Data, Typeable, Show, Functor, Traversable, Foldable)
+  deriving (Eq, Ord, Data, Typeable, Show, Functor, Traversable, Foldable)
 
 composeZ :: Int -> (a -> a) -> (a -> a) -> a -> a
 composeZ 0 _ _ = id
@@ -280,7 +280,7 @@ membersIn (Lvl i) (Lvl l) = map Lvl [i .. i + l - 1]
 
 -- Spines and arguments
 
-data Arg t = Arg {mode :: PiMode, qty :: Qty, arg :: t} deriving (Eq, Show, Functor, Traversable, Foldable)
+data Arg t = Arg {mode :: PiMode, qty :: Qty, arg :: t} deriving (Eq, Ord, Show, Functor, Traversable, Foldable)
 
 type Spine t = Seq (Arg t)
 
@@ -326,19 +326,19 @@ telToBinds = toList . fmap (\(Param _ q n _) -> (q, n))
 
 -- Metas
 
-newtype MetaVar = MetaVar {unMetaVar :: Int} deriving (Eq, Show)
+newtype MetaVar = MetaVar {unMetaVar :: Int} deriving (Eq, Show, Ord)
 
 -- Globals
 
-newtype CtorGlobal = CtorGlobal {globalName :: Name} deriving (Eq, Show)
+newtype CtorGlobal = CtorGlobal {globalName :: Name} deriving (Eq, Show, Ord)
 
-newtype DataGlobal = DataGlobal {globalName :: Name} deriving (Eq, Show)
+newtype DataGlobal = DataGlobal {globalName :: Name} deriving (Eq, Show, Ord)
 
-newtype DefGlobal = DefGlobal {globalName :: Name} deriving (Eq, Show)
+newtype DefGlobal = DefGlobal {globalName :: Name} deriving (Eq, Show, Ord)
 
-newtype PrimGlobal = PrimGlobal {globalName :: Name} deriving (Eq, Show)
+newtype PrimGlobal = PrimGlobal {globalName :: Name} deriving (Eq, Show, Ord)
 
-data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal | PrimGlob PrimGlobal deriving (Eq, Show)
+data Glob = CtorGlob CtorGlobal | DataGlob DataGlobal | DefGlob DefGlobal | PrimGlob PrimGlobal deriving (Eq, Show, Ord)
 
 globName :: Glob -> Name
 globName (CtorGlob g) = g.globalName
@@ -348,7 +348,7 @@ globName (PrimGlob g) = g.globalName
 
 -- Tags
 
-data Tag = UnfoldTag deriving (Eq, Ord, Enum, Bounded)
+data Tag = InstanceTag | UnfoldTag deriving (Eq, Ord, Enum, Bounded)
 
 instance (Monad m) => Pretty m Tag where
   pretty t = return $ "#" ++ show t
@@ -358,6 +358,7 @@ instance (Monad m) => Pretty m (Set Tag) where
 
 instance Show Tag where
   show UnfoldTag = "unfold"
+  show InstanceTag = "instance"
 
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name
@@ -431,7 +432,7 @@ instance (Pretty m a) => Pretty m (Spine a) where
   pretty Empty = return ""
   pretty (a :<| Empty) = pretty a
   pretty (a :<| sp) = do
-    a' <- pretty a
+    a' <- singlePretty a
     sp' <- pretty sp
     return $ a' ++ " " ++ sp'
 

@@ -9,6 +9,15 @@ data Bool : Type {
   false : Bool
 }
 
+
+-- -- General primitives
+
+prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
+
+prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
+
+prim conjure : (0 A : Type) -> A
+
 -- Relevant sigma
 
 data Sigma (A : Type, B : A -> Type) : Type {
@@ -18,6 +27,8 @@ data Sigma (A : Type, B : A -> Type) : Type {
 data Equal [A : Type] : A -> A -> Type {
   refl : [x : A] -> Equal x x
 }
+
+prim trust-me : [A : Type, x : A, y : A] -> Equal x y
 
 #unfold
 def dup : [A : Type] -> A -> A * A {
@@ -76,9 +87,13 @@ def if-then-else : [A : Type] -> Bool -> (Unit -> A) -> (Unit -> A) -> A {
   }
 }
 
-prim trust-me : [A : Type, x : A, y : A] -> Equal x y
+def transport-repr : (E : Type -> Type) -> [A : Type] -> E A -> E (repr A) {
+  \E [A] x => unsafe-cast (E (repr A)) x
+}
 
-prim conjure : (0 A : Type) -> A
+def transport-unrepr : (E : Type -> Type) -> [A : Type] -> E (repr A) -> E A {
+  \E [A] x => unsafe-cast (E A) x
+}
 
 -- -- JS primitives
 
@@ -105,6 +120,8 @@ prim JsString : Type
 prim js-null : JsNull
 
 prim js-undefined : JsUndefined
+
+prim js-optional-case : [A B : Type] -> B -> (A -> B) -> JsUnion A JsNull -> B
 
 prim js-true : JsBool
 
@@ -136,6 +153,10 @@ prim js-slice : [T : Type] -> JsArray T -> JsNumber -> JsNumber -> JsArray T
 
 prim js-length : [T : Type] -> JsArray T -> JsUint
 
+prim js-sort : [T : Type] -> (T -> T -> JsNumber) -> JsArray T -> JsArray T
+
+prim js-filter : [T : Type] -> (T -> JsBool) -> JsArray T -> JsArray T
+
 prim js-map : [A B : Type] -> (a : JsArray A) -> ((A * JsBoundedUint (js-length a)) -> B) -> JsArray B
 
 prim js-reduce : [T C : Type] -> (C -> T -> C) -> C -> JsArray T -> C
@@ -145,6 +166,8 @@ prim js-index : [T : Type] -> (a : JsArray T) -> JsBoundedUint (js-length a) -> 
 prim js-if-bounded : [A : Type] -> JsUint -> (n : JsUint) -> (JsBoundedUint n -> A) -> (() -> A) -> A
 
 prim js-assert-defined : [T : Type] -> JsUnion T JsUndefined -> T
+
+prim js-to-string : [A : Type] -> A -> JsString
 
 prim js-zero : JsNumber
 
@@ -157,6 +180,8 @@ prim js-uint-one : JsUint
 prim js-plus : JsNumber -> JsNumber -> JsNumber
 
 prim js-uint-plus : JsUint -> JsUint -> JsUint
+
+prim js-uint-minus : JsUint -> JsUint -> JsUint
 
 prim js-forget-bound : [n : JsUint] -> JsBoundedUint n -> JsUint
 
@@ -205,21 +230,19 @@ prim js-neq : [A B : Type] -> A -> B -> JsBool
 
 prim js-neqq : [A B : Type] -> A -> B -> JsBool
 
-prim js-lt : JsNumber -> JsNumber -> JsBool
+prim js-lt : [A B : Type] -> A -> B -> JsBool
 
-prim js-lte : JsNumber -> JsNumber -> JsBool
+prim js-lte : [A B : Type] -> A -> B -> JsBool
 
-prim js-gt : JsNumber -> JsNumber -> JsBool
+prim js-gt : [A B : Type] -> A -> B -> JsBool
 
-prim js-gte : JsNumber -> JsNumber -> JsBool
+prim js-gte : [A B : Type] -> A -> B -> JsBool
 
 prim js-and : JsBool -> JsBool -> JsBool
 
 prim js-or : JsBool -> JsBool -> JsBool
 
 prim js-not : JsBool -> JsBool
-
-prim js-panic : [T : Type] -> JsString -> T
 
 -- -- IO
 
@@ -233,7 +256,11 @@ prim unsafe-io : [A : Type] -> IO A -> A
 
 -- -- JS IO
 
+prim js-panic : [T : Type] -> JsString -> IO T
+
 prim js-console-log : [T : Type] -> T -> IO ()
+
+prim js-read-file : JsString -> IO JsString
 
 prim js-exit : [A : Type] -> JsNumber -> IO A
 
@@ -274,12 +301,6 @@ prim js-buffer-subarray : (buffer : JsBuffer, start : JsUint, end : JsUint) -> J
 prim js-buffer-eq : JsBuffer -> JsBuffer -> JsBool
 
 prim js-bound-trust-me : [n : JsUint] -> JsUint -> JsBoundedUint n
-
--- -- General primitives
-
-prim unsafe-cast : [A : Type] -> (0 B : Type) -> A -> B
-
-prim unsafe-complete : [T : Type] -> (0 E : T -> Type) -> (0 t : T) -> [u : T] -> (h : E u) -> E t
 
 -- def from-js : [A : Type] -> JS -> A {
 --   \a => cast a
@@ -451,6 +472,16 @@ def map : [A : Type] -> [B : Type] -> (A -> B) -> List A -> List B {
   }
 }
 
+def filter : [A : Type] -> (A -> Bool) -> List A -> List A {
+  \p xs => case xs {
+    [] => [],
+    [x, ..xs'] => case p x {
+      true => [x, .. filter p xs'],
+      false => filter p xs'
+    }
+  }
+}
+
 def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   \p xs => case xs {
     [] => nothing,
@@ -461,10 +492,10 @@ def find : [A : Type] -> (A -> Bool) -> List A -> Maybe A {
   }
 }
 
-def fold : [A : Type] -> [B : Type] -> (A -> B -> B) -> B -> List A -> B {
-  \f acc xs => case xs {
+def fold : [A : Type] -> [B : Type] -> B -> (A -> B -> B) -> List A -> B {
+  \acc f xs => case xs {
     [] => acc,
-    [x, ..xs'] => f x (fold f acc xs')
+    [x, ..xs'] => f x (fold acc f xs')
   }
 }
 
@@ -580,6 +611,14 @@ def lt : Nat -> Nat -> Bool {
   \m n => and (not (nat-eq m n)) (lte m n)
 }
 
+def gte : Nat -> Nat -> Bool {
+  \m n => not (lt m n)
+}
+
+def gt : Nat -> Nat -> Bool {
+  \m n => and (not (nat-eq m n)) (gte m n)
+}
+
 def bool-eq : (a : Bool, b : Bool) -> Bool {
   \a b => case a {
     true => case b {
@@ -639,6 +678,7 @@ repr data Nat as JsUint {
 }
 
 repr def add as \a b => unrepr (js-uint-plus (repr a) (repr b))
+repr def sub as \a b => unrepr (js-uint-minus (repr a) (repr b))
 repr def mul as \a b => unrepr (js-uint-times (repr a) (repr b))
 repr def pow as \a b => unrepr (js-uint-pow (repr a) (repr b))
 repr def is-even as \n => unrepr (js-eqq (js-uint-mod (repr n) (repr 1)) js-uint-zero)
@@ -653,6 +693,11 @@ repr def nat-eq-dep as \a b => {
     no (conjure _)
   }
 }
+repr def lte as \a b => unrepr (js-lte (repr a) (repr b))
+repr def lt as \a b => unrepr (js-lt (repr a) (repr b))
+
+repr def gte as \a b => unrepr (js-gte (repr a) (repr b))
+repr def gt as \a b => unrepr (js-gt (repr a) (repr b))
 
 repr data Fin i as JsBoundedUint (repr i) {
   fz as js-bounded-uint-zero,
@@ -689,7 +734,38 @@ repr data List A as JsArray A {
   }
 }
 
+data Ordering {
+  ord-lt : Ordering,
+  ord-eq : Ordering,
+  ord-gt : Ordering
+}
+
+def nat-cmp : Nat -> Nat -> Ordering {
+  \a b => case nat-eq a b {
+    true => ord-eq,
+    false => case lt a b {
+      true => ord-lt,
+      false => ord-gt,
+    }
+  }
+}
+
+def sort : [A : Type] -> (A -> A -> Ordering) -> List A -> List A {
+  \cmp l => {
+    let cmp' = \a b => {
+      case cmp a b {
+        ord-lt => js-one,
+        ord-eq => js-zero,
+        ord-gt => js-minus js-zero js-one,
+      }
+    };
+    unrepr (js-sort cmp' (repr l))
+  }
+}
+
 repr def length as \l => unrepr (js-length (repr l))
+
+repr def filter as \p xs => unrepr (js-filter (\b' => repr (p b')) (repr xs))
 
 repr def index as {
   \i l => {
@@ -702,12 +778,18 @@ repr def index as {
 
 repr def map as \f xs => unrepr (js-map (repr xs) (\case { (a, _) => f a }))
 
-repr def fold as \f i xs => js-reduce (\acc x => f x acc) i (repr xs)
+repr def fold as \i f xs => js-reduce (\acc x => f x acc) i (repr xs)
 
 -- -- -- More definitions
 
 data Char : Type {
   utf32-code : Fin (pow 2 32) -> Char,
+}
+
+def 0 char-eta : [c : Char] -> Equal c (case c { utf32-code f => utf32-code f }) {
+  \[c] => case c to (\c => Equal c (case c { utf32-code f => utf32-code f })) {
+    utf32-code f => refl
+  }
 }
 
 def char-eq : Char -> Char -> Bool {
@@ -717,6 +799,40 @@ def char-eq : Char -> Char -> Bool {
     },
   }
 }
+
+repr data Char as (repr (Fin (pow 2 32))) {
+  utf32-code f as repr f,
+  case c to E {
+    utf32-code => f,
+  } as {
+    unsafe-cast (E c) (f (unrepr (repr c)))
+  }
+}
+
+-- Strings
+
+prim js-empty-string : JsString
+
+prim js-string-concat : JsString -> JsString -> JsString
+
+prim js-string-length : JsString -> JsUint
+
+prim js-string-index : JsString -> JsUint -> JsString
+
+prim js-string-slice : JsString -> JsUint -> JsUint -> JsString
+
+prim js-string-split : JsString -> JsString -> JsArray JsString
+
+prim js-string-char-at : JsString -> JsUint -> JsBoundedUint (repr (pow 2 32))
+
+prim js-parse-uint : JsString -> JsUnion JsUint JsNull
+
+prim js-string-from-char-code : JsBoundedUint (repr (pow 2 32)) -> JsString
+
+prim js-string-elim : (0 P : JsString -> Type)
+    -> P js-empty-string
+    -> ((c : JsBoundedUint (repr (pow 2 32))) -> (cs : JsString) -> P (js-string-concat (js-string-from-char-code c) cs))
+    -> (s : JsString) -> P s
 
 data String : Type {
   snil : String,
@@ -733,6 +849,58 @@ def string-eq : String -> String -> Bool {
       snil => false,
       scons c2 s2' => and (char-eq c1 c2) (string-eq s1' s2'),
     },
+  }
+}
+
+repr data String as JsString {
+  snil as js-empty-string,
+  scons c s as js-string-concat (js-string-from-char-code (repr c)) (repr s),
+
+  case s to E {
+    snil => n,
+    scons => c,
+  } as {
+    js-string-elim (\x => E (unrepr x)) n (\l m => c (unrepr l) (unrepr m)) (repr s)
+  }
+}
+
+def string-split : String -> String -> List String {
+  \a b => {
+    transport-unrepr List (unrepr (js-string-split (repr a) (repr b)))
+  }
+}
+
+def string-length : String -> Nat {
+  \s => unrepr (js-string-length (repr s))
+}
+
+def string-index : String -> Nat -> Maybe Char {
+  \s n => {
+    if lt n (string-length s) {
+      just (unrepr (js-string-char-at (repr s) (repr n)))
+    } else {
+      nothing
+    }
+  }
+}
+
+def string-concat : String -> String -> String {
+  \a b => unrepr (js-string-concat (repr a) (repr b))
+}
+
+def string-slice : String -> Nat -> Nat -> String {
+  \s start end => unrepr (js-string-slice (repr s) (repr start) (repr end))
+}
+
+def parse-nat : String -> Maybe Nat {
+  \s => {
+    js-optional-case nothing (\x => just (unrepr x)) (js-parse-uint (repr s))
+  }
+}
+
+def show-nat : Nat -> String {
+  \n => {
+    unrepr (js-to-string (repr n))
   }
 }
 
@@ -944,7 +1112,40 @@ def reprs-subst' : [A B : Type] -> ReprBy A B -> B -> A {
   }
 }
 
--- HTTP
+-- IO
+
+#unfold
+def print : String -> IO () {
+  \x => js-console-log (repr x)
+}
+
+#unfold
+def read-file-to-string : String -> IO String {
+  \x => {
+    io-bind (js-read-file (repr x)) (\x => io-return (unrepr x))
+  }
+}
+
+#unfold
+def input : IO String {
+  read-file-to-string "/dev/stdin"
+}
+
+def throw : [A : Type] -> String -> IO A {
+  \s => js-panic (repr s)
+}
+
+prim 0 Cell : Type -> Type
+
+prim cell : [A : Type] -> A -> IO (Cell A)
+
+prim get-cell : [A : Type] -> Cell A -> IO A
+
+prim set-cell : [A : Type] -> Cell A -> A -> IO ()
+
+def modify-cell : [A : Type] -> Cell A -> (A -> A) -> IO () {
+  \cell f => io-bind (get-cell cell) (\x => set-cell cell (f x))
+}
 
 -- data HttpRequest : Type {
 --   http-request : (

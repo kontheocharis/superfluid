@@ -90,12 +90,12 @@ import Common
     nextLvl,
     unLvl,
   )
+import Control.Monad (void)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq (..), fromList)
-import Control.Monad (void)
 
 data Sub = Sub {lvl :: Lvl, vars :: IntMap (NonEmpty VTm)} deriving (Show)
 
@@ -129,13 +129,13 @@ liftPRenN qs ren = foldl (flip liftPRen) ren qs
 
 type VPat = VTm
 
-data VPatB = VPatB {vPat :: VPat, binds :: [(Qty, Name)]} deriving (Show)
+data VPatB = VPatB {vPat :: VPat, binds :: [(Qty, Name)]} deriving (Show, Eq, Ord)
 
 type VTy = VTm
 
 type Env v = [v]
 
-data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show)
+data Closure = Closure {numVars :: Int, env :: Env VTm, body :: STm} deriving (Show, Eq, Ord)
 
 mapClosureM :: (Monad m) => (STm -> m STm) -> Closure -> m Closure
 mapClosureM f (Closure n env t) = Closure n env <$> f t
@@ -148,7 +148,7 @@ data Case s t p c = Case
     elimTy :: t,
     clauses :: [Clause p c]
   }
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 type SCase = Case STm STm SPat STm
 
@@ -172,7 +172,7 @@ data VNeuHead
   | VBlockedCase VBlockedCase
   | VPrim PrimGlobal
   | VUnrepr VHead
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VLazyHead
   = VDef DefGlobal
@@ -180,14 +180,14 @@ data VLazyHead
   | VLazyCase VLazyCase
   | VLet Qty Name VTy VTm Closure
   | VRepr VHead
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VHead
   = VNeuHead VNeuHead
   | VLazyHead VLazyHead
   | VDataHead DataGlobal
   | VCtorHead (CtorGlobal, Spine VTm)
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 mapHeadM :: (Monad m) => (VTm -> m VTm) -> VHead -> m VHead
 mapHeadM f h = do
@@ -219,18 +219,18 @@ data VNorm
   | VData VData
   | VCtor VCtor
   | VU
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data VTm
   = VNorm VNorm
   | VLazy VLazy
   | VNeu VNeu
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data WTm
   = WNorm VNorm
   | WNeu VNeu
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 weakAsValue :: WTm -> VTm
 weakAsValue (WNorm n) = VNorm n
@@ -251,9 +251,9 @@ pattern VMeta m = (VFlex m, Empty)
 
 type STy = STm
 
-data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show)
+data SPat = SPat {asTm :: STm, binds :: [(Qty, Name)]} deriving (Show, Eq, Ord)
 
-data BoundState = Bound Qty | Defined deriving (Eq, Show)
+data BoundState = Bound Qty | Defined deriving (Eq, Show, Ord)
 
 type Bounds = [BoundState]
 
@@ -273,7 +273,7 @@ data STm
   | SLit (Lit STm)
   | SRepr STm
   | SUnrepr STm
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 sReprTimes :: Int -> STm -> STm
 sReprTimes 0 t = t
@@ -363,8 +363,6 @@ unembedTel :: Env HTm -> Tel STy -> HTel
 unembedTel _ Empty = HEmpty
 unembedTel env (Param m q n a :<| xs) = HWithParam m q n (unembed env a) (\x -> unembedTel (x : env) xs)
 
-
-
 hApp :: HTm -> Spine HTm -> HTm
 hApp = foldl (\f (Arg m q u) -> HApp m q f u)
 
@@ -393,9 +391,9 @@ hOwnSpine l (Param m q _ () :<| xs) = Arg m q (HVar l) :<| hOwnSpine (nextLvl l)
 
 embedClosure :: Env VTm -> Tel () -> (Spine HTm -> HTm) -> Closure
 embedClosure env n f =
-  let ownSpine = hOwnSpine (Lvl (length env)) n in
-  let fHere = f ownSpine in
-  Closure (length n) env (embed (Lvl (length n + length env)) fHere)
+  let ownSpine = hOwnSpine (Lvl (length env)) n
+   in let fHere = f ownSpine
+       in Closure (length n) env (embed (Lvl (length n + length env)) fHere)
 
 embed :: Lvl -> HTm -> STm
 embed l = \case

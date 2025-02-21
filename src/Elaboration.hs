@@ -41,10 +41,10 @@ import Data.Maybe (fromJust)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
 import Globals
-  ( DataGlobalInfo (..),
+  ( DataConstructions (..),
+    DataGlobalInfo (..),
     GlobalInfo (..),
     KnownGlobal (..),
-    DataConstructions (..),
     getDataGlobal,
     getDefGlobal,
     getPrimGlobal,
@@ -77,7 +77,8 @@ import Presyntax
 import Printing (Pretty (..))
 import Syntax (STm (..), STy, VNorm (..), VTm (..), VTy)
 import Typechecking
-  ( Mode (..),
+  ( InPat (NotInPat),
+    Mode (..),
     Tc (..),
     app,
     caseOf,
@@ -154,73 +155,80 @@ patAsVar (PLocated _ t) = patAsVar t
 patAsVar p = Right p
 
 elab :: (Elab m) => PTm -> Mode -> m (STm, VTy)
-elab p mode = case (p, mode) of
-  -- Check/both modes:
-  (PLocated l t, md) -> enterLoc l (elab t md)
-  (PLam m x t, md) -> do
-    case patAsVar x of
-      Left x' -> lam md m x' (elab t)
-      Right p' -> do
-        n <- uniqueName
-        lam md m n (elab (PCase (PName n) Nothing [Possible p' t]))
-  -- Lambda insertion
-  (t, Check (VNorm (VPi Implicit q x' a b))) -> insertLam q x' a b (elab t)
-  (PUnit, Check ty@(VNorm VU)) -> elab (pKnownData KnownUnit []) (Check ty)
-  (PUnit, md) -> elab (pKnownCtor KnownTt []) md
-  (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md -- @@Todo: sigma
-  (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
-  (PLet (MaybeQty q) x a t u, md) -> do
-    case patAsVar x of
-      Left x' -> letIn md q x' (elab a) (elab t) (elab u)
-      Right p' -> do
-        n <- uniqueName
-        letIn md q n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
-  (PRepr t, md) -> repr md (elab t)
-  (PUnrepr t, md) -> unrepr md (elab t)
-  (PHole n, md) -> meta md (Just n)
-  (PWild, md) -> wild md
-  (PLambdaCase r cs, md) -> do
-    n <- uniqueName
-    elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
-  (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
-  (PLit l, md) -> case l of
-    StringLit s -> lit md (StringLit s)
-    CharLit c -> lit md (CharLit c)
-    NatLit n -> lit md (NatLit n)
-    FinLit f bound -> case bound of
-      Just b -> lit md (FinLit f (elab b))
-      Nothing -> lit md (FinLit f (elab (pKnownDef KnownAdd [pKnownCtor KnownSucc [PLit (NatLit f)], PWild])))
-  (PName x, md) -> name md x
-  (te, Check ty) -> checkByInfer (elab te Infer) ty
-  -- Only infer:
-  (PApp {}, Infer) -> do
-    let (s, sp) = toPSpine p
-    app (elab s) (mapSpine elab sp)
-  (PU, Infer) -> univ
-  (PPi m (MaybeQty mq) x a b, Infer) -> do
-    let q = case (mq, m) of
-          (Just q', _) -> q'
-          (Nothing, Implicit) -> Zero
-          (Nothing, Explicit) -> Many
-          (Nothing, Instance) -> Many
-    -- If something ends in Type or equals, we use rig zero
-    let q' = defaultQty a q `times` defaultQty b q
-    piTy m q' x (elab a) (elab b)
-  (PList ts rest, md) -> do
-    let end = case rest of
-          Just t -> t
-          Nothing -> pKnownCtor KnownNil []
-    let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) end ts
-    elab ts' md
-  (PIf cond a b, md) -> do
-    caseOf
-      md
-      (elab cond)
-      Nothing
-      [ Possible (elab (pKnownCtor KnownTrue [])) (elab a),
-        Possible (elab (pKnownCtor KnownFalse [])) (elab b)
-      ]
-  (PParams _ _, Infer) -> error "impossible"
+elab p mode = do
+  pat <- inPat
+  case (p, mode) of
+    -- Check/both modes:
+    (PLocated l t, md) -> enterLoc l (elab t md)
+    (PLam m x t, md) -> do
+      case patAsVar x of
+        Left x' -> lam md m x' (elab t)
+        Right p' -> do
+          n <- uniqueName
+          lam md m n (elab (PCase (PName n) Nothing [Possible p' t]))
+    -- Lambda insertion
+    (t, Check (VNorm (VPi m q x' a b)))
+      | pat == NotInPat && m == Implicit || m == Instance ->
+          insertLam m q x' a b (elab t)
+    (PUnit, Check ty@(VNorm VU)) -> elab (pKnownData KnownUnit []) (Check ty)
+    (PUnit, md) -> elab (pKnownCtor KnownTt []) md
+    (PSigma _ x a _ b, md) -> elab (pKnownData KnownSigma [a, PLam Explicit (PName x) b]) md -- @@Todo: sigma
+    (PPair t1 t2, md) -> elab (pKnownCtor KnownPair [t1, t2]) md
+    (PLet (MaybeQty q) x a t u, md) -> do
+      case patAsVar x of
+        Left x' -> letIn md q x' (elab a) (elab t) (elab u)
+        Right p' -> do
+          n <- uniqueName
+          letIn md q n (elab a) (elab t) (elab (PCase (PName n) Nothing [Possible p' u]))
+    (PDoLet m x a t u, md) -> do
+      n <- uniqueName
+      elab (pKnownDef KnownBind [t, PLam Explicit (PName n) (PLet m x a (PName n) u)]) md
+    (PRepr t, md) -> repr md (elab t)
+    (PUnrepr t, md) -> unrepr md (elab t)
+    (PHole n, md) -> meta md (Just n)
+    (PWild, md) -> wild md
+    (PLambdaCase r cs, md) -> do
+      n <- uniqueName
+      elab (PLam Explicit (PName n) (PCase (PName n) r cs)) md
+    (PCase s r cs, md) -> caseOf md (elab s) (fmap elab r) (map (bimap elab elab) cs)
+    (PLit l, md) -> case l of
+      StringLit s -> lit md (StringLit s)
+      CharLit c -> lit md (CharLit c)
+      NatLit n -> lit md (NatLit n)
+      FinLit f bound -> case bound of
+        Just b -> lit md (FinLit f (elab b))
+        Nothing -> lit md (FinLit f (elab (pKnownDef KnownAdd [pKnownCtor KnownSucc [PLit (NatLit f)], PWild])))
+    (PName x, md) -> name md x
+    (te, Check ty) -> checkByInfer (elab te Infer) ty
+    -- Only infer:
+    (PApp {}, Infer) -> do
+      let (s, sp) = toPSpine p
+      app (elab s) (mapSpine elab sp)
+    (PU, Infer) -> univ
+    (PPi m (MaybeQty mq) x a b, Infer) -> do
+      let q = case (mq, m) of
+            (Just q', _) -> q'
+            (Nothing, Implicit) -> Zero
+            (Nothing, Explicit) -> Many
+            (Nothing, Instance) -> Many
+      -- If something ends in Type or equals, we use rig zero
+      let q' = defaultQty a q `times` defaultQty b q
+      piTy m q' x (elab a) (elab b)
+    (PList ts rest, md) -> do
+      let end = case rest of
+            Just t -> t
+            Nothing -> pKnownCtor KnownNil []
+      let ts' = foldr (\x xs -> pKnownCtor KnownCons [x, xs]) end ts
+      elab ts' md
+    (PIf cond a b, md) -> do
+      caseOf
+        md
+        (elab cond)
+        Nothing
+        [ Possible (elab (pKnownCtor KnownTrue [])) (elab a),
+          Possible (elab (pKnownCtor KnownFalse [])) (elab b)
+        ]
+    (PParams _ _, Infer) -> error "impossible"
 
 defaultQty :: PTy -> Qty -> Qty
 defaultQty ty fb = case fst . pGatherApps . snd . pGatherPis $ ty of

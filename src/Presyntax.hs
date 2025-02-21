@@ -53,6 +53,7 @@ type PPat = PTm
 newtype MaybeQty = MaybeQty { un :: Maybe Qty }
   deriving (Eq)
 
+
 instance Show MaybeQty where
   show (MaybeQty Nothing) = ""
   show (MaybeQty (Just q)) = show q
@@ -147,6 +148,7 @@ data PTm
   | PSigma (MaybeQty) Name PTy (MaybeQty) PTy
   | PLam PiMode PPat PTm
   | PLet (MaybeQty) PPat PTy PTm PTm
+  | PDoLet (MaybeQty) PPat PTy PTm PTm
   | PPair PTm PTm
   | PList [PTm] (Maybe PTm)
   | PApp PiMode PTm PTm
@@ -193,8 +195,9 @@ pGatherPis (PPi m _ n a b) = let (ns, b') = pGatherPis b in (Param m Zero n a :<
 pGatherPis (PLocated _ t) = pGatherPis t
 pGatherPis t = (Empty, t)
 
-pLetToList :: PTm -> ([(MaybeQty, PPat, PTy, PTm)], PTm)
-pLetToList (PLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, n, ty, t1) : binds, ret)
+pLetToList :: PTm -> ([(MaybeQty, Bool, PPat, PTy, PTm)], PTm)
+pLetToList (PLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, False, n, ty, t1) : binds, ret)
+pLetToList (PDoLet q n ty t1 t2) = let (binds, ret) = pLetToList t2 in ((q, True, n, ty, t1) : binds, ret)
 pLetToList (PLocated _ t) = pLetToList t
 pLetToList t = ([], t)
 
@@ -212,15 +215,15 @@ isCompound (PParams t _) = isCompound t
 -- isCompound (PParams _ _) = True
 isCompound _ = False
 
-prettyLets :: (Monad m) => ([(MaybeQty, PPat, PTy, PTm)], PTm) -> m String
+prettyLets :: (Monad m) => ([(MaybeQty, Bool, PPat, PTy, PTm)], PTm) -> m String
 prettyLets (binds, ret) = do
   pbinds <-
     mapM
-      ( \(MaybeQty q, v, ty, t) -> do
+      ( \(MaybeQty q, mo, v, ty, t) -> do
           pv <- singlePretty v
           pty <- pretty ty
           pt <- pretty t
-          return $ "let " ++ maybe "" show q ++ pv ++ " : " ++ pty ++ " = " ++ pt ++ ";"
+          return $ "let " ++ maybe "" show q ++ pv ++ " : " ++ pty ++ (if mo then " <- " else " = ") ++ pt ++ ";"
       )
       binds
   pret <- pretty ret
@@ -277,6 +280,7 @@ instance (Monad m) => Pretty m PTm where
     pxs <- mapM singlePretty xs
     return $ px ++ " " ++ intercalate " " (toList pxs)
   pretty l@(PLet {}) = prettyLets (pLetToList l)
+  pretty l@(PDoLet {}) = prettyLets (pLetToList l)
   pretty (PCase t r cs) = do
     pt <- singlePretty t
     pcs <- pretty cs

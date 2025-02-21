@@ -8,6 +8,7 @@ module Globals
     PrimGlobalInfo (..),
     GlobalInfo (..),
     Sig (..),
+    InstanceInfo (..),
     getDataGlobal,
     getCtorGlobal,
     getDefGlobal,
@@ -45,6 +46,9 @@ module Globals
     modifyPrimItem,
     modifyCtorItem,
     dataGlobalFromInfo,
+    lookupInstance,
+    instances,
+    addInstanceItem,
   )
 where
 
@@ -125,12 +129,18 @@ data GlobalInfo
   | DefInfo DefGlobalInfo
   | PrimInfo PrimGlobalInfo
 
+data InstanceInfo = InstanceInfo {
+    origin :: DefGlobal,
+    ty :: VTy
+  }
+
 data Sig = Sig
   { contents :: Map Name GlobalInfo,
     nameOrder :: [Name],
     tags :: Map Name (Set Tag),
     repr :: Map Name (Closure, Set Tag),
-    reprCase :: Map Name (Closure, Set Tag)
+    reprCase :: Map Name (Closure, Set Tag),
+    instances :: Map VTy InstanceInfo -- Lvl 0
   }
 
 mapSigContentsM :: (Monad m) => (GlobalInfo -> m GlobalInfo) -> Sig -> m Sig
@@ -162,7 +172,7 @@ removeRepresentedItems s =
         }
 
 emptySig :: Sig
-emptySig = Sig M.empty [] M.empty M.empty M.empty
+emptySig = Sig M.empty [] M.empty M.empty M.empty M.empty
 
 hasName :: Name -> Sig -> Bool
 hasName n s = M.member n s.contents
@@ -186,6 +196,9 @@ addCtorRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
 
 addDefRepr :: DefGlobal -> Closure -> Set Tag -> Sig -> Sig
 addDefRepr g t ts s = s {repr = M.insert g.globalName (t, ts) s.repr}
+
+addInstanceItem :: VTy -> InstanceInfo -> Sig -> Sig
+addInstanceItem ty info s = s {instances = M.insert ty info s.instances}
 
 modifyDataItem :: DataGlobal -> (DataGlobalInfo -> DataGlobalInfo) -> Sig -> Sig
 modifyDataItem dat f s = s {contents = M.insert dat.globalName (DataInfo (f (getDataGlobal dat s))) s.contents}
@@ -235,6 +248,12 @@ getGlobalTags n sig = case M.lookup n sig.tags of
 
 lookupGlobal :: Name -> Sig -> Maybe GlobalInfo
 lookupGlobal n sig = M.lookup n sig.contents
+
+lookupInstance :: VTy -> Sig -> Maybe InstanceInfo
+lookupInstance ty sig = M.lookup ty sig.instances
+
+instances :: Sig -> [(VTy, InstanceInfo)]
+instances sig = M.toList sig.instances
 
 unfoldDef :: DefGlobal -> Sig -> Maybe VTm
 unfoldDef g sig = (getDefGlobal g sig).vtm
@@ -298,6 +317,7 @@ data KnownGlobal a where
   KnownJsIndex :: KnownGlobal PrimGlobal
   KnownAdd :: KnownGlobal DefGlobal
   KnownSub :: KnownGlobal DefGlobal
+  KnownBind :: KnownGlobal DefGlobal
 
 deriving instance Show (KnownGlobal a)
 
@@ -334,3 +354,4 @@ knownPrim KnownJsIndex = PrimGlobal (Name "js-index")
 knownDef :: KnownGlobal DefGlobal -> DefGlobal
 knownDef KnownSub = DefGlobal (Name "sub")
 knownDef KnownAdd = DefGlobal (Name "add")
+knownDef KnownBind = DefGlobal (Name "bind")

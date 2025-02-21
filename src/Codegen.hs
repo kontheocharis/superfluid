@@ -77,8 +77,20 @@ jsName (Name "false") = "FALSE"
 jsName (Name "true") = "TRUE"
 jsName (Name "null") = "NULL"
 jsName (Name "undefined") = "UNDEFINED"
+jsName (Name "return") = "RETURN"
+jsName (Name "class") = "CLASS"
+jsName (Name "function") = "FUNCTION"
+jsName (Name "const") = "CONST"
+jsName (Name "let") = "LET"
+jsName (Name "constructor") = "CONSTRUCTOR"
+jsName (Name "new") = "NEW"
 jsName (Name "String") = "STRING"
 jsName (Name "void") = "VOID"
+jsName (Name "for") = "FOR"
+jsName (Name "while") = "WHILE"
+jsName (Name "if") = "IF"
+jsName (Name "switch") = "SWITCH"
+jsName (Name "throw") = "THROW"
 jsName (Name n) = concatMap (\c -> if c == '-' then "_" else if c == '\'' then "_p_" else [c]) n
 
 jsGlobal :: Name -> JsExpr
@@ -121,7 +133,7 @@ generateProgram :: (Gen m) => m JsProg
 generateProgram = do
   view >>= mapSigContentsM_ generateItem
   boot <- readBootFile
-  addDecl $ jsExprStat (jsInvoke $ jsGlobal (Name "main"))
+  addDecl $ jsExprStat (jsApp (jsGlobal (Name "main")) (S.singleton $ Arg Explicit Many jsId))
   ds <- view
   return $ jsProgFromStats boot ds
 
@@ -169,7 +181,7 @@ generateCtor c sp = do
   jsLamsForTel ns sp $ \ps -> do
     let args = [jsStringLit ci.name.unName | length di.ctors > 1] ++ ps
     case args of
-      [a] -> return a
+      [a] | length di.ctors == 1 -> return a
       _ -> return $ jsArray args
 
 generateCase :: (Gen m) => SCase -> m JsExpr
@@ -182,7 +194,10 @@ generateCase c = do
       [Possible _ t] -> generateExpr t
       _ -> error "Found irrelevant data with more than one case"
     else do
-      sub <- generateExpr c.subject
+      sub' <- generateExpr c.subject
+      subName <- jsNewBind (Name "subject")
+      let sub = JsExpr subName
+      let letSub = jsConst subName sub'
       cs' <-
         mapM
           ( \cl -> do
@@ -197,7 +212,7 @@ generateCase c = do
               let offset = if length di.ctors <= 1 then 0 else 1
 
               let clauseArgs =
-                    if length relevantBinds == 1
+                    if length relevantBinds == 1 && length c.clauses == 1
                       then S.singleton $ Arg Explicit Many sub
                       else
                         S.fromList $
@@ -210,7 +225,7 @@ generateCase c = do
           )
           c.clauses
       let subTag = jsIndex sub (intToNat 0)
-      return $ jsSwitch subTag cs'
+      return $ jsBlockExpr [letSub, jsReturn (jsSwitch subTag cs')]
 
 generateLets :: (Gen m) => [(Qty, Name, STm, STm)] -> STm -> m [JsStat]
 generateLets ((q, n, _, t) : ts) ret = jsLet n q (generateExpr t) (generateLets ts ret)
@@ -292,6 +307,9 @@ jsSwitch (JsExpr e) cs =
 
 jsInvoke :: JsExpr -> JsExpr
 jsInvoke (JsExpr e) = JsExpr $ "(" ++ e ++ ")()"
+
+jsId :: JsExpr
+jsId = JsExpr "(x) => x"
 
 jsArray :: [JsExpr] -> JsExpr
 jsArray es = JsExpr $ "[" ++ intercalate ", " (map (\(JsExpr e) -> e) es) ++ "]"

@@ -1,0 +1,121 @@
+data Functor (F : Type -> Type) : Type {
+  functor : (map : [A B : Type] -> (A -> B) -> (F A -> F B)) -> Functor F
+}
+
+data Monad (M : Type -> Type) : Type {
+  monad : [[Functor M]] (
+    return : [A : Type] -> A -> M A,
+    bind : [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B
+  ) -> Monad M
+}
+
+#unfold
+def monad-functor : [M : Type -> Type] [[Monad M]] -> Functor M {
+  \[[m]] => case m {
+    monad [[f]] r b => f
+  }
+}
+
+#unfold
+def return : [M : Type -> Type] [[Monad M]] [A : Type] -> A -> M A {
+  \[[m]] => case m {
+    monad r b => r
+  }
+}
+
+#unfold
+def bind : [M : Type -> Type] [[Monad M]] [A B : Type] -> M A -> (A -> M B) -> M B {
+  \[[m]] => case m {
+    monad r b => b
+  }
+}
+
+#unfold
+def fmap : [F : Type -> Type] [[Functor F]] [A B : Type] -> (A -> B) -> (F A -> F B) {
+  \[[f]] => case f {
+    functor m => m
+  }
+}
+
+#unfold
+#instance
+def maybe-is-functor : Functor Maybe {
+  functor (\[A] [B] f ma => {
+    let ma' : Maybe A = ma;
+    case ma' {
+      nothing => nothing,
+      just a => just (f a)
+    }
+  })
+}
+
+#unfold
+#instance
+def maybe-is-monad : Monad Maybe {
+  monad [[maybe-is-functor]] (\[A] a => just a) (\[A] [B] ma f => {
+    case ma {
+      nothing => nothing,
+      just a => f a
+    }
+  })
+}
+
+#instance
+def list-is-functor : Functor List {
+  ?m
+}
+
+#instance
+def list-is-monad : Monad List {
+  ?m
+}
+
+-- def voidM : [M : Type -> Type] [[Monad M]] -> M () {
+--   \[_] [[md]] => return [_] ()
+-- }
+
+data Display (T : Type) : Type {
+  display : (T -> String) -> Display T
+}
+
+#instance
+def nat-display : Display Nat {
+  ?nat-display
+}
+
+#instance
+def list-display : [T : Type] [[Display T]] -> Display (List T) {
+  ?list-display
+}
+
+def show : [T : Type] [[Display T]] -> T -> String {
+  \[[display f]] a => f a
+}
+
+def main : () {
+  -- let mo : Maybe Nat -> Maybe Nat = \m => {
+  --   let x : Nat <- m;
+  --   let x' = add 3 x;
+  --   return x'
+  -- };
+  let x : String = show [1, 2, 3];
+
+  ()
+}
+
+-- def main : () {
+--   let x = fmap s (bind (return 3) (\n => return (add 3 n)));
+--   ()
+-- }
+
+-- def bind : [M : Type -> Type] -> Monad M -> [A : Type] -> [B : Type] -> M A -> (A -> M B) -> M B {
+--   \m => case m {
+--     mk-monad _ _ _ b => b
+--   }
+-- }
+
+-- def fmap : [F : Type -> Type] -> Functor F -> [A : Type] -> [B : Type] -> (A -> B) -> (F A -> F B) {
+--   \m => case m {
+--     mk-functor _ f => f
+--   }
+-- }
