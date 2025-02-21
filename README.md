@@ -210,10 +210,25 @@ the generated code is written to a file with the same name as the input file, bu
 This can then be run with Node.js. Often you might need a larger stack size.
 For example, `node --stack-size=200000 examples/paper/fizzbuzz.sf.js`.
 
-# Missing features
+# Acknowledgments
+
+- A lot of the work on Superfluid started by mirroring the code in Andras
+  Kovacs' [elaboration zoo](https://github.com/AndrasKovacs/elaboration-zoo).
+- Thank you to Edwin Brady for the detailed discussions about: unification
+  with postponing, quantitative type theory, instance resolution, and dependent
+  pattern matching.
+
+# Wishlist/missing features
 
 - Induction-induction and induction-recursion for data types.
 - Forward declarations.
 - Positivity and termination checking.
 - Mutual recursion for functions.
 - Dependent pattern matching (coming soon).
+- Coherence checking for representations.
+- A well-scoped version of this compiler that is cleaner and less hacky. Work
+  has begun: <https://github.com/kontheocharis/superfluid-idr>.
+- Coinductive data types.
+- A better compilation target: C/Rust/LLVM.
+- More *internal* control over compilation: custom function/closure compilation,
+  flat dependent pair types (as a library).
