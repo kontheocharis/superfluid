@@ -247,6 +247,7 @@ instance Acc Comp where
 
 instance Elab Comp where
   elabError = throwError . ElabCompilerError
+  shouldRunAccount = return True
 
 instance Has Comp Ctx where
   view = gets (\c -> c.ctx)

@@ -8,7 +8,6 @@ data Lvl : Size -> Type {
   ls : [n : Size] -> Lvl n -> Lvl (s n)
 }
 
-
 -- Weakening for de-Brujin levels
 def weaken : [n : Size] -> Lvl n -> Lvl (s n) {
   \l => case l to (\n l => Lvl (s n)) {
@@ -40,14 +39,90 @@ data LT : Size -> Size -> Type {
   lt-succ : [n : Nat, m : Nat] (p : LT n m) -> LT (s n) (s m)
 }
 
+def lt-next : [a : Size, b : Size] -> LT a b -> LT a (s b) {
+  \p => case p to (\a b p => LT a (s b)) {
+    lt-zero => lt-zero,
+    lt-succ q => lt-succ (lt-next q)
+  }
+}
+
 def Lvl' : Size -> Type {
   \n => Subset Nat (\m => LT m n)
 }
 
+#unfold
 def lz' : [n : Size] -> Lvl' (s n) {
   element 0 lt-zero
 }
 
+#unfold
 def ls' : [n : Size] -> Lvl' n -> Lvl' (s n) {
   \(element n p) => element (s n) (lt-succ p)
+}
+
+-- I am too lazy to prove these due to the lack of dependent pattern matching but they are obvious.
+def lt-z-z-absurd : LT z z -> Empty {
+  \p => case p {
+    lt-zero => ?Fsdf,
+    lt-succ q => ?fsdf
+  }
+}
+def lt-s-z-absurd : [n : Nat] -> LT (s n) z -> Empty {
+  ?lt-s-z-absurd
+}
+def lt-z-s-is-lt-zero : [n : Nat] -> (p : LT z (s n)) -> Equal lt-zero p {
+  ?lt-z-s-is-lt-zero
+}
+def lt-s-s-is-lt-succ : [m : Nat, n : Nat] -> (p : LT (s m) (s n)) -> (p' : LT m n) * Equal (lt-succ p') p {
+  ?lt-s-s-is-lt-succ
+}
+
+-- This induction looks terrible but it is because we don't have dependent pattern matching.
+#unfold
+#noaccount -- This is needed because I am matching on irrelevant arguments. It is valid because only one branch doesn't diverge.
+def lvl'-ind : (E : (0 s : Size) -> Lvl' s -> Type)
+  -> (lz'' : [n : Size] -> E (s n) lz')
+  -> (ls'' : [n : Size] -> (l : Lvl' n) -> E (s n) (ls' l))
+  -> [n : Size] -> (l : Lvl' n) -> E n l
+{
+  \E lz'' ls'' [n] b' => {
+      let m = inclusion b';
+      let 0 p = membership b';
+
+      subst
+        (\t => E n t) (sym subset-eta)
+        ((case m to (\m' => (p' : LT m' n) -> E n (element m' p')) {
+          z => case n to (\n' => (p' : LT z n') -> E n' (element z p')) {
+            z => \p' => case lt-z-z-absurd p' {}, -- Impossible: can't have LT z z
+            s n' => \p' => subst (\q => E (s n') (element z q)) (lt-z-s-is-lt-zero p') lz'',
+          },
+          s m' => case n to (\n' => (p' : LT (s m') n') -> E n' (element (s m') p')) {
+            z => \p' => case lt-s-z-absurd p' {}, -- Impossible: can't have LT (s m') z
+            s n' => \p' => {
+                let (x, g) = lt-s-s-is-lt-succ p';
+                subst (\q => E (s n') (element (s m') q)) g (ls'' (element m' x))
+            },
+          },
+        }) p)
+  }
+}
+
+-- Finally, represent Lvl as Lvl'
+repr data Lvl n as Lvl' n {
+  lz as lz',
+  ls p as ls' (repr p),
+  case b to E {
+    lz => lze,
+    ls => lse,
+  } as {
+    lvl'-ind (\n v => E n (unrepr v)) lze (\q => lse (unrepr q)) (repr b)
+  }
+}
+
+-- And, we get free weakening! It is the identity in the output.
+repr def weaken as {
+  \[n] l => {
+    let (element p q) = repr l;
+    unrepr (element p (lt-next q))
+  }
 }

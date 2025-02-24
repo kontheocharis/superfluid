@@ -186,7 +186,6 @@ minus View View = Just View
 minus View One = Nothing
 minus View Many = Nothing
 
-
 -- | An amount of times to do something, which might be infinite.
 newtype Times = Finite Int deriving (Eq, Ord, Show)
 
@@ -348,7 +347,7 @@ globName (PrimGlob g) = g.globalName
 
 -- Tags
 
-data Tag = InstanceTag | UnfoldTag deriving (Eq, Ord, Enum, Bounded)
+data Tag = InstanceTag | UnfoldTag | NoAccountTag deriving (Eq, Ord, Enum, Bounded)
 
 instance (Monad m) => Pretty m Tag where
   pretty t = return $ "#" ++ show t
@@ -359,6 +358,7 @@ instance (Monad m) => Pretty m (Set Tag) where
 instance Show Tag where
   show UnfoldTag = "unfold"
   show InstanceTag = "instance"
+  show NoAccountTag = "noaccount"
 
 class (Monad m) => HasNameSupply m where
   uniqueName :: m Name

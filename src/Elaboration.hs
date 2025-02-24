@@ -27,6 +27,7 @@ import Common
     PrimGlobal (..),
     Qty (Many, Zero),
     Spine,
+    Tag (NoAccountTag),
     Tel,
     enterLoc,
     mapSpine,
@@ -35,11 +36,13 @@ import Common
     uniqueTel,
     pattern Possible,
   )
+import Control.Monad (unless)
 import Control.Monad.Extra (when)
 import Data.Bifunctor (bimap)
 import Data.Maybe (fromJust)
 import Data.Semiring (Semiring (..))
 import qualified Data.Sequence as S
+import qualified Data.Set as SET
 import Globals
   ( DataConstructions (..),
     DataGlobalInfo (..),
@@ -137,6 +140,7 @@ instance (Tc m, HasProjectFiles m) => Pretty m ElabError where
           return $ "Pattern must be fully applied, but got " ++ show n' ++ " arguments instead of " ++ show n
 
 class (Tc m, Acc m) => Elab m where
+  shouldRunAccount :: m Bool
   elabError :: ElabError -> m a
 
 pKnownCtor :: KnownGlobal CtorGlobal -> [PTm] -> PTm
@@ -242,7 +246,7 @@ elabDef def = do
   defItem def.qty.un def.name def.tags (elab def.ty) (elab def.tm)
   ensureAllProblemsSolved
   di <- access (getDefGlobal (DefGlobal def.name))
-  runAccount di
+  unless (SET.member NoAccountTag def.tags) $ runAccount' di
 
 elabCtor :: (Elab m) => DataGlobal -> PCtor -> m ()
 elabCtor dat ctor = ctorItem dat ctor.name ctor.qty.un ctor.tags (elab ctor.ty)
@@ -258,14 +262,14 @@ elabData dat = do
   endDataItem d
   ensureAllProblemsSolved
   di <- access (getDataGlobal (DataGlobal dat.name))
-  runAccount di
+  unless (SET.member NoAccountTag dat.tags) $ runAccount' di
 
 elabPrim :: (Elab m) => PPrim -> m ()
 elabPrim prim = do
   primItem prim.name prim.qty.un prim.tags (elab prim.ty)
   ensureAllProblemsSolved
   pr <- access (getPrimGlobal (PrimGlobal prim.name))
-  runAccount pr
+  unless (SET.member NoAccountTag prim.tags) $ runAccount' pr
 
 ensurePatIsHeadWithBinds :: (Elab m) => PTm -> m (Name, Spine Name)
 ensurePatIsHeadWithBinds p =
@@ -302,15 +306,20 @@ elabDataRep r = do
         reprDataItem
           dat
           r.tags
-          (elabAndAccount target')
+          (elabAndAccount target' r.tags)
       mapM_ (elabCtorRep te) r.ctors
       elabCaseRep te dat info r.caseExpr
     _ -> elabError (ExpectedDataGlobal h)
 
-elabAndAccount :: (Elab m) => PTm -> Mode -> m (STm, VTy)
-elabAndAccount t md = do
+runAccount' :: (Elab m, Account a) => a -> m ()
+runAccount' t = do
+  q <- shouldRunAccount
+  when q $ runAccount t
+
+elabAndAccount :: (Elab m) => PTm -> SET.Set Tag -> Mode -> m (STm, VTy)
+elabAndAccount t tags md = do
   (t', ty) <- elab t md
-  runAccount t'
+  unless (SET.member NoAccountTag tags) $ runAccount' t'
   return (t', ty)
 
 elabCtorRep :: (Elab m) => Tel STy -> PCtorRep -> m ()
@@ -320,7 +329,7 @@ elabCtorRep te r = do
   case g of
     Just (CtorInfo _) -> do
       let target' = pLams (nameSpineToTel sp) r.target
-      reprCtorItem te (CtorGlobal h) r.tags (elabAndAccount target')
+      reprCtorItem te (CtorGlobal h) r.tags (elabAndAccount target' r.tags)
     _ -> elabError (ExpectedCtorGlobal h)
 
 elabCaseRep :: (Elab m) => Tel STy -> DataGlobal -> DataGlobalInfo -> PCaseRep -> m ()
@@ -335,14 +344,14 @@ elabCaseRep te dat info r = do
         pLams
           (S.singleton elimTy S.>< srcBranches S.>< tyIndices S.>< S.singleton srcSubject)
           r.target
-  reprCaseItem te dat r.tags (elabAndAccount target')
+  reprCaseItem te dat r.tags (elabAndAccount target' r.tags)
 
 elabDefRep :: (Elab m) => PDefRep -> m ()
 elabDefRep r = do
   x <- ensurePatIsBind r.src
   g <- access (lookupGlobal x)
   case g of
-    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elabAndAccount r.target)
+    Just (DefInfo _) -> reprDefItem (DefGlobal x) r.tags (elabAndAccount r.target r.tags)
     _ -> elabError (ExpectedDataGlobal x)
 
 elabItem :: (Elab m) => PItem -> m ()
