@@ -1,0 +1,53 @@
+
+-- We define snoc lists the same as lists but the non-empty constructor is
+-- flipped
+data SnocList (A : Type) : Type {
+  lin : SnocList A,
+  snoc : SnocList A -> A -> SnocList A
+}
+
+-- Represent snoc lists as JavaScript arrays
+repr data SnocList A as JsArray A {
+  lin as js-empty-array,
+  snoc xs x as js-array-extend-r (repr xs) x,
+
+  case l to E {
+    lin => n,
+    snoc => c,
+  } as {
+    js-array-switch-r [A] [\x => E (unrepr x)] (\_ => n) (\xs a  => c (unrepr xs) a) (repr l)
+  }
+}
+
+-- Ensure that both cons list and snoc list share the same representation
+def snoc-list-list-repr-same : [A : Type] -> Equal (repr (SnocList A)) (repr (List A)) {
+  refl
+}
+
+-- Zero-cost conversion:
+def snoc-to-cons : [A : Type] -> SnocList A -> List A {
+  \a => unrepr (repr a)
+}
+def cons-to-snoc : [A : Type] -> List A -> SnocList A {
+  \a => unrepr (repr a)
+}
+
+-- Palindrome example: we do not need to use indexing or manual transports! we can just
+-- use whichever list representation is convenient.
+--
+-- Take a look at the generated code (cons-snoc.sf). You will see that all we do
+-- is index into the array and recurse for the middle. (Inlining can be improved
+-- but this is an orthogonal issue.)
+def palindrome : List Nat -> Bool {
+  \xs => case xs {
+    nil => true,
+    cons x xs => case cons-to-snoc xs {
+      lin => true,
+      snoc ys y => if nat-eq x y {
+        palindrome (snoc-to-cons ys)
+      } else {
+        false
+      }
+    }
+  }
+}
