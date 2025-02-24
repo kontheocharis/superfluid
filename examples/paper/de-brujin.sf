@@ -60,24 +60,31 @@ def ls' : [n : Size] -> Lvl' n -> Lvl' (s n) {
   \(element n p) => element (s n) (lt-succ p)
 }
 
--- I am too lazy to prove these due to the lack of dependent pattern matching but they are obvious.
+-- Basic lemmas for LT
+
 def lt-z-z-absurd : LT z z -> Empty {
-  \p => case p {
-    lt-zero => ?Fsdf,
-    lt-succ q => ?fsdf
-  }
-}
-def lt-s-z-absurd : [n : Nat] -> LT (s n) z -> Empty {
-  ?lt-s-z-absurd
-}
-def lt-z-s-is-lt-zero : [n : Nat] -> (p : LT z (s n)) -> Equal lt-zero p {
-  ?lt-z-s-is-lt-zero
-}
-def lt-s-s-is-lt-succ : [m : Nat, n : Nat] -> (p : LT (s m) (s n)) -> (p' : LT m n) * Equal (lt-succ p') p {
-  ?lt-s-s-is-lt-succ
+  \p => (case p to (\a b p => Equal a z -> Equal b z -> Empty) {
+    lt-zero => \a b => z-neq-s (sym b),
+    lt-succ q => \a b => z-neq-s (sym b),
+  }) refl refl
 }
 
--- This induction looks terrible but it is because we don't have dependent pattern matching.
+def lt-s-z-absurd : [n : Nat] -> LT (s n) z -> Empty {
+  \[n] p => (case p to (\a b p => Equal a (s n) -> Equal b z -> Empty) {
+    lt-zero => \a b => z-neq-s a,
+    lt-succ q => \a b => z-neq-s (sym b)
+  }) refl refl
+}
+
+-- These are too annoying to prove without dependent pattern matching but they are obvious.
+def lt-z-s-is-lt-zero : [n : Nat] -> (p : LT z (s n)) -> Equal lt-zero p {
+  \p => ?lt-z-s-is-lt-zero
+}
+def lt-s-s-is-lt-succ : [m : Nat, n : Nat] -> (p : LT (s m) (s n)) -> (p' : LT m n) * Equal (lt-succ p') p {
+  \p => ?lt-s-s-is-lt-succ
+}
+
+-- This induction looks terrible because we don't have dependent pattern matching.
 #unfold
 #noaccount -- This is needed because I am matching on irrelevant arguments. It is valid because only one branch doesn't diverge.
 def lvl'-ind : (E : (0 s : Size) -> Lvl' s -> Type)
@@ -125,4 +132,10 @@ repr def weaken as {
     let (element p q) = repr l;
     unrepr (element p (lt-next q))
   }
+}
+
+def main : IO () {
+  let x : Lvl 5 = ls (ls lz);
+  let x : Lvl 6 = weaken x;
+  io-return ()
 }
