@@ -6,7 +6,7 @@
 
 module Compiler (runCli) where
 
-import Accounting (AccError, Acc (..))
+import Accounting (Acc (..), AccError)
 import Codegen (Gen (..), JsStat, generateProgram, renderJsProg)
 import Common
   ( Has (..),
@@ -15,8 +15,9 @@ import Common
     Loc (..),
     Logger (..),
     Name (..),
+    Parent (..),
     Qty (Many),
-    Try (..), Parent (..),
+    Try (..),
   )
 import Control.Monad (void, when)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT, tryError)
@@ -52,6 +53,7 @@ import Parsing (ParseError, parseProgram)
 import Persistence (bootPath, preludePath)
 import Presyntax (PProgram)
 import Printing (Pretty (..))
+import Representation (reprInfSig)
 import System.Exit (exitFailure)
 import System.IO (stderr)
 import Typechecking
@@ -66,7 +68,6 @@ import Typechecking
     prettyGoal,
   )
 import Unelaboration (Unelab, unelabSig)
-import Representation (reprInfSig)
 
 -- import Resources.Prelude (preludePath, preludeContents)
 

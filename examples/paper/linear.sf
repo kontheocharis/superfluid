@@ -1,4 +1,3 @@
-
 data LinPair (A B : Type) : Type {
   1 lpair : 1 A -> 1 B -> LinPair A B
 }

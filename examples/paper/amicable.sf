@@ -40,6 +40,7 @@ def is-amicable-pair : (a : Nat, b : Nat) -> Maybe (AmicablePair a b) {
   }
 }
 
+-- This runs at run-time with the optimised nat representation based on JS integers.
 def main : IO () {
   case is-amicable-pair 284 220 {
     nothing => io-return (debug-print "Not amicable!" tt),
@@ -47,6 +48,7 @@ def main : IO () {
   }
 }
 
+-- This runs at compile-time with the standard (linked) nat representation
 -- def test : AmicablePair 220 284 {
 --   amicable _ _ refl refl
 -- }

@@ -94,6 +94,7 @@ import Common
 import Constructions (ctorConstructions, ctorParamsClosure, dataConstructions, dataElimParamsClosure, dataFullVTy, dataMotiveParamsClosure)
 import Context
 import Control.Applicative (Alternative (empty))
+import Control.Exception (handle)
 import Control.Monad (replicateM, unless)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Extra (fromMaybeM, when)
@@ -184,7 +185,6 @@ import Syntax
     pattern VVar,
   )
 import Unelaboration (Unelab)
-import Control.Exception (handle)
 
 data TcError
   = Mismatch [UnifyError]
@@ -355,7 +355,6 @@ ensureAllProblemsSolved = do
   if S.null ps
     then return ()
     else tcError $ RemainingProblems (toList ps)
-
 
 uniqueNames :: (Tc m) => Int -> m [Name]
 uniqueNames n = replicateM n uniqueName
