@@ -1,3 +1,4 @@
+-- Define vectors as the nat-indexed version of lists
 data Vec (T : Type) : Nat -> Type {
   vec-nil : Vec T z,
   vec-cons : [n : Nat] -> T -> Vec T n -> Vec T (s n)
@@ -7,15 +8,18 @@ def vec-length : [T : Type, ! n : Nat] -> Vec T n -> Nat {
   \[_] [n] _ => n
 }
 
+-- Now we actually want to represent vectors as a refinement of lists
 def 0 Vec' : Type -> Nat -> Type {
   \T n => Subset (List T) (\l => Equal (length l) n)
 }
 
+-- Implement nil for the refinement
 #unfold
 def vec-nil' : [T : Type] -> Vec' T 0 {
   element nil refl
 }
 
+-- Implement cons for the refinement
 #unfold
 def vec-cons' : [T : Type, n : Nat] -> T -> Vec' T n -> Vec' T (s n) {
   \[T] [n] x xs => {
@@ -23,6 +27,13 @@ def vec-cons' : [T : Type, n : Nat] -> T -> Vec' T n -> Vec' T (s n) {
   }
 }
 
+-- Implement induction for the refinement
+--
+-- Notice all the manual proofs; even though some would go away in the presence
+-- of dependent pattern matching, they would still not be structural like
+-- pattern matching on the actual Vec. Our program transformation step handles
+-- this; we can use the manual and messy induction principle for the refinement
+-- to justify structural pattern matching.
 #unfold
 def vec-ind' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
     -> E 0 vec-nil'
@@ -52,7 +63,8 @@ def vec-ind' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
   }
 }
 
--- these are almost refl, but blocked by annoying things
+-- Coherence laws:
+-- these are almost refl, but blocked by annoying things that are compiler problems.
 
 def 0 vec-ind-nil' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
     -> [ni : E 0 vec-nil']
@@ -72,6 +84,7 @@ def 0 vec-ind-cons' :  [T : Type] -> [E : (0 n : Nat) -> Vec' T n -> Type]
 }
 
 
+-- Represent vectors as a refinement of lists.
 repr data Vec T n as Vec' T n {
   vec-nil as vec-nil',
   vec-cons x xs as vec-cons' x (repr xs),
@@ -91,6 +104,7 @@ def 0 fin-zero-absurd : Fin 0 -> Empty {
   }) refl
 }
 
+-- Indexing into vectors, which will really be indexing into lists at runtime.
 def vec-index : [T : Type, n : Nat] -> Vec T n -> Fin n -> T {
   \v => case v to (\n _ => Fin n -> T) {
     vec-nil => \i => case fin-zero-absurd i {},
@@ -115,22 +129,12 @@ def vec-to-list : [T : Type, n : Nat] -> Vec T n -> List T {
   }
 }
 
+-- Zero-cost vectors to lists
 repr def vec-to-list as \v => inclusion (repr v)
 
+-- In the output we see only JavaScript arrays, no vectors.
 def main : IO () {
   let v = vec-cons 1 (vec-cons 2 (vec-cons 3 vec-nil));
   let n = vec-index v 2n;
   js-console-log n
 }
-
--- def pain : [n : Nat] -> Vec Nat n -> Nat {
---   \v => foo v
--- }
-
--- def vec-ind'' : [T : Type] -> (E : (0 n : Nat) -> Vec' T n -> Type)
---     -> E 0 vec-nil'
---     -> ((x : T) -> [n : Nat] -> (xs : Vec' T n) -> E (s n) (vec-cons' x xs))
---     -> [* n : Nat] -> (b : Vec' T n) -> E n b
--- {
---   \E ni co b => vec-ind' E ni co b
--- }
