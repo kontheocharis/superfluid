@@ -1,0 +1,94 @@
+
+
+data Base : Type {
+  adenine : Base,
+  cytosine : Base,
+  guanine : Base,
+  thymine : Base,
+  uracil : Base
+}
+
+data DNA-Base : Type {
+  dna-adenine : DNA-Base,
+  dna-cytosine : DNA-Base,
+  dna-guanine : DNA-Base,
+  dna-thymine : DNA-Base,
+}
+
+data RNA-Base : Type {
+  rna-adenine : RNA-Base,
+  rna-cytosine : RNA-Base,
+  rna-guanine : RNA-Base,
+  rna-uracil : RNA-Base,
+}
+
+def DNA-Base' : Type {
+  Subset Base (\b => Equal uracil b -> Empty)
+}
+
+def RNA-Base' : Type {
+  Subset Base (\b => Equal thymine b -> Empty)
+}
+
+def uracil-not-adenine : Equal uracil adenine -> Empty {
+  \p => subst [Base] (\n => case n {
+    adenine => Empty,
+    cytosine => Empty,
+    guanine => Empty,
+    thymine => Empty,
+    uracil => Unit
+  }) p tt
+}
+
+def uracil-not-cytosine : Equal uracil cytosine -> Empty {
+  \p => subst [Base] (\n => case n {
+    adenine => Empty,
+    cytosine => Empty,
+    guanine => Empty,
+    thymine => Empty,
+    uracil => Unit
+  }) p tt
+}
+
+def uracil-not-guanine : Equal uracil guanine -> Empty {
+  \p => subst [Base] (\n => case n {
+    adenine => Empty,
+    cytosine => Empty,
+    guanine => Empty,
+    thymine => Empty,
+    uracil => Unit
+  }) p tt
+}
+
+def uracil-not-thymine : Equal uracil thymine -> Empty {
+  \p => subst [Base] (\n => case n {
+    adenine => Empty,
+    cytosine => Empty,
+    guanine => Empty,
+    thymine => Empty,
+    uracil => Unit
+  }) p tt
+}
+
+repr data DNA-Base as Subset Base (\b => Equal uracil b -> Empty) {
+  dna-adenine as element adenine uracil-not-adenine,
+  dna-cytosine as element cytosine uracil-not-cytosine,
+  dna-guanine as element guanine uracil-not-guanine,
+  dna-thymine as element thymine uracil-not-thymine,
+  case b to E {
+    dna-adenine => da,
+    dna-cytosine => dc,
+    dna-guanine => dg,
+    dna-thymine => dt,
+  } as {
+    case (repr b) to (\x => E (unrepr x)) {
+      element x p => (case x to (\x => (0 p' : Equal uracil x -> Empty) -> Equal p p' -> E (unrepr (element x p))) {
+        adenine => \p q => ?da,
+        cytosine => \p q => ?dc,
+        guanine => \p q => ?dg,
+        thymine => \p q => ?dt,
+        uracil => \p q => ?fsdf,
+      }) p refl
+    }
+  }
+}
