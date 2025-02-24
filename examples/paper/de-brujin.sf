@@ -1,0 +1,53 @@
+def Size : Type {
+  Nat
+}
+
+-- de-Brujin levels, used to index into terms
+data Lvl : Size -> Type {
+  lz : [n : Size] -> Lvl (s n),
+  ls : [n : Size] -> Lvl n -> Lvl (s n)
+}
+
+
+-- Weakening for de-Brujin levels
+def weaken : [n : Size] -> Lvl n -> Lvl (s n) {
+  \l => case l to (\n l => Lvl (s n)) {
+    lz => lz,
+    ls n => ls (weaken n)
+  }
+}
+
+-- The goal: make weakening the identity function.
+-- This is because weakening the context by one variable
+-- only adds it to the *end* of the context, and de-Brujin
+-- levels only index from the beginning of the context.
+-- Thus, weakening a de-Brujin level should only change the
+-- data type's index, not the actual data itself. (This is as opposed to
+-- de-Brujin indices, where weakening is not zero-cost.)
+--
+-- For a file full of "identity" weakening functions, see
+-- <https://github.com/kontheocharis/superfluid-idr/blob/master/src/Core/Weakening.idr>
+-- We want to provably compile these to the identity function..
+
+
+-- Strategy: represent a de-Brujin level as a Nat less than some value (using
+-- Subset). The less-than proof should be erased. Then we can use the congruence
+-- of successor in the less-than relation to weaken a de-Brujin level, and the
+-- result should be erased.
+
+data LT : Size -> Size -> Type {
+  lt-zero : [n : Nat] -> LT z (s n),
+  lt-succ : [n : Nat, m : Nat] (p : LT n m) -> LT (s n) (s m)
+}
+
+def Lvl' : Size -> Type {
+  \n => Subset Nat (\m => LT m n)
+}
+
+def lz' : [n : Size] -> Lvl' (s n) {
+  element 0 lt-zero
+}
+
+def ls' : [n : Size] -> Lvl' n -> Lvl' (s n) {
+  \(element n p) => element (s n) (lt-succ p)
+}
