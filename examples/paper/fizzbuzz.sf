@@ -35,6 +35,7 @@ def repeat : Nat -> (Nat -> IO ()) -> IO () {
   }
 }
 
+-- This is not a very interesting example, but it does run fast.
 def main : IO () {
   repeat 10000 (\n => js-console-log (fizzbuzz-to-string (get-fizzbuzz n)))
 }
