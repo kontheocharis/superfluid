@@ -223,16 +223,17 @@ The `bootstrap/prelude` already contains quite a few examples of custom represen
 
 Also see the `examples/` directory for:
 
-- `paper/refinement.sf`: Zero-cost conversion between lists and vectors (the coherence rules are missing).
-- `paper/fizzbuzz.sf`: Just a plain fizzbuzz implementation, but actually runs fast due to `Nat` representation.
 - `paper/amicable.sf`: Finding amicable numbers. Again, runs fast due to `Nat` representation.
   However we can run the function at compile-time too, which doesn't have access
   to the fast `Nat` representation, and thus is really slow (but can do symbolic
   theorem proving!).
-- `paper/binary.sf`: Storing player and inventory data structures as a
-   contiguous byte buffer using representations (WIP).
-- `paper/network.sf`: UDP buffers with zero-copy serialization and
-   deserialization into records (WIP).
+- `paper/fizzbuzz.sf`: Just a plain fizzbuzz implementation, but actually runs fast due to `Nat` representation.
+- `paper/refinement.sf`: Zero-cost conversion between lists and vectors.
+- `paper/cons-snoc.sf`: Zero-cost conversion between lists and snoc-lists.
+- `paper/de-brujin.sf`: Free weakening of de-Brujin levels while still retaining the well-scoped indexing structure.
+- `paper/flat.sf`: Message buffers with zero-copy serialization and deserialization into records (TODO).
+- `paper/lambda.sf`: Typechecking the simply-typed lambda calculus into a well-typed representation without creating a new tree.
+- `paper/linear.sf`: Linear lists with cons that doesn't copy data.
 
 I have also written day 1 of Advent of Code 2024 Superfluid: <https://github.com/kontheocharis/advent-of-code-2024>.
 
