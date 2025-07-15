@@ -247,7 +247,7 @@ More examples coming very soon.
   with postponing, quantitative type theory, instance resolution, and dependent
   pattern matching.
 
-# Wishlist/missing features
+# Missing features
 
 - Induction-induction and induction-recursion for data types.
 - Forward declarations.
