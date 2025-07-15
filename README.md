@@ -201,7 +201,7 @@ JavaScript arrays. See `examples/paper/refinement.sf` for an example of zero-cos
 conversion between lists and vectors.
 
 The system of custom representations is explored further in the paper:
-<https://trendsfp.github.io/abstracts/paper-019.pdf>
+<https://arxiv.org/abs/2505.21225>
 
 ## Code generation
 
